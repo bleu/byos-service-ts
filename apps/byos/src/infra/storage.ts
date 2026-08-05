@@ -104,7 +104,8 @@ export async function insert(
 		.returning({ id: proposals.id });
 
 	// INSERT ... RETURNING always returns exactly one row
-	const id = row?.id;
+	if (!row) throw new Error("INSERT RETURNING returned no rows");
+	const { id } = row;
 	const fullProposal: Proposal = { ...proposal, id };
 
 	const auditEvent: AuditEvent = {
