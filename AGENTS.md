@@ -39,6 +39,7 @@ docker-compose.yml      Dev Postgres + Redis
 | Background jobs | BullMQ (repeatable jobs, audit queue) |
 | Job store / cache | Redis |
 | Blockchain | viem |
+| CoW Protocol types | `@cowprotocol/cow-sdk` (OrderKind, SupportedChainId, BUY_ETH_ADDRESS) |
 | Validation | Zod |
 | Logging | pino |
 | Build | tsup |
@@ -67,6 +68,7 @@ docker-compose.yml      Dev Postgres + Redis
 - Native `bigint` for 256-bit values internally. Decimal strings on the wire (JSON) and in the database (TEXT columns). Zod transforms at boundaries.
 - No `any` — use `unknown` and narrow.
 - No classes except `AppError`. Prefer plain objects and functions.
+- **Prefer `@cowprotocol/cow-sdk` types** when they are identical to what we need (e.g., `OrderKind`, `SupportedChainId`, `BUY_ETH_ADDRESS`). Keep manual types when cow-sdk's version doesn't match our context (e.g., `SigningScheme` — cow-sdk uses numeric values, we need the orderbook wire format strings). See the cow-sdk mapping table in the implementation plan for the full list.
 
 ### Error handling
 

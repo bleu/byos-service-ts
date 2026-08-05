@@ -1,14 +1,17 @@
+import { OrderKind } from "@cowprotocol/cow-sdk";
 import { type Address, encodeFunctionData, type Hex } from "viem";
 import { GPv2SettlementAbi } from "./abis/gpv2-settlement.js";
 import type { SettlementInteraction } from "./trampoline.js";
 import { encodeTrampolineInteractions } from "./trampoline.js";
 import type { ContractInteraction, Proposal } from "./types.js";
 
-export enum OrderKind {
-	Sell = "sell",
-	Buy = "buy",
-}
+export { OrderKind } from "@cowprotocol/cow-sdk";
 
+/**
+ * Signing scheme as reported by the CoW orderbook API (string wire format).
+ * The cow-sdk SigningScheme uses numeric values (0,1,2,3) which don't match
+ * the orderbook wire format, so we keep our own string enum.
+ */
 export enum SigningScheme {
 	Eip712 = "eip712",
 	EthSign = "ethSign",
@@ -39,7 +42,7 @@ export interface CowOrder {
  */
 function tradeFlags(order: CowOrder): bigint {
 	let flags = 0;
-	if (order.kind === OrderKind.Buy) {
+	if (order.kind === OrderKind.BUY) {
 		flags |= 1;
 	}
 	if (order.partiallyFillable) {
@@ -84,7 +87,7 @@ export function encodeSettle(
 	preInteractions: readonly SettlementInteraction[],
 	postInteractions: readonly SettlementInteraction[],
 ): Hex {
-	const executedAmount = order.kind === OrderKind.Sell ? proposal.sellAmount : proposal.buyAmount;
+	const executedAmount = order.kind === OrderKind.SELL ? proposal.sellAmount : proposal.buyAmount;
 
 	const trade = {
 		sellTokenIndex: 0n,

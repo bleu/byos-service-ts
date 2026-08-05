@@ -18,7 +18,7 @@ function fixtureOrder(): CowOrder {
 		validTo: 1_785_170_912,
 		appData: "0x06ebf0fd49ea441fbd174e445f37f792eb8ee8848c66c470f59d06a1c3e318a4",
 		feeAmount: 0n,
-		kind: OrderKind.Sell,
+		kind: OrderKind.SELL,
 		partiallyFillable: false,
 		signingScheme: SigningScheme.Eip712,
 		signature:
@@ -67,7 +67,7 @@ describe("settlement encoding", () => {
 	});
 
 	it("buy order flags and executed amount", () => {
-		const order = { ...fixtureOrder(), kind: OrderKind.Buy, signingScheme: SigningScheme.Eip1271 };
+		const order = { ...fixtureOrder(), kind: OrderKind.BUY, signingScheme: SigningScheme.Eip1271 };
 		const proposal = fixtureProposal();
 
 		const calldata = encodeSettle(order, proposal, trampolineAddr, [], proposalSig, [], []);

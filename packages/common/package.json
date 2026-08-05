@@ -16,6 +16,7 @@
 		"dev": "tsc --watch"
 	},
 	"dependencies": {
+		"@cowprotocol/cow-sdk": "^9.2.6",
 		"viem": "^2.0.0",
 		"zod": "^3.23.0"
 	},
