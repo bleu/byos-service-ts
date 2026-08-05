@@ -103,6 +103,7 @@ export async function insert(
 		})
 		.returning({ id: proposals.id });
 
+	// INSERT ... RETURNING always returns exactly one row
 	const id = row?.id;
 	const fullProposal: Proposal = { ...proposal, id };
 
