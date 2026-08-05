@@ -18,7 +18,7 @@ tests/e2e/              End-to-end tests
 docs/adr/               Architecture decision records
 docs/reference/         CoW protocol background (slashing, auctions, CIPs)
 openapi.yml             Proposal API spec
-docker-compose.yml      Dev Postgres
+docker-compose.yml      Dev Postgres + Redis
 ```
 
 ## Before working
@@ -36,6 +36,8 @@ docker-compose.yml      Dev Postgres
 | Runtime | Node |
 | Web framework | Hono (two apps: public on 9585, internal on 9586) |
 | Database | Drizzle ORM + Postgres |
+| Background jobs | BullMQ (repeatable jobs, audit queue) |
+| Job store / cache | Redis |
 | Blockchain | viem |
 | Validation | Zod |
 | Logging | pino |
@@ -72,15 +74,18 @@ docker-compose.yml      Dev Postgres
 - Store errors carry a `retryable` flag (mirrors Rust's `StoreError::should_retry()`).
 - No `try/catch` in domain logic — domain functions return values or throw `AppError`.
 
-### Background loops
+### Background jobs (BullMQ)
 
-- Recursive `setTimeout` — schedule next tick only after current completes (mirrors Rust's `MissedTickBehavior::Delay`).
-- All loops accept an `AbortSignal` for graceful shutdown.
-- Shutdown order: signal abort → stop loops (await current tick) → drain audit writer → close DB pool.
+- Background work uses **BullMQ repeatable jobs** backed by Redis — not `setTimeout` or `setInterval`.
+- One `Queue` + `Worker` per job type: validation (every 12s), retention sweep (every 5m), penalty loop.
+- The **audit trail** is a dedicated BullMQ queue for durable write-behind persistence. Events survive process crashes.
+- **Rate limiting** uses Redis sliding windows (not in-memory).
+- Jobs run with `concurrency: 1` by default — no overlapping ticks, same semantics as the Rust service's `MissedTickBehavior::Delay`.
+- Shutdown order: close HTTP servers → `worker.close()` on all BullMQ workers (finishes current job) → drain audit queue → close Redis → close DB pool.
 
 ### Dependency injection
 
-- Plain `AppContext` object built at startup, passed explicitly to Hono apps (via Hono `Env` type) and background loop functions.
+- Plain `AppContext` object built at startup, passed explicitly to Hono apps (via Hono `Env` type) and BullMQ worker processors. Contains DB pool, Redis connection, viem clients, BullMQ queues, and config.
 - In tests, construct an `AppContext` with overrides — same pattern as the Rust test harness.
 
 ### Configuration

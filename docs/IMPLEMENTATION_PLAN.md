@@ -19,8 +19,11 @@ This document describes the full migration plan for converting the Rust BYOS ser
 | CI | GitHub Actions (lint.yml + test.yml) |
 | Config | Environment variables validated with Zod + dotenv for dev |
 | Error handling | Single `AppError` class with `kind` field |
-| Background loops | Recursive `setTimeout` |
-| Graceful shutdown | `AbortController` |
+| Background jobs | BullMQ repeatable jobs (Redis) |
+| Job queue / cache store | Redis |
+| Rate limiting | Redis-backed sliding window |
+| Audit trail | BullMQ durable queue → Postgres |
+| Graceful shutdown | `AbortController` (HTTP) + `worker.close()` (BullMQ) |
 | DI / wiring | Plain `AppContext` object passed explicitly |
 | BigInt strategy | Native `bigint` internally, string at boundaries (wire + DB) |
 | Contract ABIs | One `.ts` file per contract, `as const` export |
@@ -61,10 +64,13 @@ byos-service-ts/
 │   │   │   │   │   ├── operator.ts    # Escrow operator (debit signing)
 │   │   │   │   │   └── index.ts
 │   │   │   │   ├── storage.ts         # Drizzle proposal store
-│   │   │   │   ├── audit.ts           # Write-behind audit writer
-│   │   │   │   ├── validation.ts      # Background validation loop
-│   │   │   │   ├── penalty.ts         # Track A penalty execution loop
-│   │   │   │   ├── retention.ts       # Dropped proposals cleanup sweep
+│   │   │   │   ├── audit.ts           # Audit trail (BullMQ queue → Postgres)
+│   │   │   │   ├── rate-limit.ts      # Redis-backed rate limiter
+│   │   │   │   ├── jobs/
+│   │   │   │   │   ├── index.ts       # Queue/worker setup, Redis connection
+│   │   │   │   │   ├── validation.ts  # Validation repeatable job
+│   │   │   │   │   ├── penalty.ts     # Track A penalty repeatable job
+│   │   │   │   │   └── retention.ts   # Retention sweep repeatable job
 │   │   │   │   └── orderbook.ts       # CoW orderbook client
 │   │   │   ├── config.ts             # Zod-validated env config
 │   │   │   ├── context.ts            # AppContext type and builder
@@ -113,7 +119,7 @@ byos-service-ts/
 ├── docs/
 │   ├── adr/                           # Architecture Decision Records
 │   └── reference/                     # CoW Protocol background
-├── docker-compose.yml                 # Dev Postgres
+├── docker-compose.yml                 # Dev Postgres + Redis
 ├── openapi.yml                        # Proposal API spec (copied from Rust)
 ├── biome.json
 ├── pnpm-workspace.yaml
@@ -162,10 +168,10 @@ byos-service-ts/
 | `infra/api/error.rs` | `infra/api/error.ts` | AppError → HTTP response |
 | `infra/api/mod.rs` | `infra/api/index.ts` | Two Hono apps, middleware |
 | `infra/storage.rs` | `infra/storage.ts` | Drizzle queries |
-| `infra/audit.rs` | `infra/audit.ts` | Write-behind persistence |
-| `infra/validation.rs` | `infra/validation.ts` | Background validation loop |
-| `infra/penalty.rs` | `infra/penalty.ts` | Penalty execution loop |
-| `infra/retention.rs` | `infra/retention.ts` | Retention sweep loop |
+| `infra/audit.rs` | `infra/audit.ts` | Audit trail (BullMQ queue → Postgres) |
+| `infra/validation.rs` | `infra/jobs/validation.ts` | Validation BullMQ repeatable job |
+| `infra/penalty.rs` | `infra/jobs/penalty.ts` | Penalty BullMQ repeatable job |
+| `infra/retention.rs` | `infra/jobs/retention.ts` | Retention sweep BullMQ repeatable job |
 | `infra/orderbook.rs` | `infra/orderbook.ts` | CoW orderbook HTTP client |
 | `infra/blockchain/validator.rs` | `infra/blockchain/validator.ts` | Escrow + simulation |
 | `infra/blockchain/escrow.rs` | `infra/blockchain/escrow.ts` | viem contract reads |
@@ -216,7 +222,7 @@ Set up the monorepo skeleton with no business logic.
 - `tsconfig.base.json` with strict mode, path aliases
 - Per-package `package.json` and `tsconfig.json`
 - `biome.json` at root
-- `docker-compose.yml` for Postgres
+- `docker-compose.yml` for Postgres + Redis
 - `.github/workflows/lint.yml` and `test.yml`
 - `tsup.config.ts` per app
 - `.env.example` with all required env vars
@@ -312,6 +318,7 @@ Wire up Hono routes and middleware.
 3. **Middleware:**
    - Bearer token auth middleware for internal routes
    - EIP-712 signature extraction middleware for public routes
+   - Redis-backed rate limiting middleware for public routes
    - Error handler (`app.onError`) mapping `AppError` to JSON responses
    - Request logging via pino
 4. **DTO conversion** — `dto.ts`: Zod schemas → domain types, domain types → response JSON
@@ -320,22 +327,24 @@ Wire up Hono routes and middleware.
 
 **Tests:** Route-level tests with test `AppContext`, covering auth, validation errors, happy paths.
 
-### Phase 6 — Background Loops & Startup
+### Phase 6 — Background Jobs & Startup
 
-Wire the service together.
+Wire the service together using BullMQ for background work and Redis as the job store.
 
 **Deliverables:**
-1. **Validation loop** — `validation.ts`: recursive `setTimeout` every 12s, picks up Submitted proposals, runs escrow + simulation, transitions to Active/Rejected/SimFailed
-2. **Retention sweep** — `retention.ts`: recursive `setTimeout` every 5m, deletes terminal proposals older than retention window
-3. **Penalty loop** — `penalty.ts`: recursive `setTimeout`, processes Track A debits for SettleFailed proposals
-4. **Audit writer** — `audit.ts`: write-behind queue, drains on shutdown
-5. **AppContext builder** — `context.ts`: constructs DB pool, viem clients, config, passes to apps and loops
-6. **Entry point** — `index.ts`: Zod config parsing, context creation, start both HTTP servers, start loops, `AbortController` for shutdown, `SIGTERM`/`SIGINT` handlers
-7. **Graceful shutdown order:** signal abort → stop loops (await current tick) → drain audit writer → close DB pool
+1. **Redis connection** — `infra/jobs/index.ts`: shared `IORedis` connection for all queues and workers
+2. **Validation job** — `infra/jobs/validation.ts`: BullMQ repeatable job every 12s, picks up Submitted proposals, runs escrow + simulation, transitions to Active/Rejected/SimFailed. Uses `Promise.all` for concurrent validation within a single job run.
+3. **Retention sweep job** — `infra/jobs/retention.ts`: BullMQ repeatable job every 5m, deletes terminal proposals older than retention window
+4. **Penalty job** — `infra/jobs/penalty.ts`: BullMQ repeatable job, processes Track A debits for SettleFailed proposals
+5. **Audit trail** — `infra/audit.ts`: BullMQ queue for durable write-behind. Audit events are enqueued (survives crashes) and a worker drains them to Postgres. Replaces the Rust in-memory channel approach with a persistent queue.
+6. **Rate limiter** — `infra/rate-limit.ts`: Redis-backed sliding window rate limiter for the public `/proposals` API
+7. **AppContext builder** — `context.ts`: constructs DB pool, Redis connection, viem clients, BullMQ queues, config. Passed to apps and workers.
+8. **Entry point** — `index.ts`: Zod config parsing, context creation, start both HTTP servers, start BullMQ workers, `AbortController` for HTTP shutdown, `SIGTERM`/`SIGINT` handlers
+9. **Graceful shutdown order:** signal abort → close HTTP servers → `worker.close()` on all BullMQ workers (finishes current job) → drain audit queue → close Redis connection → close DB pool
 
 **Rust reference:** `crates/byos/src/run.rs`, `crates/byos/src/infra/validation.rs`, `crates/byos/src/infra/retention.rs`, `crates/byos/src/infra/penalty.rs`
 
-**Tests:** Startup/shutdown tests, validation loop behavior, retention sweep timing.
+**Tests:** Startup/shutdown tests, job scheduling behavior, audit queue durability.
 
 ### Phase 7 — Subsolver (`apps/subsolver`)
 
@@ -414,27 +423,64 @@ const configSchema = z.object({
 });
 ```
 
-### Background Loop Pattern
+### Background Jobs (BullMQ)
+
+Background work uses BullMQ repeatable jobs backed by Redis. This replaces the Rust service's `tokio::spawn` + `tokio::time::interval` pattern.
 
 ```typescript
-function createLoop(
-  name: string,
-  fn: () => Promise<void>,
-  intervalMs: number,
-  signal: AbortSignal,
-): void {
-  const tick = async () => {
-    if (signal.aborted) return;
-    try {
-      await fn();
-    } catch (err) {
-      logger.error({ err }, `${name} tick failed`);
-    }
-    if (!signal.aborted) {
-      setTimeout(tick, intervalMs);
-    }
-  };
-  tick();
+import { Queue, Worker } from "bullmq";
+import type { IORedis } from "ioredis";
+
+// Queue setup — one per job type
+const validationQueue = new Queue("validation", { connection: redis });
+
+// Add a repeatable job (runs every 12s)
+await validationQueue.upsertJobScheduler("validation-loop", {
+  every: 12_000,
+});
+
+// Worker processes jobs
+const validationWorker = new Worker("validation", async (job) => {
+  const submitted = await store.findByStatus("submitted");
+  await Promise.all(submitted.map((p) => validate(p)));
+}, { connection: redis });
+
+// Graceful shutdown
+await validationWorker.close(); // finishes current job, then stops
+```
+
+Key differences from the Rust approach:
+- Jobs are **durable** — if the process crashes mid-tick, the job is retried on restart
+- BullMQ handles **scheduling** — no manual `setTimeout` or `setInterval`
+- **Concurrency** is configurable per worker (`concurrency: 1` by default — no overlapping ticks)
+- `worker.close()` provides clean shutdown (finishes current job, stops accepting new ones)
+
+### Audit Trail (BullMQ Queue)
+
+The audit trail uses a dedicated BullMQ queue for durable write-behind persistence. Events survive process crashes (unlike the Rust in-memory channel).
+
+```typescript
+const auditQueue = new Queue("audit", { connection: redis });
+
+// Enqueue from anywhere (fire-and-forget)
+await auditQueue.add("status-changed", { proposalId, from, to, timestamp });
+
+// Worker drains to Postgres
+const auditWorker = new Worker("audit", async (job) => {
+  await db.insert(auditEvents).values(job.data);
+}, { connection: redis });
+```
+
+### Rate Limiting (Redis)
+
+Public API rate limiting uses a Redis-backed sliding window, replacing the Rust service's in-memory `tower::limit`.
+
+```typescript
+// Redis sliding window — survives restarts, ready for multiple instances
+async function checkRateLimit(key: string, limit: number, windowSecs: number): Promise<boolean> {
+  const current = await redis.incr(key);
+  if (current === 1) await redis.expire(key, windowSecs);
+  return current <= limit;
 }
 ```
 
@@ -467,6 +513,8 @@ function decimalToBigint(s: string): bigint { return BigInt(s); }
 - `@hono/node-server`
 - `drizzle-orm`
 - `postgres` (porsager) or `pg`
+- `bullmq`
+- `ioredis`
 - `pino`
 - `zod`
 - `dotenv`
