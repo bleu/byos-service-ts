@@ -1,0 +1,60 @@
+export const TrampolineFactoryAbi = [
+	{
+		type: "function",
+		name: "addressOf",
+		inputs: [{ name: "_subSolver", type: "address" }],
+		outputs: [{ name: "_trampoline", type: "address" }],
+		stateMutability: "view",
+	},
+	{
+		type: "function",
+		name: "domainSeparator",
+		inputs: [],
+		outputs: [{ name: "_domainSeparator", type: "bytes32" }],
+		stateMutability: "view",
+	},
+	{
+		type: "function",
+		name: "ESCROW",
+		inputs: [],
+		outputs: [{ name: "", type: "address" }],
+		stateMutability: "view",
+	},
+	{
+		type: "function",
+		name: "SETTLEMENT",
+		inputs: [],
+		outputs: [{ name: "", type: "address" }],
+		stateMutability: "view",
+	},
+	{
+		type: "function",
+		name: "eip712Domain",
+		inputs: [],
+		outputs: [
+			{ name: "fields", type: "bytes1" },
+			{ name: "name", type: "string" },
+			{ name: "version", type: "string" },
+			{ name: "chainId", type: "uint256" },
+			{ name: "verifyingContract", type: "address" },
+			{ name: "salt", type: "bytes32" },
+			{ name: "extensions", type: "uint256[]" },
+		],
+		stateMutability: "view",
+	},
+	{
+		type: "function",
+		name: "ensureDeployed",
+		inputs: [{ name: "_subSolver", type: "address" }],
+		outputs: [{ name: "_instance", type: "address" }],
+		stateMutability: "nonpayable",
+	},
+	{
+		type: "event",
+		name: "TrampolineDeployed",
+		inputs: [
+			{ name: "_subSolver", type: "address", indexed: true },
+			{ name: "_instance", type: "address", indexed: false },
+		],
+	},
+] as const;

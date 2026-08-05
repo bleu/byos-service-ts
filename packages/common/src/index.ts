@@ -1,2 +1,8 @@
-// Shared types, EIP-712 schema, ABIs, and DTOs for the BYOS service.
-// See: Rust equivalent at crates/byos-common/src/lib.rs
+export * from "./abis/index.js";
+export * from "./dto.js";
+export * from "./eip712.js";
+export * from "./error.js";
+export * from "./hooks.js";
+export * from "./settlement.js";
+export * from "./trampoline.js";
+export * from "./types.js";
