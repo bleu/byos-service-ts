@@ -87,11 +87,20 @@ export function createSolveRoute(config: SolveConfig) {
 				// Skip expired
 				if (proposal.validUntil <= now) continue;
 
+				// Skip proposals whose fill exceeds the remaining auction amount
+				if (order.partiallyFillable) {
+					const exceeds =
+						order.kind === "sell"
+							? proposal.sellAmount > BigInt(order.sellAmount)
+							: proposal.buyAmount > BigInt(order.buyAmount);
+					if (exceeds) continue;
+				}
+
 				const gasCost = effectiveGas(proposal.gasUsed) * config.gasPriceRef.value;
 
 				const candidate: Candidate = {
-					orderSell: BigInt(order.fullSellAmount),
-					orderBuy: BigInt(order.fullBuyAmount),
+					orderSell: BigInt(order.sellAmount),
+					orderBuy: BigInt(order.buyAmount),
 					proposalSell: proposal.sellAmount,
 					proposalBuy: proposal.buyAmount,
 					isSellOrder: order.kind === "sell",
