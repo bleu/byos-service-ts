@@ -97,9 +97,14 @@ async function main() {
 		]);
 		logger.info("http servers closed");
 
-		// Close BullMQ workers (finish current job)
-		await Promise.all(workers.map((w) => w.close()));
-		logger.info("workers closed");
+		// Close non-audit workers first (they may emit audit events during teardown)
+		const nonAuditWorkers = workers.filter((w) => w !== auditWorker);
+		await Promise.all(nonAuditWorkers.map((w) => w.close()));
+		logger.info("background workers closed");
+
+		// Drain remaining audit jobs before closing
+		await auditWorker.close();
+		logger.info("audit worker drained");
 
 		// Close queues
 		await Promise.all([

@@ -73,7 +73,7 @@ export interface SolveResponse {
 
 export interface Notification {
 	auctionId?: string;
-	solutionId: number | number[];
+	solutionId?: number | number[];
 	kind: string;
 	transaction?: string;
 }

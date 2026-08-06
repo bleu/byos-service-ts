@@ -30,7 +30,8 @@ function outcomeOf(notification: Notification): SettlementOutcome | null {
 	}
 }
 
-function parseSolutionIds(raw: number | number[]): number[] {
+function parseSolutionIds(raw: number | number[] | undefined): number[] {
+	if (raw === undefined) return [];
 	return Array.isArray(raw) ? raw : [raw];
 }
 

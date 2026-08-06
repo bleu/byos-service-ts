@@ -18,7 +18,7 @@ export type StoreError =
 	| { kind: "corruptRow"; table: string; column: string; detail: string };
 
 export function shouldRetry(error: StoreError): boolean {
-	return error.kind !== "corruptRow";
+	return error.kind === "database";
 }
 
 // --- Row Codec ---

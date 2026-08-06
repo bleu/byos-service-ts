@@ -34,8 +34,16 @@ export async function enqueueAuditEvent(
 	auditQueue: import("bullmq").Queue,
 	event: AuditEvent,
 ): Promise<void> {
-	await auditQueue.add("audit-event", {
-		occurredAt: event.occurredAt.toISOString(),
-		kind: event.kind,
-	} satisfies SerializedAuditEvent);
+	await auditQueue.add(
+		"audit-event",
+		{
+			occurredAt: event.occurredAt.toISOString(),
+			kind: event.kind,
+		} satisfies SerializedAuditEvent,
+		{
+			attempts: 20,
+			backoff: { type: "exponential", delay: 100 },
+			removeOnFail: false,
+		},
+	);
 }
