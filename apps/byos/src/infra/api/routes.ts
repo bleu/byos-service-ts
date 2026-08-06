@@ -126,7 +126,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		return c.json(proposalToGetResponse(result));
 	});
 
-	// GET /proposals/:orderUid — List by order UID (owner-scoped)
+	// GET /proposals/by-sub-solver — List by sub-solver (owner-scoped)
 	app.get("/proposals/by-sub-solver", async (c) => {
 		const sig = extractSignature(c);
 		let reader: Address;
@@ -140,6 +140,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		return c.json(proposalToListResponse(proposals));
 	});
 
+	// GET /proposals/:orderUid — List by order UID (owner-scoped)
 	app.get("/proposals/:orderUid", async (c) => {
 		const orderUid = c.req.param("orderUid");
 		const sig = extractSignature(c);
