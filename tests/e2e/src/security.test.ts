@@ -1,16 +1,16 @@
-import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
+import { createInternalApp } from "@byos/byos/src/infra/api/index.js";
 import { createTestDb } from "@byos/byos/test/setup.js";
 import { signCancellation } from "@byos/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	CHAIN_ID,
+	createTestApp,
 	DOMAIN,
 	MAX_PROPOSAL_LIFETIME_SECS,
 	OTHER_SIGN_FN,
-	TRAMPOLINE_FACTORY,
-	createTestApp,
 	signAndSubmitProposal,
 	type TestApp,
+	TRAMPOLINE_FACTORY,
 } from "./helpers.js";
 
 let app: TestApp;
