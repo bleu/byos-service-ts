@@ -98,11 +98,16 @@ docker-compose.yml      Dev Postgres + Redis
 
 ### Testing
 
-- **Unit tests**: colocated with source or in `__tests__/` directories. Test domain logic in isolation.
-- **Service-level tests**: in `apps/byos/test/`. Require Postgres (docker-compose). Each test gets a unique database — see `test/setup.ts`.
-- **E2e tests**: in `tests/e2e/`. Require anvil + both services running.
-- Run unit tests: `pnpm test`
-- Run DB tests: `pnpm test:db`
+Four tiers, one command each. Everything but the unit tier needs `docker compose up -d postgres`.
+
+| Tier | Lives in | Command | Needs |
+|------|----------|---------|-------|
+| Unit | beside the source, in `__tests__/` | `pnpm test` | nothing |
+| DB | `apps/byos/src/**/*.db.test.ts` | `pnpm test:db` | Postgres |
+| Service-level / e2e | `tests/e2e/` | `pnpm test:e2e` | Postgres |
+| On-chain | `tests/onchain/` | `pnpm test:onchain` | anvil on PATH, `RUN_ONCHAIN_TESTS=1` |
+
+The e2e tier builds both Hono apps in-process — it does not need a running service. Every DB-backed test gets its own database; `apps/byos/test/setup.ts` creates it and sweeps stale ones. The on-chain tier self-skips without `RUN_ONCHAIN_TESTS=1`, which is why CI does not run it.
 
 ### Wire format
 
