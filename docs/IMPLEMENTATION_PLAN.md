@@ -471,6 +471,8 @@ const auditWorker = new Worker("audit", async (job) => {
 }, { connection: redis });
 ```
 
+> **Note:** Audit jobs should be configured with retry-forever semantics (high attempt count with exponential backoff, `removeOnFail: false`) to match the Rust service's behavior where audit events are never dropped. The audit worker should also be the last worker closed during graceful shutdown, since other workers may enqueue audit events during their teardown.
+
 ### Rate Limiting (Redis)
 
 Public API rate limiting uses a Redis-backed sliding window, replacing the Rust service's in-memory `tower::limit`.

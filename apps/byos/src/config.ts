@@ -53,3 +53,14 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 	}
 	return result.data;
 }
+
+export function safeConfigForLogging(config: Config): Record<string, unknown> {
+	return {
+		...config,
+		DATABASE_URL: "<redacted>",
+		REDIS_URL: "<redacted>",
+		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
+		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
+		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
+	};
+}
