@@ -24,6 +24,14 @@ export default defineConfig({
 					include: ["**/*.test.ts"],
 				},
 			},
+			{
+				test: {
+					name: "onchain",
+					root: "tests/onchain",
+					include: ["**/*.test.ts"],
+					testTimeout: 60_000,
+				},
+			},
 		],
 	},
 });

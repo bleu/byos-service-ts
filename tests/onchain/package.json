@@ -1,0 +1,13 @@
+{
+	"name": "@byos/onchain",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"devDependencies": {
+		"@byos/common": "workspace:*",
+		"@types/node": "^22.0.0",
+		"typescript": "^5.8.0",
+		"viem": "^2.0.0",
+		"vitest": "^3.0.0"
+	}
+}
