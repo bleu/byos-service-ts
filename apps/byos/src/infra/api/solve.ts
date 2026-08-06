@@ -89,9 +89,10 @@ export function createSolveRoute(config: SolveConfig) {
 
 				// Skip proposals whose fill exceeds the remaining auction amount
 				if (order.partiallyFillable) {
-					const exceeds = order.kind === "sell"
-						? proposal.sellAmount > BigInt(order.sellAmount)
-						: proposal.buyAmount > BigInt(order.buyAmount);
+					const exceeds =
+						order.kind === "sell"
+							? proposal.sellAmount > BigInt(order.sellAmount)
+							: proposal.buyAmount > BigInt(order.buyAmount);
 					if (exceeds) continue;
 				}
 
