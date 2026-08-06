@@ -9,8 +9,9 @@
 	"scripts": {
 		"build": "pnpm -r run build",
 		"dev": "docker compose up -d --wait postgres && pnpm --filter @byos/byos run dev",
-		"test": "vitest run",
+		"test": "vitest run --project unit",
 		"test:db": "vitest run --project db",
+		"test:e2e": "vitest run --project e2e",
 		"test:watch": "vitest",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
