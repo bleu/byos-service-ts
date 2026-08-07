@@ -50,6 +50,15 @@ interface OrderDto {
 const CACHE_CAPACITY = 10_000;
 const ETHER = 10n ** 18n;
 
+// Unknown enum values throw transient rather than coercing: the Rust DTO's
+// closed serde enums fail deserialization, so the validator defers instead of
+// mis-classifying the order.
+function mapKind(kind: string): OrderKind {
+	if (kind === "sell") return OrderKind.SELL;
+	if (kind === "buy") return OrderKind.BUY;
+	throw { kind: "transient", message: `unknown order kind ${kind}` } satisfies OrderbookError;
+}
+
 function mapSigningScheme(scheme: string): SigningScheme {
 	switch (scheme) {
 		case "eip712":
@@ -61,7 +70,10 @@ function mapSigningScheme(scheme: string): SigningScheme {
 		case "presign":
 			return SigningScheme.PreSign;
 		default:
-			return SigningScheme.Eip712;
+			throw {
+				kind: "transient",
+				message: `unknown signing scheme ${scheme}`,
+			} satisfies OrderbookError;
 	}
 }
 
@@ -85,7 +97,7 @@ function dtoToOrderRecord(dto: OrderDto): OrderRecord {
 		validTo: dto.validTo,
 		appData: dto.appData as Hex,
 		feeAmount: BigInt(dto.feeAmount),
-		kind: dto.kind === "buy" ? OrderKind.BUY : OrderKind.SELL,
+		kind: mapKind(dto.kind),
 		partiallyFillable: dto.partiallyFillable,
 		signingScheme: mapSigningScheme(dto.signingScheme),
 		signature: dto.signature as Hex,
