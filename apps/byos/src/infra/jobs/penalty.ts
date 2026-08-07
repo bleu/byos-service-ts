@@ -75,6 +75,18 @@ async function runRevertDebits(
 					{ id: proposal.id, amount: amount.toString(), tx: penaltyTxHash },
 					"revert debit landed",
 				);
+			} else {
+				// The debit is on-chain but the proposal still reads settleFailed,
+				// so the next tick picks it up and charges again.
+				logger.error(
+					{
+						id: proposal.id,
+						amount: amount.toString(),
+						tx: penaltyTxHash,
+						error: result,
+					},
+					"debit landed but proposal not marked penalized; may re-charge next tick",
+				);
 			}
 		} catch (e) {
 			const newCount = count + 1;
