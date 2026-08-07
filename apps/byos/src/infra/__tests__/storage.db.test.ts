@@ -180,6 +180,71 @@ describe("proposal store", () => {
 		expect(updated?.status).toBe("executing");
 	});
 
+	// The outcome is decided from the locked row, not the caller's copy. /notify
+	// reads the proposal, then applies an outcome; in between, another
+	// notification or the executing timeout can move the row.
+	it("judges a settlement outcome against the committed status", async () => {
+		const txHash = `0x${"33".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const stale = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, stale, "executing");
+
+		// `stale` still reads "active"; the row is already "executing".
+		const result = await store.applySettlementOutcome(ctx.db, stale, {
+			kind: "reverted",
+			txHash,
+		});
+
+		expect("auditEvent" in result).toBe(true);
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settleFailed");
+		expect(updated?.settlementTxHash).toBe(txHash);
+	});
+
+	// Requiring "executing" here would forfeit the debit whenever
+	// settlementStarted never landed — driver never sent it, its write failed,
+	// or the two notifications arrived out of order.
+	it("charges a revert that arrives without a preceding settlementStarted", async () => {
+		const txHash = `0x${"44".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, {
+			kind: "reverted",
+			txHash,
+		});
+
+		expect("auditEvent" in result).toBe(true);
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settleFailed");
+		// The penalty loop prices the debit off this tx.
+		expect(updated?.settlementTxHash).toBe(txHash);
+	});
+
+	it("ignores an outcome illegal from the committed status", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "cancelled" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "started" });
+
+		// Not an error: the timeout backstop and re-simulation reconcile it.
+		expect("auditEvent" in result && result.auditEvent).toBeNull();
+		expect((await store.get(ctx.db, id))?.status).toBe("cancelled");
+	});
+
+	it("queues the non-settlement charge when an executing settlement is abandoned", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "abandoned" });
+
+		expect("insertedPenalty" in result && result.insertedPenalty).toBe(true);
+		// Back in the pool and still competing, with the charge queued separately.
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
+		const queued = (await store.pendingPenalties(ctx.db)).filter((p) => p.proposalId === id);
+		expect(queued).toHaveLength(1);
+	});
+
 	it("sweeps dropped proposals", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
 		const p = (await store.get(ctx.db, id))!;
