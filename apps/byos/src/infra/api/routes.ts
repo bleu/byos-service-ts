@@ -104,8 +104,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 	// GET /proposal/:id — Get single proposal (owner-scoped)
 	app.get("/proposal/:id", async (c) => {
+		// Not just NaN: Number("1.5") and Number("1e30") both parse, then fail in
+		// the driver as a 500 for what is a malformed id.
 		const id = Number(c.req.param("id"));
-		if (Number.isNaN(id)) {
+		if (!Number.isSafeInteger(id) || id < 0) {
 			throw new AppError(Kind.BadRequest, "Invalid proposal id");
 		}
 
@@ -157,8 +159,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 	// DELETE /proposal/:id — Cancel proposal
 	app.delete("/proposal/:id", async (c) => {
+		// Not just NaN: Number("1.5") and Number("1e30") both parse, then fail in
+		// the driver as a 500 for what is a malformed id.
 		const id = Number(c.req.param("id"));
-		if (Number.isNaN(id)) {
+		if (!Number.isSafeInteger(id) || id < 0) {
 			throw new AppError(Kind.BadRequest, "Invalid proposal id");
 		}
 
