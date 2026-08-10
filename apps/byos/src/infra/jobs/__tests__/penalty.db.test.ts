@@ -181,6 +181,39 @@ describe("revert debits", () => {
 		expect(debitCalls).toBe(0);
 	});
 
+	it("does not debit a settleFailed proposal without a settlement tx", async () => {
+		// apply_settlement_outcome always writes the tx alongside settleFailed,
+		// so a missing hash is a corrupt row — alert, don't guess an amount.
+		const { id } = await store.insert(ctx.db, sampleProposal());
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.transition(ctx.db, active as Proposal, "settleFailed");
+
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async debit() {
+				return PENALTY_TX;
+			},
+		};
+		const logLines: string[] = [];
+		const capturing = pino(
+			{ level: "error" },
+			{
+				write: (line: string) => {
+					logLines.push(line);
+				},
+			},
+		);
+
+		await runRevertDebits({ ...config(operator), logger: capturing }, new Map());
+
+		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect(logLines.some((line) => line.includes("without settlement tx"))).toBe(true);
+	});
+
 	it("does not count a record failure against the debit attempt cap", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const operator: DebitEscrow = {
