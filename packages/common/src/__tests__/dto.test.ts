@@ -160,3 +160,81 @@ describe("DTO schemas", () => {
 		});
 	});
 });
+
+// Ported from the Rust edge-parser tests (byos infra/api/dto.rs): the wire
+// grammar for amounts and byte strings must reject what parse_u256/parse_hex
+// reject and accept what they accept.
+describe("wire grammar", () => {
+	const valid = {
+		orderUid: `0x${"ab".repeat(56)}`,
+		sellAmount: "1000000000000000000",
+		buyAmount: "5000000",
+		interactions: [
+			{
+				target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+				value: "0",
+				callData: "0xabcdef",
+			},
+		],
+		validUntil: "1750000000",
+		nonce: "0",
+		signature: `0x${"ab".repeat(65)}`,
+	};
+
+	function accepts(overrides: Record<string, unknown>): boolean {
+		return createProposalRequestSchema.safeParse({ ...valid, ...overrides }).success;
+	}
+
+	function withCallData(callData: string) {
+		return { interactions: [{ ...valid.interactions[0], callData }] };
+	}
+
+	it("hex accepts a bare prefix as empty", () => {
+		// An interaction with no calldata is a plain value transfer.
+		expect(accepts(withCallData("0x"))).toBe(true);
+		expect(accepts(withCallData(""))).toBe(true);
+	});
+
+	it("hex rejects an odd digit count", () => {
+		expect(accepts(withCallData("0xabc"))).toBe(false);
+		expect(accepts(withCallData("abc"))).toBe(false);
+	});
+
+	it("hex rejects non-hex digits", () => {
+		expect(accepts(withCallData("0xzz"))).toBe(false);
+		expect(accepts(withCallData("0x 1"))).toBe(false);
+	});
+
+	it("hex accepts a missing 0x prefix", () => {
+		expect(accepts(withCallData("abcd"))).toBe(true);
+		expect(accepts({ signature: "ab".repeat(65) })).toBe(true);
+		expect(accepts({ orderUid: "ab".repeat(56) })).toBe(true);
+	});
+
+	it("u256 keeps leading zeros and rejects other shapes", () => {
+		expect(accepts({ sellAmount: "000123" })).toBe(true);
+		// Hex is the wrong base here — amounts are decimal on the wire
+		// (ADR-0005), so 0x10 must not silently read as 16.
+		expect(accepts({ sellAmount: "0x10" })).toBe(false);
+		expect(accepts({ sellAmount: "-1" })).toBe(false);
+		expect(accepts({ sellAmount: "1.5" })).toBe(false);
+		expect(accepts({ sellAmount: " 1" })).toBe(false);
+	});
+
+	it("u256 reads an empty string as zero", () => {
+		// Pins the upstream ruint behaviour the Rust test documents.
+		expect(accepts({ sellAmount: "" })).toBe(true);
+		expect(BigInt("")).toBe(0n);
+	});
+
+	it("u256 rejects a value past the maximum", () => {
+		const max = (2n ** 256n - 1n).toString();
+		expect(accepts({ sellAmount: max })).toBe(true);
+		expect(accepts({ sellAmount: (2n ** 256n).toString() })).toBe(false);
+	});
+
+	it("orderUid must be exactly 56 bytes", () => {
+		expect(accepts({ orderUid: `0x${"ab".repeat(55)}` })).toBe(false);
+		expect(accepts({ orderUid: `0x${"ab".repeat(57)}` })).toBe(false);
+	});
+});
