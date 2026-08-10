@@ -281,10 +281,7 @@ export async function cancel(
 		}
 
 		if (locked.status === "executing") {
-			await tx
-				.update(proposals)
-				.set({ pendingCancellation: true })
-				.where(eq(proposals.id, id));
+			await tx.update(proposals).set({ pendingCancellation: true }).where(eq(proposals.id, id));
 
 			const auditEvent: AuditEvent = {
 				occurredAt: new Date(),

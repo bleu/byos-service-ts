@@ -178,10 +178,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 				case "notOwner":
 					throw new AppError(Kind.ProposalNotFound);
 				case "staleTransition":
-					throw new AppError(
-						Kind.ProposalNotCancellable,
-						cancelDescription(result.actual),
-					);
+					throw new AppError(Kind.ProposalNotCancellable, cancelDescription(result.actual));
 				default:
 					throw new AppError(Kind.Internal);
 			}
@@ -193,8 +190,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			return c.json(
 				{
 					status: "pending",
-					description:
-						"Cancellation will take effect when the current settlement completes.",
+					description: "Cancellation will take effect when the current settlement completes.",
 				},
 				202,
 			);
