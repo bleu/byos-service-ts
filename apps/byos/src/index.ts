@@ -9,7 +9,11 @@ import { createInternalApp, createPublicApp } from "./infra/api/index.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
-import { createValidationWorker } from "./infra/jobs/validation.js";
+import {
+	createProposalValidationWorker,
+	createValidationWorker,
+	enqueueProposalValidation,
+} from "./infra/jobs/validation.js";
 
 async function main() {
 	// 1. Parse config (fail-fast)
@@ -62,8 +66,17 @@ async function main() {
 		db: ctx.db,
 		validator: ctx.validator,
 		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
+		enqueueValidation: (proposalId) =>
+			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
 		onAuditEvent: ctx.onAuditEvent,
 		logger: logger.child({ worker: "validation" }),
+	});
+
+	const proposalValidationWorker = createProposalValidationWorker(ctx.redis, {
+		db: ctx.db,
+		validator: ctx.validator,
+		onAuditEvent: ctx.onAuditEvent,
+		logger: logger.child({ worker: "validate-proposal" }),
 	});
 
 	const retentionWorker = createRetentionWorker(ctx.redis, {
@@ -82,9 +95,13 @@ async function main() {
 			})
 		: null;
 
-	const workers = [auditWorker, validationWorker, retentionWorker, penaltyWorker].filter(
-		Boolean,
-	) as import("bullmq").Worker[];
+	const workers = [
+		auditWorker,
+		validationWorker,
+		proposalValidationWorker,
+		retentionWorker,
+		penaltyWorker,
+	].filter(Boolean) as import("bullmq").Worker[];
 
 	// 7. Graceful shutdown
 	const shutdown = async (signal: string) => {
@@ -109,6 +126,7 @@ async function main() {
 		// Close queues
 		await Promise.all([
 			ctx.queues.validation.close(),
+			ctx.queues.validateProposal.close(),
 			ctx.queues.retention.close(),
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
