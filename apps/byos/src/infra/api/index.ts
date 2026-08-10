@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
@@ -17,6 +18,7 @@ export interface AppContext {
 	gasPriceRef: GasPriceRef;
 	solveBearerToken?: string;
 	onAuditEvent: (event: AuditEvent) => void;
+	logger?: Logger;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
@@ -52,6 +54,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 	const notify = createNotifyRoute({
 		db: ctx.db,
 		onAuditEvent: ctx.onAuditEvent,
+		logger: ctx.logger,
 	});
 
 	// Apply bearer auth if configured

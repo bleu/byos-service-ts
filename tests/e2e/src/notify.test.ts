@@ -93,6 +93,29 @@ describe("/notify", () => {
 		expect(updated?.status).toBe("settleFailed");
 	});
 
+	it("attributable non-outcome kind changes nothing, kept as audit evidence", async () => {
+		const id = await seedActiveProposal(302n);
+		await store.recordSolution(app.ctx.db, 102, 1, id);
+
+		const { status } = await postNotify({
+			auctionId: "102",
+			solutionId: 1,
+			kind: "emptySolution",
+		});
+		expect(status).toBe(200);
+
+		// Pre-submission kinds carry no transition (ADR-0013)
+		const updated = await store.get(app.ctx.db, id);
+		expect(updated?.status).toBe("active");
+
+		// ...but the notification is kept as driverNotified evidence (ADR-0010)
+		const evidence = app.auditEvents.filter(
+			(e) => e.kind.type === "driverNotified" && e.kind.proposalId === id,
+		);
+		expect(evidence).toHaveLength(1);
+		expect(evidence[0]?.kind).toMatchObject({ notificationKind: "emptySolution" });
+	});
+
 	it("unknown kind returns 200 with no state change", async () => {
 		const { status } = await postNotify({
 			auctionId: "999",
