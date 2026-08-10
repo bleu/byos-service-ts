@@ -14,6 +14,7 @@ import {
 } from "../../domain/scoring.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
+import { AppError, Kind } from "./error.js";
 import type {
 	Auction,
 	AuctionOrder,
@@ -42,8 +43,17 @@ export function createSolveRoute(config: SolveConfig) {
 			// If it doesn't parse, leave previous value
 		}
 
-		// Parse auction ID
-		const auctionId = auction.id ? Number(auction.id) : 0;
+		// Auctions without an id are quote requests: never settled, so there
+		// is nothing to attribute. A present id must be a decimal integer —
+		// Rust rejects anything else at deserialization.
+		let auctionId: number | null = null;
+		if (auction.id) {
+			const parsed = Number(auction.id);
+			if (!/^\d+$/.test(auction.id) || !Number.isSafeInteger(parsed)) {
+				throw new AppError(Kind.BadRequest, "Invalid auction id");
+			}
+			auctionId = parsed;
+		}
 
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
@@ -129,11 +139,14 @@ export function createSolveRoute(config: SolveConfig) {
 			const solution = buildSolution(solutionId, order, bestProposal, bestGasUsed, bestCut);
 			if (!solution) continue;
 
-			// Record attribution
-			try {
-				await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id);
-			} catch {
-				continue; // Skip solution if attribution fails
+			// Record attribution before bidding: if we cannot record it, we
+			// do not bid it. Quote requests skip the write entirely.
+			if (auctionId !== null) {
+				try {
+					await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id);
+				} catch {
+					continue;
+				}
 			}
 
 			solutions.push(solution);
