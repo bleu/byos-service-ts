@@ -64,7 +64,13 @@ describe("bearer token enforcement", () => {
 			const noAuthResp = await authedApp.request("/solve", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ id: "1", orders: [], tokens: {}, effectiveGasPrice: "10000000000" }),
+				body: JSON.stringify({
+					id: "1",
+					orders: [],
+					tokens: {},
+					effectiveGasPrice: "10000000000",
+					deadline: "2099-01-01T00:00:00Z",
+				}),
 			});
 			expect(noAuthResp.status).toBe(401);
 
@@ -75,7 +81,13 @@ describe("bearer token enforcement", () => {
 					"Content-Type": "application/json",
 					Authorization: "Bearer test-secret",
 				},
-				body: JSON.stringify({ id: "1", orders: [], tokens: {}, effectiveGasPrice: "10000000000" }),
+				body: JSON.stringify({
+					id: "1",
+					orders: [],
+					tokens: {},
+					effectiveGasPrice: "10000000000",
+					deadline: "2099-01-01T00:00:00Z",
+				}),
 			});
 			expect(authedResp.status).toBe(200);
 		} finally {

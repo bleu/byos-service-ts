@@ -4,7 +4,8 @@ import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import type { SettlementOutcome } from "../../domain/proposal.js";
 import * as store from "../storage.js";
-import type { Notification } from "./types.js";
+import { AppError, Kind } from "./error.js";
+import { type Notification, notificationSchema } from "./types.js";
 
 export interface NotifyConfig {
 	db: Db;
@@ -30,8 +31,8 @@ function outcomeOf(notification: Notification): SettlementOutcome | null {
 	}
 }
 
-function parseSolutionIds(raw: number | number[] | undefined): number[] {
-	if (raw === undefined) return [];
+function parseSolutionIds(raw: Notification["solutionId"]): number[] {
+	if (raw == null) return [];
 	return Array.isArray(raw) ? raw : [raw];
 }
 
@@ -39,7 +40,17 @@ export function createNotifyRoute(config: NotifyConfig) {
 	const app = new Hono();
 
 	app.post("/notify", async (c) => {
-		const notification = (await c.req.json()) as Notification;
+		let raw: unknown;
+		try {
+			raw = await c.req.json();
+		} catch {
+			throw new AppError(Kind.BadRequest, "Invalid JSON body");
+		}
+		const parsed = notificationSchema.safeParse(raw);
+		if (!parsed.success) {
+			throw new AppError(Kind.BadRequest, "Invalid notification body");
+		}
+		const notification = parsed.data;
 		const auctionId = notification.auctionId ? Number(notification.auctionId) : 0;
 		const solutionIds = parseSolutionIds(notification.solutionId);
 

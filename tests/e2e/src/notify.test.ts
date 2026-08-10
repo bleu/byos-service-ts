@@ -101,4 +101,54 @@ describe("/notify", () => {
 		});
 		expect(status).toBe(200);
 	});
+
+	// Ported from Rust upstream_notification_shapes_deserialize: every shape
+	// the driver actually sends must be accepted; unknown kinds and flattened
+	// kind-specific fields must not 4xx/5xx the driver.
+	it("upstream notification shapes are accepted", async () => {
+		const bodies = [
+			{ auctionId: "1234", solutionId: 1, kind: "settlementStarted" },
+			{
+				auctionId: "1234",
+				solutionId: [1, 2],
+				kind: "success",
+				transaction: `0x${"ab".repeat(32)}`,
+			},
+			// Pre-solution kinds fire with no ids at all.
+			{ kind: "deserializationError", reason: "bad json" },
+			{ auctionId: null, solutionId: null, kind: "timeout" },
+			// Flattened kind-specific fields must be tolerated, not rejected.
+			{ auctionId: "9", solutionId: 3, kind: "simulationFailed", block: 123, succeededOnce: false },
+			// Kinds added upstream after this code shipped.
+			{ auctionId: "9", solutionId: 3, kind: "someFutureKind" },
+		];
+		for (const body of bodies) {
+			const { status } = await postNotify(body);
+			expect(status, `must accept ${JSON.stringify(body)}`).toBe(200);
+		}
+	});
+
+	it("malformed transaction hash is rejected and nothing is persisted", async () => {
+		const id = await seedActiveProposal(303n);
+		await store.recordSolution(app.ctx.db, 103, 1, id);
+		const proposal = (await store.get(app.ctx.db, id))!;
+		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
+
+		const { status } = await postNotify({
+			auctionId: "103",
+			solutionId: 1,
+			kind: "success",
+			transaction: "0xzz",
+		});
+		expect(status).toBe(400);
+
+		const updated = await store.get(app.ctx.db, id);
+		expect(updated?.status).toBe("executing");
+		expect(updated?.settlementTxHash).toBeNull();
+	});
+
+	it("missing kind is rejected", async () => {
+		const { status } = await postNotify({ auctionId: "999", solutionId: 1 });
+		expect(status).toBe(400);
+	});
 });
