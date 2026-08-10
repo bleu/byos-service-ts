@@ -177,7 +177,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 				case "notOwner":
 					throw new AppError(Kind.ProposalNotFound);
 				case "staleTransition":
-					throw new AppError(Kind.ProposalNotCancellable);
+					throw new AppError(
+						Kind.ProposalNotCancellable,
+						cancelDescription(result.actual),
+					);
 				default:
 					throw new AppError(Kind.Internal);
 			}
@@ -188,4 +191,11 @@ export function createPublicRoutes(config: RoutesConfig) {
 	});
 
 	return app;
+}
+
+function cancelDescription(actualStatus: string): string {
+	if (actualStatus === "executing") {
+		return "Proposal is currently part of an auction settlement and cannot be cancelled. If the settlement does not succeed, the proposal will be released.";
+	}
+	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }

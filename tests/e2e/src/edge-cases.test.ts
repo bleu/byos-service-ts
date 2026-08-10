@@ -1,3 +1,4 @@
+import * as store from "@byos/byos/src/infra/storage.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	cancelSignatureHeader,
@@ -17,7 +18,7 @@ afterAll(async () => {
 });
 
 describe("cancel edge cases", () => {
-	it("double cancel returns 409", async () => {
+	it("double cancel returns 409 with terminal status description", async () => {
 		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 301n });
 		const { id } = await response.json();
 
@@ -35,6 +36,30 @@ describe("cancel edge cases", () => {
 			headers: { "X-Signature": sig },
 		});
 		expect(resp2.status).toBe(409);
+		const body = await resp2.json();
+		expect(body.kind).toBe("ProposalNotCancellable");
+		expect(body.description).toContain("cancelled");
+	});
+
+	it("cancel of executing proposal returns 409 with auction message", async () => {
+		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 303n });
+		const { id } = await response.json();
+
+		// Drive proposal to executing: submitted → active → executing
+		const submitted = (await store.get(app.ctx.db, id))!;
+		await store.transition(app.ctx.db, submitted, "active");
+		const active = (await store.get(app.ctx.db, id))!;
+		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
+
+		const sig = await cancelSignatureHeader(id);
+		const resp = await app.publicApp.request(`/proposal/${id}`, {
+			method: "DELETE",
+			headers: { "X-Signature": sig },
+		});
+		expect(resp.status).toBe(409);
+		const body = await resp.json();
+		expect(body.kind).toBe("ProposalNotCancellable");
+		expect(body.description).toContain("auction settlement");
 	});
 
 	it("cancel unknown id returns 404", async () => {
