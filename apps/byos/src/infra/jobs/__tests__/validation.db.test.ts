@@ -88,6 +88,22 @@ describe("validation tick", () => {
 		expect(enqueued).toContain(id);
 	});
 
+	it("queues no non-settlement penalty for a timeout release", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ orderUid: `0x${"a6".repeat(56)}` }));
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.transition(ctx.db, active as Proposal, "executing");
+
+		await runValidationTick(tickConfig([], 0));
+
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
+		// Only /notify's driver-confirmed abandonment may queue the 0.1 c_l
+		// charge; the timeout backstop must not.
+		const pending = await store.pendingPenalties(ctx.db);
+		expect(pending.some((p) => p.proposalId === id)).toBe(false);
+	});
+
 	it("never touches executing proposals within the timeout", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal({ orderUid: `0x${"a3".repeat(56)}` }));
 		const submitted = await store.get(ctx.db, id);
@@ -113,6 +129,24 @@ describe("proposal validation job", () => {
 		);
 
 		expect((await store.get(ctx.db, id))?.status).toBe("active");
+	});
+
+	it("marks a proposal simFailed when the validator says so", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ orderUid: `0x${"a7".repeat(56)}` }));
+
+		const failAll = {
+			async validate() {
+				return { kind: "simFailed" } as const;
+			},
+		};
+		await runProposalValidation(
+			{ db: ctx.db, validator: failAll, onAuditEvent: () => {}, logger },
+			id,
+		);
+
+		const proposal = await store.get(ctx.db, id);
+		expect(proposal?.status).toBe("simFailed");
+		expect(proposal?.rejectionReason).toBeNull();
 	});
 
 	it("skips a proposal that left the live statuses before the job ran", async () => {
