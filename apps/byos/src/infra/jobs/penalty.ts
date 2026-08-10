@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
-import { keccak256, toHex } from "viem";
+import { type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import { nonSettlementDebit, revertDebit } from "../../domain/penalty.js";
@@ -9,6 +9,15 @@ import type { EscrowOperator } from "../blockchain/operator.js";
 import * as store from "../storage.js";
 
 const MAX_DEBIT_ATTEMPTS = 10;
+
+/**
+ * On-chain reason for a non-settlement debit: keccak of the raw order UID
+ * bytes, same as the Rust service. No settlement tx exists to cite, so the
+ * reason is the order the sub-solver won and abandoned.
+ */
+export function nonSettlementReason(orderUid: string): Hex {
+	return keccak256(orderUid as Hex);
+}
 
 export interface PenaltyWorkerConfig {
 	db: Db;
@@ -108,7 +117,7 @@ async function runNonSettlementDebits(
 
 		try {
 			const amount = nonSettlementDebit(cL);
-			const reason = keccak256(toHex(penalty.orderUid));
+			const reason = nonSettlementReason(penalty.orderUid);
 			const penaltyTxHash = await operator.debit(penalty.subSolver, amount, reason);
 
 			const auditEvent = await store.recordNonSettlementDebit(db, penalty, amount, penaltyTxHash);
