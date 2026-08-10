@@ -115,16 +115,28 @@ export class OrderbookClient implements FetchOrder {
 	private cache = new Map<string, OrderRecord>();
 	private baseUrl: string;
 
-	constructor(baseUrl: string) {
+	constructor(
+		baseUrl: string,
+		private readonly cacheCapacity: number = CACHE_CAPACITY,
+	) {
 		this.baseUrl = baseUrl.replace(/\/+$/, "");
 	}
 
 	private remember(uid: string, record: OrderRecord): void {
 		const key = uid.toLowerCase();
-		if (this.cache.size >= CACHE_CAPACITY && !this.cache.has(key)) {
+		if (this.cache.size >= this.cacheCapacity && !this.cache.has(key)) {
 			this.cache.clear();
 		}
 		this.cache.set(key, record);
+	}
+
+	/** A network failure is a transient orderbook error, not a raw fetch error. */
+	private async get(url: string): Promise<Response> {
+		try {
+			return await fetch(url);
+		} catch (e) {
+			throw { kind: "transient", message: `orderbook unreachable: ${e}` } satisfies OrderbookError;
+		}
 	}
 
 	async order(uid: string): Promise<OrderRecord> {
@@ -135,7 +147,7 @@ export class OrderbookClient implements FetchOrder {
 		const normalizedUid = uid.startsWith("0x") ? uid : `0x${uid}`;
 		const url = `${this.baseUrl}/api/v1/orders/${normalizedUid}`;
 
-		const response = await fetch(url);
+		const response = await this.get(url);
 
 		if (response.status === 404) {
 			throw { kind: "notFound" } satisfies OrderbookError;
@@ -156,7 +168,7 @@ export class OrderbookClient implements FetchOrder {
 
 	async nativePrice(token: Address): Promise<bigint> {
 		const url = `${this.baseUrl}/api/v1/token/${token}/native_price`;
-		const response = await fetch(url);
+		const response = await this.get(url);
 
 		if (response.status === 404) {
 			throw { kind: "notFound" } satisfies OrderbookError;
