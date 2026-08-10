@@ -41,7 +41,7 @@ describe("cancel edge cases", () => {
 		expect(body.description).toContain("cancelled");
 	});
 
-	it("cancel of executing proposal returns 409 with auction message", async () => {
+	it("cancel of executing proposal returns 202 with deferred status", async () => {
 		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 303n });
 		const { id } = await response.json();
 
@@ -56,10 +56,36 @@ describe("cancel edge cases", () => {
 			method: "DELETE",
 			headers: { "X-Signature": sig },
 		});
-		expect(resp.status).toBe(409);
+		expect(resp.status).toBe(202);
 		const body = await resp.json();
-		expect(body.kind).toBe("ProposalNotCancellable");
-		expect(body.description).toContain("auction settlement");
+		expect(body.status).toBe("pending");
+		expect(body.description).toContain("settlement");
+	});
+
+	it("deferred cancel transitions to cancelled when settlement is abandoned", async () => {
+		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 304n });
+		const { id } = await response.json();
+
+		// Drive to executing
+		const submitted = (await store.get(app.ctx.db, id))!;
+		await store.transition(app.ctx.db, submitted, "active");
+		const active = (await store.get(app.ctx.db, id))!;
+		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
+
+		// Cancel while executing (deferred)
+		const sig = await cancelSignatureHeader(id);
+		const cancelResp = await app.publicApp.request(`/proposal/${id}`, {
+			method: "DELETE",
+			headers: { "X-Signature": sig },
+		});
+		expect(cancelResp.status).toBe(202);
+
+		// Settlement abandoned → should transition to cancelled, not active
+		const executing = (await store.get(app.ctx.db, id))!;
+		await store.applySettlementOutcome(app.ctx.db, executing, { kind: "abandoned" });
+
+		const final = await store.get(app.ctx.db, id);
+		expect(final?.status).toBe("cancelled");
 	});
 
 	it("cancel unknown id returns 404", async () => {

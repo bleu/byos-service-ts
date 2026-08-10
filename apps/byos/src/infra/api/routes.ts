@@ -96,6 +96,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			trampoline: null,
 			settlementTxHash: null,
 			penaltyTxHash: null,
+			pendingCancellation: false,
 		});
 
 		config.onAuditEvent(auditEvent);
@@ -187,6 +188,18 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(result.auditEvent);
+
+		if ("deferred" in result) {
+			return c.json(
+				{
+					status: "pending",
+					description:
+						"Cancellation will take effect when the current settlement completes.",
+				},
+				202,
+			);
+		}
+
 		return c.body(null, 204);
 	});
 
@@ -194,8 +207,5 @@ export function createPublicRoutes(config: RoutesConfig) {
 }
 
 function cancelDescription(actualStatus: string): string {
-	if (actualStatus === "executing") {
-		return "Proposal is currently part of an auction settlement and cannot be cancelled. If the settlement does not succeed, the proposal will be released.";
-	}
 	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }

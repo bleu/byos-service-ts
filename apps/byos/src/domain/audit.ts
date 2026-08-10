@@ -5,6 +5,7 @@ import type { Proposal } from "./proposal.js";
 export type AuditKind =
 	| { type: "received"; proposal: Proposal }
 	| { type: "cancelled"; proposalId: number; subSolver: Address; orderUid: string }
+	| { type: "cancellationDeferred"; proposalId: number; subSolver: Address; orderUid: string }
 	| {
 			type: "statusChanged";
 			proposalId: number;
@@ -52,6 +53,8 @@ export function eventType(kind: AuditKind): string {
 			return "received";
 		case "cancelled":
 			return "cancelled";
+		case "cancellationDeferred":
+			return "cancellation_deferred";
 		case "penalized":
 			return "penalized";
 		case "nonSettlementDebited":
@@ -98,6 +101,8 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 				signature: kind.proposal.signature,
 			};
 		case "cancelled":
+			return {};
+		case "cancellationDeferred":
 			return {};
 		case "statusChanged":
 			return {

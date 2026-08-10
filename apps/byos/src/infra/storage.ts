@@ -54,6 +54,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		trampoline: (row.trampoline as Address) ?? null,
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
 		penaltyTxHash: (row.penaltyTxHash as Hex) ?? null,
+		pendingCancellation: row.pendingCancellation,
 	};
 }
 
@@ -241,7 +242,7 @@ export async function cancel(
 	db: Db,
 	id: number,
 	subSolver: Address,
-): Promise<{ auditEvent: AuditEvent } | StoreError> {
+): Promise<{ auditEvent: AuditEvent } | { deferred: true; auditEvent: AuditEvent } | StoreError> {
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
 			.select({
@@ -259,31 +260,51 @@ export async function cancel(
 		if (locked.subSolver.toLowerCase() !== subSolver.toLowerCase()) {
 			return { kind: "notOwner" as const, id, owner: subSolver };
 		}
-		if (locked.status !== "submitted" && locked.status !== "active") {
-			return {
-				kind: "staleTransition" as const,
-				id,
-				expected: "submitted|active",
-				actual: locked.status,
+
+		if (locked.status === "submitted" || locked.status === "active") {
+			await tx
+				.update(proposals)
+				.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
+				.where(eq(proposals.id, id));
+
+			const auditEvent: AuditEvent = {
+				occurredAt: new Date(),
+				kind: {
+					type: "cancelled",
+					proposalId: id,
+					subSolver,
+					orderUid: locked.orderUid,
+				},
 			};
+
+			return { auditEvent };
 		}
 
-		await tx
-			.update(proposals)
-			.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
-			.where(eq(proposals.id, id));
+		if (locked.status === "executing") {
+			await tx
+				.update(proposals)
+				.set({ pendingCancellation: true })
+				.where(eq(proposals.id, id));
 
-		const auditEvent: AuditEvent = {
-			occurredAt: new Date(),
-			kind: {
-				type: "cancelled",
-				proposalId: id,
-				subSolver,
-				orderUid: locked.orderUid,
-			},
+			const auditEvent: AuditEvent = {
+				occurredAt: new Date(),
+				kind: {
+					type: "cancellationDeferred",
+					proposalId: id,
+					subSolver,
+					orderUid: locked.orderUid,
+				},
+			};
+
+			return { deferred: true, auditEvent };
+		}
+
+		return {
+			kind: "staleTransition" as const,
+			id,
+			expected: "submitted|active|executing",
+			actual: locked.status,
 		};
-
-		return { auditEvent };
 	});
 
 	return result;
@@ -296,7 +317,10 @@ export async function applySettlementOutcome(
 ): Promise<{ auditEvent: AuditEvent | null; insertedPenalty: boolean } | StoreError> {
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
-			.select({ status: proposals.status })
+			.select({
+				status: proposals.status,
+				pendingCancellation: proposals.pendingCancellation,
+			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
 			.for("update");
@@ -328,7 +352,7 @@ export async function applySettlementOutcome(
 				break;
 			case "abandoned":
 				if (from === "executing") {
-					toStatus = "active";
+					toStatus = locked.pendingCancellation ? "cancelled" : "active";
 					insertPenalty = true;
 				}
 				break;
@@ -342,6 +366,7 @@ export async function applySettlementOutcome(
 			.update(proposals)
 			.set({
 				status: toStatus,
+				pendingCancellation: false,
 				...(txHash ? { settlementTxHash: txHash.toLowerCase() } : {}),
 				statusChangedAt: sql`now()`,
 			})
@@ -417,34 +442,63 @@ export async function recordPenalty(
 }
 
 export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Promise<AuditEvent[]> {
-	const rows = await db
+	const staleCondition = and(
+		eq(proposals.status, "executing"),
+		sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
+	);
+
+	const released = await db
 		.update(proposals)
 		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
-		.where(
-			and(
-				eq(proposals.status, "executing"),
-				sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
-			),
-		)
+		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
 		.returning({
 			id: proposals.id,
 			subSolver: proposals.subSolver,
 			orderUid: proposals.orderUid,
 		});
 
-	return rows.map((r) => ({
-		occurredAt: new Date(),
-		kind: {
-			type: "statusChanged" as const,
-			proposalId: r.id,
-			subSolver: r.subSolver as Address,
-			orderUid: r.orderUid,
-			from: "executing" as Status,
-			to: "active" as Status,
-			rejectionReason: null,
-			settlementTxHash: null,
-		},
-	}));
+	const cancelled = await db
+		.update(proposals)
+		.set({
+			status: "cancelled" as Status,
+			pendingCancellation: false,
+			statusChangedAt: sql`now()`,
+		})
+		.where(and(staleCondition, eq(proposals.pendingCancellation, true)))
+		.returning({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		});
+
+	return [
+		...released.map((r) => ({
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged" as const,
+				proposalId: r.id,
+				subSolver: r.subSolver as Address,
+				orderUid: r.orderUid,
+				from: "executing" as Status,
+				to: "active" as Status,
+				rejectionReason: null,
+				settlementTxHash: null,
+			},
+		})),
+		...cancelled.map((r) => ({
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged" as const,
+				proposalId: r.id,
+				subSolver: r.subSolver as Address,
+				orderUid: r.orderUid,
+				from: "executing" as Status,
+				to: "cancelled" as Status,
+				rejectionReason: null,
+				settlementTxHash: null,
+			},
+		})),
+	];
 }
 
 const SWEEPABLE_STATUSES: Status[] = ["rejected", "simFailed", "expired", "cancelled"];
@@ -646,6 +700,7 @@ export async function solutionProposals(
 			trampoline: proposals.trampoline,
 			settlementTxHash: proposals.settlementTxHash,
 			penaltyTxHash: proposals.penaltyTxHash,
+			pendingCancellation: proposals.pendingCancellation,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

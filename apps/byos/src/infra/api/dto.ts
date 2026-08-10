@@ -60,6 +60,7 @@ export function proposalToGetResponse(p: Proposal) {
 		...(p.rejectionReason ? { rejectionReason: p.rejectionReason } : {}),
 		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
 		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
+		...(p.pendingCancellation ? { pendingCancellation: true } : {}),
 	};
 }
 

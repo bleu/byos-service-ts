@@ -18,6 +18,7 @@ export async function insertAuditEvent(db: Db, event: AuditEvent): Promise<void>
 			orderUid = kind.proposal.orderUid.toLowerCase();
 			break;
 		case "cancelled":
+		case "cancellationDeferred":
 		case "driverNotified":
 			proposalId = kind.proposalId;
 			subSolver = kind.subSolver.toLowerCase();

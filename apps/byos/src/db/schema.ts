@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
 	bigint,
 	bigserial,
+	boolean,
 	index,
 	jsonb,
 	pgTable,
@@ -34,6 +35,7 @@ export const proposals = pgTable(
 		trampoline: text(),
 		settlementTxHash: text("settlement_tx_hash"),
 		penaltyTxHash: text("penalty_tx_hash"),
+		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
 	},

@@ -1,0 +1,1 @@
+ALTER TABLE "proposals" ADD COLUMN "pending_cancellation" boolean DEFAULT false NOT NULL;
