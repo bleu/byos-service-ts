@@ -5,6 +5,11 @@ import type { Proposal } from "./proposal.js";
 export type AuditKind =
 	| { type: "received"; proposal: Proposal }
 	| { type: "cancelled"; proposalId: number; subSolver: Address; orderUid: string }
+	// Emitted when a sub-solver requests cancellation while the proposal is in
+	// an active auction settlement ("executing"). The proposal stays executing
+	// but its pendingCancellation flag is set. When the settlement resolves:
+	//   - abandoned → proposal transitions to "cancelled" (not back to "active")
+	//   - succeeded/reverted → flag is cleared (proposal is terminal anyway)
 	| { type: "cancellationDeferred"; proposalId: number; subSolver: Address; orderUid: string }
 	| {
 			type: "statusChanged";
