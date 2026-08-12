@@ -26,6 +26,7 @@ export interface Proposal {
 	trampoline: Address | null;
 	settlementTxHash: Hex | null;
 	penaltyTxHash: Hex | null;
+	pendingCancellation: boolean;
 }
 
 /** What the driver reported about a settlement. */

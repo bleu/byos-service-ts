@@ -44,6 +44,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 		...overrides,
 	};
 }
@@ -301,6 +302,94 @@ describe("proposal store", () => {
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
 		expect(found[0]?.id).toBe(id);
+	});
+
+	it("defers cancellation of executing proposal", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const result = await store.cancel(ctx.db, id, sub.subSolver);
+		expect("deferred" in result).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("executing");
+		expect(updated?.pendingCancellation).toBe(true);
+	});
+
+	it("deferred cancel is idempotent", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const r1 = await store.cancel(ctx.db, id, sub.subSolver);
+		const r2 = await store.cancel(ctx.db, id, sub.subSolver);
+		expect("deferred" in r1).toBe(true);
+		expect("deferred" in r2).toBe(true);
+	});
+
+	it("abandoned with pendingCancellation transitions to cancelled", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		// Set pending cancellation
+		await store.cancel(ctx.db, id, sub.subSolver);
+
+		const executing = (await store.get(ctx.db, id))!;
+		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
+		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("cancelled");
+		expect(updated?.pendingCancellation).toBe(false);
+	});
+
+	it("abandoned without pendingCancellation transitions to active", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const executing = (await store.get(ctx.db, id))!;
+		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
+		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("active");
+		expect(updated?.pendingCancellation).toBe(false);
+	});
+
+	it("succeeded clears pendingCancellation", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		await store.cancel(ctx.db, id, sub.subSolver);
+
+		const executing = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, executing, {
+			kind: "succeeded",
+			txHash: "0xabc123" as Hex,
+		});
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settled");
+		expect(updated?.pendingCancellation).toBe(false);
 	});
 });
 

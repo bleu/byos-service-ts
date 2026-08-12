@@ -108,6 +108,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			trampoline: null,
 			settlementTxHash: null,
 			penaltyTxHash: null,
+			pendingCancellation: false,
 		});
 
 		config.onAuditEvent(auditEvent);
@@ -193,15 +194,30 @@ export function createPublicRoutes(config: RoutesConfig) {
 				case "notOwner":
 					throw new AppError(Kind.ProposalNotFound);
 				case "staleTransition":
-					throw new AppError(Kind.ProposalNotCancellable);
+					throw new AppError(Kind.ProposalNotCancellable, cancelDescription(result.actual));
 				default:
 					throw new AppError(Kind.Internal);
 			}
 		}
 
 		config.onAuditEvent(result.auditEvent);
+
+		if ("deferred" in result) {
+			return c.json(
+				{
+					status: "pending",
+					description: "Cancellation will take effect when the current settlement completes.",
+				},
+				202,
+			);
+		}
+
 		return c.body(null, 204);
 	});
 
 	return app;
+}
+
+function cancelDescription(actualStatus: string): string {
+	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }
