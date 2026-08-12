@@ -47,6 +47,7 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
+		logger,
 	});
 
 	// 5. Start HTTP servers

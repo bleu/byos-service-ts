@@ -1,3 +1,4 @@
+import type { AuditEvent } from "@byos/byos/src/domain/audit.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
 import type { ContractInteraction } from "@byos/common";
@@ -50,12 +51,13 @@ export interface TestApp {
 	internalApp: Hono;
 	ctx: TestContext;
 	gasPriceRef: { value: bigint };
+	auditEvents: AuditEvent[];
 }
 
 export async function createTestApp(): Promise<TestApp> {
 	const ctx = await createTestDb();
 	const gasPriceRef = { value: 10_000_000_000n }; // 10 gwei default
-	const auditEvents: unknown[] = [];
+	const auditEvents: AuditEvent[] = [];
 
 	const appCtx = {
 		db: ctx.db,
@@ -63,13 +65,13 @@ export async function createTestApp(): Promise<TestApp> {
 		trampolineFactory: TRAMPOLINE_FACTORY,
 		maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
 		gasPriceRef,
-		onAuditEvent: (e: unknown) => auditEvents.push(e),
+		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
 	};
 
 	const publicApp = createPublicApp(appCtx);
 	const internalApp = createInternalApp(appCtx);
 
-	return { publicApp, internalApp, ctx, gasPriceRef };
+	return { publicApp, internalApp, ctx, gasPriceRef, auditEvents };
 }
 
 // --- Proposal Helpers ---
