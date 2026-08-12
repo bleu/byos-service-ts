@@ -294,7 +294,6 @@ describe("proposal store", () => {
 		expect(queued).toHaveLength(1);
 	});
 
-
 	it("records and retrieves solutions", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
 		await store.recordSolution(ctx.db, 100, 1, id);
