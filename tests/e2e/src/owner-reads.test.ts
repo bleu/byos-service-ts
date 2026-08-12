@@ -93,9 +93,9 @@ describe("owner-scoped reads", () => {
 		);
 	});
 
-	// A settlement is in flight — the owner cannot pull the proposal out
-	// from under it.
-	it("cancel of an executing proposal returns conflict", async () => {
+	// A settlement is in flight — the cancellation is deferred until the
+	// settlement outcome lands.
+	it("cancel of an executing proposal is deferred", async () => {
 		const id = await seedProposal(app.ctx.db, {
 			orderUid: `0x${"d2".repeat(56)}`,
 			subSolver: SIGNER_ACCOUNT.address,
@@ -107,10 +107,11 @@ describe("owner-scoped reads", () => {
 			method: "DELETE",
 			headers: { "X-Signature": sig },
 		});
-		expect(resp.status).toBe(409);
+		expect(resp.status).toBe(202);
 
 		const stored = await store.get(app.ctx.db, id);
 		expect(stored?.status, "the in-flight settlement keeps its proposal").toBe("executing");
+		expect(stored?.pendingCancellation, "cancellation is deferred").toBe(true);
 	});
 
 	it("list by order uid is scoped to the caller", async () => {
