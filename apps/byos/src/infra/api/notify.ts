@@ -51,7 +51,12 @@ export function createNotifyRoute(config: NotifyConfig) {
 			throw new AppError(Kind.BadRequest, "Invalid notification body");
 		}
 		const notification = parsed.data;
-		const auctionId = notification.auctionId ? Number(notification.auctionId) : 0;
+		// Strict integer parse, mirroring Rust's parse::<i64>().ok(): a
+		// malformed id means unattributable, not an error.
+		const auctionId =
+			notification.auctionId && /^\d+$/.test(notification.auctionId)
+				? Number(notification.auctionId)
+				: 0;
 		const solutionIds = parseSolutionIds(notification.solutionId);
 
 		// Attribute proposals via solutions table
