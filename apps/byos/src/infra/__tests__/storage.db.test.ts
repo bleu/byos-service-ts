@@ -1,7 +1,10 @@
+import type { Status } from "@byos/common";
+import { sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TestContext } from "../../../test/setup.js";
 import { createTestDb } from "../../../test/setup.js";
+import { solutions } from "../../db/schema.js";
 import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 
@@ -291,18 +294,6 @@ describe("proposal store", () => {
 		expect(queued).toHaveLength(1);
 	});
 
-	it("sweeps dropped proposals", async () => {
-		const { id } = await store.insert(ctx.db, sampleProposal());
-		const p = (await store.get(ctx.db, id))!;
-		await store.transition(ctx.db, p, "rejected");
-
-		// Sweep with 0 seconds — should catch everything
-		const swept = await store.sweepDropped(ctx.db, 0);
-		expect(swept).toBeGreaterThanOrEqual(1);
-
-		const gone = await store.get(ctx.db, id);
-		expect(gone).toBeNull();
-	});
 
 	it("records and retrieves solutions", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
@@ -311,5 +302,98 @@ describe("proposal store", () => {
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
 		expect(found[0]?.id).toBe(id);
+	});
+});
+
+// A sweep is table-wide, so these get a database each rather than sharing the
+// one above — otherwise a row another test planted decides the counts.
+describe("retention sweep", () => {
+	const WINDOW_SECS = 3600;
+	let sweep: TestContext;
+
+	beforeEach(async () => {
+		sweep = await createTestDb();
+	});
+
+	afterEach(async () => {
+		await sweep.cleanup();
+	});
+
+	async function backdate(id: number, secs: number): Promise<void> {
+		await sweep.db.execute(
+			sql`UPDATE proposals SET status_changed_at = now() - make_interval(secs => ${secs}) WHERE id = ${id}`,
+		);
+	}
+
+	const uid = (seed: number) => `0x${seed.toString(16).padStart(2, "0").repeat(56)}`;
+
+	/** Insert a proposal already past the retention window. */
+	async function insertAged(status: Status, seed: number): Promise<number> {
+		const { id } = await store.insert(sweep.db, sampleProposal({ status, orderUid: uid(seed) }));
+		await backdate(id, WINDOW_SECS * 2);
+		return id;
+	}
+
+	// Every dropped-tier status, not just one: asserting only `rejected` means a
+	// status quietly dropped from the sweep set leaves the table growing without
+	// failing anything.
+	it("deletes every dropped-tier status past the window", async () => {
+		const dropped: Status[] = ["rejected", "simFailed", "expired", "cancelled"];
+		const ids: Array<[Status, number]> = [];
+		for (const [i, status] of dropped.entries()) {
+			ids.push([status, await insertAged(status, i + 1)]);
+		}
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(4);
+
+		for (const [status, id] of ids) {
+			expect(await store.get(sweep.db, id), `a swept ${status} proposal reads as gone`).toBeNull();
+		}
+	});
+
+	it("spares fresh dropped rows", async () => {
+		const { id } = await store.insert(sweep.db, sampleProposal({ status: "rejected" }));
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(0);
+		expect(await store.get(sweep.db, id)).not.toBeNull();
+	});
+
+	// The money states are never swept, and neither are live or in-flight rows.
+	it("never touches money states or live proposals", async () => {
+		const spared: Status[] = [
+			"settled",
+			"settleFailed",
+			"penalized",
+			"executing",
+			"active",
+			"submitted",
+		];
+		const ids: Array<[Status, number]> = [];
+		for (const [i, status] of spared.entries()) {
+			ids.push([status, await insertAged(status, i + 1)]);
+		}
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(0);
+
+		for (const [status, id] of ids) {
+			expect(await store.get(sweep.db, id), `${status} must survive the sweep`).not.toBeNull();
+		}
+	});
+
+	// A swept proposal takes its auction-participation rows with it; settled
+	// proposals are never swept, so theirs survive.
+	it("cascades solutions rows of dropped proposals only", async () => {
+		const dropped = await insertAged("cancelled", 1);
+		const settled = await insertAged("settled", 2);
+		await store.recordSolution(sweep.db, 1, 1, dropped);
+		await store.recordSolution(sweep.db, 2, 1, settled);
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(1);
+
+		const remaining = await sweep.db
+			.select({ proposalId: solutions.proposalId })
+			.from(solutions)
+			.orderBy(solutions.proposalId);
+		expect(remaining).toEqual([{ proposalId: settled }]);
 	});
 });
