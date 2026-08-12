@@ -6,6 +6,12 @@ Instructions for AI agents working on this codebase.
 
 This repo is the **TypeScript rewrite** of the Rust BYOS service ([`bleu/byos-service`](https://github.com/bleu/byos-service)). BYOS (Bring Your Own Solver) is a CoW Protocol solver that sources routes from permissionless external sub-solvers. It is a migration — the Rust codebase is the reference implementation. Domain logic, behavior, and API contracts must match. The full migration plan lives in [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
+## Shared specification
+
+The normative BYOS specification lives in `docs/shared/` (a Git submodule pointing to [bleu/byos-docs](https://github.com/bleu/byos-docs)). Domain vocabulary is in `docs/shared/glossary.md`. The design document is `docs/shared/design-document.md`. The wire contract is defined in [bleu/byos-service](https://github.com/bleu/byos-service) at `crates/byos/openapi.yml`.
+
+**Rule**: ADRs in this repo record *why* a decision was made. They do not restate *what is true* — the specification does that. Each domain ADR carries a `Spec:` line citing the relevant section. If an ADR and the specification disagree, the specification is correct.
+
 ## Repo structure
 
 ```
@@ -16,7 +22,7 @@ apps/subsolver/         Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
 tests/e2e/              End-to-end tests
 docs/adr/               Architecture decision records
-docs/reference/         CoW protocol background (slashing, auctions, CIPs)
+docs/shared/            Shared BYOS specification (submodule → bleu/byos-docs)
 apps/byos/openapi.yml   Proposal API spec
 docker-compose.yml      Dev Postgres + Redis
 ```

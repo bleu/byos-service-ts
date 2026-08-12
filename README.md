@@ -118,7 +118,7 @@ The service runs three BullMQ background jobs:
 - [`AGENTS.md`](AGENTS.md) — Agent/contributor guidelines, conventions, how to port
 - [`docs/adr/`](docs/adr/) — Architecture decision records
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — Migration plan from Rust
-- [`docs/reference/`](docs/reference/) — CoW Protocol background
+- [`docs/shared/`](docs/shared/) — Shared BYOS specification (submodule)
 - [`apps/byos/openapi.yml`](apps/byos/openapi.yml) — Proposal API specification
 
 ## Related repositories
