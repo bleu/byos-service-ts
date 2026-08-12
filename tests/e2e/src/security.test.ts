@@ -1,4 +1,5 @@
 import { createInternalApp } from "@byos/byos/src/infra/api/index.js";
+import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb } from "@byos/byos/test/setup.js";
 import { signCancellation } from "@byos/common";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import {
 	DOMAIN,
 	MAX_PROPOSAL_LIFETIME_SECS,
 	OTHER_SIGN_FN,
+	seedProposal,
 	signAndSubmitProposal,
 	type TestApp,
 	TRAMPOLINE_FACTORY,
@@ -39,6 +41,11 @@ describe("listener isolation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({}),
 		});
+		expect(resp.status).toBe(404);
+	});
+
+	it("GET /proposals/by-sub-solver is not reachable on internal listener", async () => {
+		const resp = await app.internalApp.request("/proposals/by-sub-solver");
 		expect(resp.status).toBe(404);
 	});
 });
@@ -93,6 +100,93 @@ describe("bearer token enforcement", () => {
 				}),
 			});
 			expect(authedResp.status).toBe(200);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	// Ported from the Rust bearer tests (byos infra/api/mod.rs + notify.rs).
+	it("bearer edge cases: wrong token, case-changed token, case-insensitive scheme, open healthz", async () => {
+		const ctx = await createTestDb();
+		try {
+			const authedApp = createInternalApp({
+				db: ctx.db,
+				chainId: CHAIN_ID,
+				trampolineFactory: TRAMPOLINE_FACTORY,
+				maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
+				gasPriceRef: { value: 10_000_000_000n },
+				solveBearerToken: "driver-secret",
+				onAuditEvent: () => {},
+			});
+			const auction = JSON.stringify({
+				id: "1",
+				orders: [],
+				tokens: {},
+				effectiveGasPrice: "10000000000",
+				deadline: "2099-01-01T00:00:00Z",
+			});
+			const solve = (authorization: string) =>
+				authedApp.request("/solve", {
+					method: "POST",
+					headers: { "Content-Type": "application/json", Authorization: authorization },
+					body: auction,
+				});
+
+			const wrong = await solve("Bearer not-the-secret");
+			expect(wrong.status).toBe(401);
+			// RFC 7235: a 401 names the expected auth scheme.
+			expect(wrong.headers.get("WWW-Authenticate")).toBe("Bearer");
+
+			// The scheme is case-insensitive; the token itself is not.
+			expect((await solve("bearer driver-secret")).status).toBe(200);
+			expect((await solve("Bearer DRIVER-SECRET")).status).toBe(401);
+
+			// /healthz stays open for probes.
+			expect((await authedApp.request("/healthz")).status).toBe(200);
+		} finally {
+			await ctx.cleanup();
+		}
+	});
+
+	// /notify mutates proposal state, so it must sit inside the same bearer
+	// guard as /solve — a refactor that moved the route outside the guarded
+	// sub-router must fail here.
+	it("/notify sits behind the bearer guard", async () => {
+		const ctx = await createTestDb();
+		try {
+			const authedApp = createInternalApp({
+				db: ctx.db,
+				chainId: CHAIN_ID,
+				trampolineFactory: TRAMPOLINE_FACTORY,
+				maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
+				gasPriceRef: { value: 10_000_000_000n },
+				solveBearerToken: "driver-secret",
+				onAuditEvent: () => {},
+			});
+			const id = await seedProposal(ctx.db, { orderUid: `0x${"aa".repeat(56)}` });
+			await store.recordSolution(ctx.db, 77, 1, id);
+			const notification = JSON.stringify({
+				auctionId: "77",
+				solutionId: 1,
+				kind: "settlementStarted",
+			});
+			const notify = (headers: Record<string, string>) =>
+				authedApp.request("/notify", {
+					method: "POST",
+					headers: { "Content-Type": "application/json", ...headers },
+					body: notification,
+				});
+
+			// Without the token: rejected, and no transition happened.
+			expect((await notify({})).status).toBe(401);
+			expect(
+				(await store.get(ctx.db, id))?.status,
+				"an unauthorized notification must not move the proposal",
+			).toBe("active");
+
+			// With it: accepted, and the transition lands.
+			expect((await notify({ Authorization: "Bearer driver-secret" })).status).toBe(200);
+			expect((await store.get(ctx.db, id))?.status).toBe("executing");
 		} finally {
 			await ctx.cleanup();
 		}
