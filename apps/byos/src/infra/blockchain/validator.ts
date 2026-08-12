@@ -99,8 +99,10 @@ export class SimulationValidator implements ValidateProposal {
 		const scaled = scaledToFill(candidate, record.order.partiallyFillable);
 		if (!scaled) return "unprofitable";
 
+		// Score must strictly exceed minScore: a breakeven proposal (gas equal
+		// to surplus, score 0) is rejected at the default minScore of 0.
 		const score = scoreProposal(scaled, surplusPrice);
-		if (score === null || score < this.minScore) return "unprofitable";
+		if (score === null || score <= this.minScore) return "unprofitable";
 
 		return "ok";
 	}

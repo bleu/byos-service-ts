@@ -14,13 +14,14 @@ import {
 } from "../../domain/scoring.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
-import type {
-	Auction,
-	AuctionOrder,
-	Fulfillment,
-	Solution,
-	SolutionInteraction,
-	SolveResponse,
+import { AppError, Kind } from "./error.js";
+import {
+	type AuctionOrder,
+	auctionSchema,
+	type Fulfillment,
+	type Solution,
+	type SolutionInteraction,
+	type SolveResponse,
 } from "./types.js";
 
 export interface SolveConfig {
@@ -29,21 +30,50 @@ export interface SolveConfig {
 	onAuditEvent: (event: AuditEvent) => void;
 }
 
+const U64_MAX = 2n ** 64n - 1n;
+
 export function createSolveRoute(config: SolveConfig) {
 	const app = new Hono();
 
 	app.post("/solve", async (c) => {
-		const auction = (await c.req.json()) as Auction;
-
-		// Publish gas price
+		let raw: unknown;
 		try {
-			config.gasPriceRef.value = BigInt(auction.effectiveGasPrice);
+			raw = await c.req.json();
+		} catch {
+			throw new AppError(Kind.BadRequest, "Invalid JSON body");
+		}
+		const parsed = auctionSchema.safeParse(raw);
+		if (!parsed.success) {
+			throw new AppError(Kind.BadRequest, "Invalid auction body");
+		}
+		const auction = parsed.data;
+
+		// Publish the auction's gas price for the escrow validator. A price
+		// past u64::MAX is scored with but never published: the validator's
+		// threshold multiplies it unbounded, which would push every sub-solver
+		// under the escrow minimum and reject the live book — and Rejected is
+		// terminal.
+		let auctionGasPrice = config.gasPriceRef.value;
+		try {
+			auctionGasPrice = BigInt(auction.effectiveGasPrice);
+			if (auctionGasPrice <= U64_MAX) {
+				config.gasPriceRef.value = auctionGasPrice;
+			}
 		} catch {
 			// If it doesn't parse, leave previous value
 		}
 
-		// Parse auction ID
-		const auctionId = auction.id ? Number(auction.id) : 0;
+		// Auctions without an id are quote requests: never settled, so there
+		// is nothing to attribute. A present id must be a decimal integer —
+		// Rust rejects anything else at deserialization.
+		let auctionId: number | null = null;
+		if (auction.id) {
+			const parsed = Number(auction.id);
+			if (!/^\d+$/.test(auction.id) || !Number.isSafeInteger(parsed)) {
+				throw new AppError(Kind.BadRequest, "Invalid auction id");
+			}
+			auctionId = parsed;
+		}
 
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
@@ -87,11 +117,22 @@ export function createSolveRoute(config: SolveConfig) {
 				// Skip expired
 				if (proposal.validUntil <= now) continue;
 
-				const gasCost = effectiveGas(proposal.gasUsed) * config.gasPriceRef.value;
+				// Skip proposals whose fill exceeds the remaining auction amount
+				if (order.partiallyFillable) {
+					const exceeds =
+						order.kind === "sell"
+							? proposal.sellAmount > BigInt(order.sellAmount)
+							: proposal.buyAmount > BigInt(order.buyAmount);
+					if (exceeds) continue;
+				}
+
+				// Score with the auction's own price, published or not (an
+				// oversized price then legitimately produces no bids this round).
+				const gasCost = effectiveGas(proposal.gasUsed) * auctionGasPrice;
 
 				const candidate: Candidate = {
-					orderSell: BigInt(order.fullSellAmount),
-					orderBuy: BigInt(order.fullBuyAmount),
+					orderSell: BigInt(order.sellAmount),
+					orderBuy: BigInt(order.buyAmount),
 					proposalSell: proposal.sellAmount,
 					proposalBuy: proposal.buyAmount,
 					isSellOrder: order.kind === "sell",
@@ -120,11 +161,14 @@ export function createSolveRoute(config: SolveConfig) {
 			const solution = buildSolution(solutionId, order, bestProposal, bestGasUsed, bestCut);
 			if (!solution) continue;
 
-			// Record attribution
-			try {
-				await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id);
-			} catch {
-				continue; // Skip solution if attribution fails
+			// Record attribution before bidding: if we cannot record it, we
+			// do not bid it. Quote requests skip the write entirely.
+			if (auctionId !== null) {
+				try {
+					await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id);
+				} catch {
+					continue;
+				}
 			}
 
 			solutions.push(solution);

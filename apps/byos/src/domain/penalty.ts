@@ -1,4 +1,10 @@
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
+
+/** The chain edge the penalty loop drives — Rust's DebitEscrow trait. */
+export interface DebitEscrow {
+	settlementCost(txHash: Hex): Promise<bigint>;
+	debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
+}
 
 /** Reverted settlement debit = settlement's on-chain cost + c_l. */
 export function revertDebit(settlementCost: bigint, cL: bigint): bigint {

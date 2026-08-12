@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	cancelSignatureHeader,
 	createTestApp,
+	OTHER_SIGNER_ACCOUNT,
 	otherReadAuthHeader,
 	readAuthHeader,
 	signAndSubmitProposal,
@@ -104,6 +105,42 @@ describe("proposal lifecycle", () => {
 		});
 		const body = await getResp.json();
 		expect(body.status).toBe("cancelled");
+	});
+
+	it("unknown orderUid returns empty list", async () => {
+		const sig = await readAuthHeader();
+		const resp = await app.publicApp.request("/proposals/0x" + "ff".repeat(56), {
+			headers: { "X-Signature": sig },
+		});
+		expect(resp.status).toBe(200);
+		const body = await resp.json();
+		expect(body.proposals).toHaveLength(0);
+	});
+
+	it("listing by sub-solver is identity-scoped", async () => {
+		// Submit a proposal with SIGNER
+		await signAndSubmitProposal(app.publicApp, { nonce: 401n });
+
+		// List as SIGNER → should find it
+		const signerSig = await readAuthHeader();
+		const signerResp = await app.publicApp.request("/proposals/by-sub-solver", {
+			headers: { "X-Signature": signerSig },
+		});
+		const signerBody = await signerResp.json();
+		expect(signerBody.proposals.length).toBeGreaterThanOrEqual(1);
+
+		// List as OTHER_SIGNER → should not find it
+		const otherSig = await otherReadAuthHeader();
+		const otherResp = await app.publicApp.request("/proposals/by-sub-solver", {
+			headers: { "X-Signature": otherSig },
+		});
+		const otherBody = await otherResp.json();
+		// Other signer should not see SIGNER's proposals
+		// (they might have their own, but shouldn't see ours)
+		const ourProposals = otherBody.proposals.filter(
+			(p: any) => p.subSolver?.toLowerCase() !== OTHER_SIGNER_ACCOUNT.address.toLowerCase(),
+		);
+		expect(ourProposals).toHaveLength(0);
 	});
 
 	it("healthz returns 200", async () => {

@@ -1,13 +1,13 @@
 import { z } from "zod";
 
+const addressPattern = /^0x[0-9a-fA-F]{40}$/;
+
 export const configSchema = z.object({
 	// Required
 	DATABASE_URL: z.string(),
 	REDIS_URL: z.string().default("redis://localhost:6379"),
 	CHAIN_ID: z.coerce.number(),
-	TRAMPOLINE_FACTORY: z
-		.string()
-		.regex(/^0x[0-9a-fA-F]{40}$/, "Must be a valid 0x-prefixed address"),
+	TRAMPOLINE_FACTORY: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
 
 	// Listeners
 	PUBLIC_ADDR_PORT: z.coerce.number().default(9585),
@@ -19,8 +19,14 @@ export const configSchema = z.object({
 	// Chain connectivity (all required together when RPC_URL is set)
 	RPC_URL: z.string().optional(),
 	ORDERBOOK_URL: z.string().optional(),
-	ESCROW_ADDRESS: z.string().optional(),
-	SETTLEMENT_ADDRESS: z.string().optional(),
+	ESCROW_ADDRESS: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
+	SETTLEMENT_ADDRESS: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
 	MIN_COLLATERAL: z.string().optional(),
 	DEFAULT_GAS_PRICE: z.string().optional(),
 
@@ -43,13 +49,57 @@ export const configSchema = z.object({
 		.default("false"),
 });
 
+/**
+ * Mirrors the Rust CLI's requires_all: a half-configured chain connection
+ * must fail startup, not boot with an undefined escrow address or a
+ * collateral floor of zero.
+ */
+const RPC_COMPANIONS = [
+	"ORDERBOOK_URL",
+	"ESCROW_ADDRESS",
+	"SETTLEMENT_ADDRESS",
+	"MIN_COLLATERAL",
+	"DEFAULT_GAS_PRICE",
+] as const;
+
+const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
+	if (cfg.RPC_URL) {
+		for (const key of RPC_COMPANIONS) {
+			if (!cfg[key]) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: [key],
+					message: "required when RPC_URL is set",
+				});
+			}
+		}
+	} else if (cfg.OPERATOR_PRIVATE_KEY) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["OPERATOR_PRIVATE_KEY"],
+			message: "requires RPC_URL",
+		});
+	}
+});
+
 export type Config = z.infer<typeof configSchema>;
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
-	const result = configSchema.safeParse(env);
+	const result = refinedConfigSchema.safeParse(env);
 	if (!result.success) {
 		const errors = result.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n");
 		throw new Error(`Invalid configuration:\n${errors}`);
 	}
 	return result.data;
+}
+
+export function safeConfigForLogging(config: Config): Record<string, unknown> {
+	return {
+		...config,
+		DATABASE_URL: "<redacted>",
+		REDIS_URL: "<redacted>",
+		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
+		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
+		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
+	};
 }

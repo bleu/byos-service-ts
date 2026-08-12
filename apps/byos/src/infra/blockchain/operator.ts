@@ -1,6 +1,5 @@
 import { EscrowAbi } from "@byos/common";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import type { DebitError } from "./types.js";
 
 const CONFIRMATION_TIMEOUT = 120_000; // 120 seconds
 
@@ -40,6 +39,3 @@ export class EscrowOperator {
 		return hash;
 	}
 }
-
-/** Error type for debit operations. */
-export type { DebitError };

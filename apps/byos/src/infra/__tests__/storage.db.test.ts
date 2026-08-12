@@ -1,7 +1,10 @@
+import type { Status } from "@byos/common";
+import { sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TestContext } from "../../../test/setup.js";
 import { createTestDb } from "../../../test/setup.js";
+import { solutions } from "../../db/schema.js";
 import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 
@@ -41,6 +44,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 		...overrides,
 	};
 }
@@ -61,6 +65,22 @@ describe("proposal store", () => {
 	it("returns null for non-existent id", async () => {
 		const proposal = await store.get(ctx.db, 999999);
 		expect(proposal).toBeNull();
+	});
+
+	// An id the column cannot hold names no row, so it is a miss rather than a
+	// driver error the handler would surface as a 500.
+	const unstorable = [1.5, 1e30, Number.MAX_SAFE_INTEGER + 2, Number.NaN, Number.POSITIVE_INFINITY];
+
+	it.each(unstorable)("reads an unstorable id (%p) as a miss", async (id) => {
+		await expect(store.get(ctx.db, id)).resolves.toBeNull();
+
+		const owned = await store.getForOwner(ctx.db, id, sampleProposal().subSolver);
+		expect("kind" in owned && owned.kind === "notFound").toBe(true);
+	});
+
+	it.each(unstorable)("cancelling an unstorable id (%p) is a miss", async (id) => {
+		const result = await store.cancel(ctx.db, id, sampleProposal().subSolver);
+		expect("kind" in result && result.kind === "notFound").toBe(true);
 	});
 
 	it("transitions status with CAS", async () => {
@@ -122,6 +142,36 @@ describe("proposal store", () => {
 		}
 	});
 
+	it("verdict on a terminal proposal is stale", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "settled" }));
+
+		const result = await store.resolveVerdict(ctx.db, id, { kind: "accept", simulation: null });
+
+		expect("kind" in result && result.kind === "staleTransition").toBe(true);
+		if ("kind" in result && result.kind === "staleTransition") {
+			expect(result.actual).toBe("settled");
+		}
+		expect((await store.get(ctx.db, id))?.status).toBe("settled");
+	});
+
+	it("cancellation during validation wins over the verdict", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		expect("auditEvent" in (await store.cancel(ctx.db, id, sub.subSolver))).toBe(true);
+
+		// The verdict the validator was already computing when the cancel landed.
+		const result = await store.resolveVerdict(ctx.db, id, { kind: "accept", simulation: null });
+
+		// The variant matters, not just the failure: a plain "is it an error"
+		// would also pass on a connection blip, which proves nothing about the
+		// compare-and-swap.
+		expect("kind" in result && result.kind === "staleTransition").toBe(true);
+		if ("kind" in result && result.kind === "staleTransition") {
+			expect(result.actual).toBe("cancelled");
+		}
+		expect((await store.get(ctx.db, id))?.status).toBe("cancelled");
+	});
+
 	it("cancels a submitted proposal", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
@@ -180,17 +230,69 @@ describe("proposal store", () => {
 		expect(updated?.status).toBe("executing");
 	});
 
-	it("sweeps dropped proposals", async () => {
-		const { id } = await store.insert(ctx.db, sampleProposal());
-		const p = (await store.get(ctx.db, id))!;
-		await store.transition(ctx.db, p, "rejected");
+	// The outcome is decided from the locked row, not the caller's copy. /notify
+	// reads the proposal, then applies an outcome; in between, another
+	// notification or the executing timeout can move the row.
+	it("judges a settlement outcome against the committed status", async () => {
+		const txHash = `0x${"33".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const stale = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, stale, "executing");
 
-		// Sweep with 0 seconds — should catch everything
-		const swept = await store.sweepDropped(ctx.db, 0);
-		expect(swept).toBeGreaterThanOrEqual(1);
+		// `stale` still reads "active"; the row is already "executing".
+		const result = await store.applySettlementOutcome(ctx.db, stale, {
+			kind: "reverted",
+			txHash,
+		});
 
-		const gone = await store.get(ctx.db, id);
-		expect(gone).toBeNull();
+		expect("auditEvent" in result).toBe(true);
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settleFailed");
+		expect(updated?.settlementTxHash).toBe(txHash);
+	});
+
+	// Requiring "executing" here would forfeit the debit whenever
+	// settlementStarted never landed — driver never sent it, its write failed,
+	// or the two notifications arrived out of order.
+	it("charges a revert that arrives without a preceding settlementStarted", async () => {
+		const txHash = `0x${"44".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, {
+			kind: "reverted",
+			txHash,
+		});
+
+		expect("auditEvent" in result).toBe(true);
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settleFailed");
+		// The penalty loop prices the debit off this tx.
+		expect(updated?.settlementTxHash).toBe(txHash);
+	});
+
+	it("ignores an outcome illegal from the committed status", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "cancelled" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "started" });
+
+		// Not an error: the timeout backstop and re-simulation reconcile it.
+		expect("auditEvent" in result && result.auditEvent).toBeNull();
+		expect((await store.get(ctx.db, id))?.status).toBe("cancelled");
+	});
+
+	it("queues the non-settlement charge when an executing settlement is abandoned", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
+		const proposal = (await store.get(ctx.db, id))!;
+
+		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "abandoned" });
+
+		expect("insertedPenalty" in result && result.insertedPenalty).toBe(true);
+		// Back in the pool and still competing, with the charge queued separately.
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
+		const queued = (await store.pendingPenalties(ctx.db)).filter((p) => p.proposalId === id);
+		expect(queued).toHaveLength(1);
 	});
 
 	it("records and retrieves solutions", async () => {
@@ -200,5 +302,186 @@ describe("proposal store", () => {
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
 		expect(found[0]?.id).toBe(id);
+	});
+
+	it("defers cancellation of executing proposal", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const result = await store.cancel(ctx.db, id, sub.subSolver);
+		expect("deferred" in result).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("executing");
+		expect(updated?.pendingCancellation).toBe(true);
+	});
+
+	it("deferred cancel is idempotent", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const r1 = await store.cancel(ctx.db, id, sub.subSolver);
+		const r2 = await store.cancel(ctx.db, id, sub.subSolver);
+		expect("deferred" in r1).toBe(true);
+		expect("deferred" in r2).toBe(true);
+	});
+
+	it("abandoned with pendingCancellation transitions to cancelled", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		// Set pending cancellation
+		await store.cancel(ctx.db, id, sub.subSolver);
+
+		const executing = (await store.get(ctx.db, id))!;
+		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
+		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("cancelled");
+		expect(updated?.pendingCancellation).toBe(false);
+	});
+
+	it("abandoned without pendingCancellation transitions to active", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		const executing = (await store.get(ctx.db, id))!;
+		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
+		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("active");
+		expect(updated?.pendingCancellation).toBe(false);
+	});
+
+	it("succeeded clears pendingCancellation", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		const p = (await store.get(ctx.db, id))!;
+		await store.transition(ctx.db, p, "active");
+		const active = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
+
+		await store.cancel(ctx.db, id, sub.subSolver);
+
+		const executing = (await store.get(ctx.db, id))!;
+		await store.applySettlementOutcome(ctx.db, executing, {
+			kind: "succeeded",
+			txHash: "0xabc123" as Hex,
+		});
+
+		const updated = await store.get(ctx.db, id);
+		expect(updated?.status).toBe("settled");
+		expect(updated?.pendingCancellation).toBe(false);
+	});
+});
+
+// A sweep is table-wide, so these get a database each rather than sharing the
+// one above — otherwise a row another test planted decides the counts.
+describe("retention sweep", () => {
+	const WINDOW_SECS = 3600;
+	let sweep: TestContext;
+
+	beforeEach(async () => {
+		sweep = await createTestDb();
+	});
+
+	afterEach(async () => {
+		await sweep.cleanup();
+	});
+
+	async function backdate(id: number, secs: number): Promise<void> {
+		await sweep.db.execute(
+			sql`UPDATE proposals SET status_changed_at = now() - make_interval(secs => ${secs}) WHERE id = ${id}`,
+		);
+	}
+
+	const uid = (seed: number) => `0x${seed.toString(16).padStart(2, "0").repeat(56)}`;
+
+	/** Insert a proposal already past the retention window. */
+	async function insertAged(status: Status, seed: number): Promise<number> {
+		const { id } = await store.insert(sweep.db, sampleProposal({ status, orderUid: uid(seed) }));
+		await backdate(id, WINDOW_SECS * 2);
+		return id;
+	}
+
+	// Every dropped-tier status, not just one: asserting only `rejected` means a
+	// status quietly dropped from the sweep set leaves the table growing without
+	// failing anything.
+	it("deletes every dropped-tier status past the window", async () => {
+		const dropped: Status[] = ["rejected", "simFailed", "expired", "cancelled"];
+		const ids: Array<[Status, number]> = [];
+		for (const [i, status] of dropped.entries()) {
+			ids.push([status, await insertAged(status, i + 1)]);
+		}
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(4);
+
+		for (const [status, id] of ids) {
+			expect(await store.get(sweep.db, id), `a swept ${status} proposal reads as gone`).toBeNull();
+		}
+	});
+
+	it("spares fresh dropped rows", async () => {
+		const { id } = await store.insert(sweep.db, sampleProposal({ status: "rejected" }));
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(0);
+		expect(await store.get(sweep.db, id)).not.toBeNull();
+	});
+
+	// The money states are never swept, and neither are live or in-flight rows.
+	it("never touches money states or live proposals", async () => {
+		const spared: Status[] = [
+			"settled",
+			"settleFailed",
+			"penalized",
+			"executing",
+			"active",
+			"submitted",
+		];
+		const ids: Array<[Status, number]> = [];
+		for (const [i, status] of spared.entries()) {
+			ids.push([status, await insertAged(status, i + 1)]);
+		}
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(0);
+
+		for (const [status, id] of ids) {
+			expect(await store.get(sweep.db, id), `${status} must survive the sweep`).not.toBeNull();
+		}
+	});
+
+	// A swept proposal takes its auction-participation rows with it; settled
+	// proposals are never swept, so theirs survive.
+	it("cascades solutions rows of dropped proposals only", async () => {
+		const dropped = await insertAged("cancelled", 1);
+		const settled = await insertAged("settled", 2);
+		await store.recordSolution(sweep.db, 1, 1, dropped);
+		await store.recordSolution(sweep.db, 2, 1, settled);
+
+		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(1);
+
+		const remaining = await sweep.db
+			.select({ proposalId: solutions.proposalId })
+			.from(solutions)
+			.orderBy(solutions.proposalId);
+		expect(remaining).toEqual([{ proposalId: settled }]);
 	});
 });

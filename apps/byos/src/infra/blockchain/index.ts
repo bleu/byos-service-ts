@@ -6,5 +6,4 @@ export {
 	type SimulationParams,
 	type SimulationResult,
 } from "./simulation.js";
-export type { DebitError } from "./types.js";
 export { ProposalValidator, SimulationValidator } from "./validator.js";

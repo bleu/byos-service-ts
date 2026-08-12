@@ -13,12 +13,15 @@ import type { Verdict } from "../domain/validator.js";
 export type StoreError =
 	| { kind: "notFound"; id: number }
 	| { kind: "notOwner"; id: number; owner: Address }
-	| { kind: "staleTransition"; id: number; expected: string; actual: string }
+	// `actual` is the status the row was found in. A compare-and-swap that
+	// affected no rows never learns it, so it is null there rather than a
+	// stand-in string a reader could mistake for a real status.
+	| { kind: "staleTransition"; id: number; expected: string; actual: string | null }
 	| { kind: "database"; cause: unknown }
 	| { kind: "corruptRow"; table: string; column: string; detail: string };
 
 export function shouldRetry(error: StoreError): boolean {
-	return error.kind !== "corruptRow";
+	return error.kind === "database";
 }
 
 // --- Row Codec ---
@@ -54,6 +57,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		trampoline: (row.trampoline as Address) ?? null,
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
 		penaltyTxHash: (row.penaltyTxHash as Hex) ?? null,
+		pendingCancellation: row.pendingCancellation,
 	};
 }
 
@@ -63,6 +67,18 @@ function tryRowToProposal(row: ProposalRow): Proposal | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Whether the `id` column can hold this value.
+ *
+ * Ids reach the store from the sequence, always in range, and from the URL
+ * path, which is whatever `Number()` made of it. Sending a fraction or a value
+ * past the column's range to Postgres raises a driver error, and the handler
+ * turns that into a 500 for what is really a miss.
+ */
+function isStorableId(id: number): boolean {
+	return Number.isSafeInteger(id) && id >= 0;
 }
 
 function interactionsToJson(interactions: Proposal["interactions"]) {
@@ -132,7 +148,7 @@ export async function transition(
 			kind: "staleTransition",
 			id: proposal.id,
 			expected: proposal.status,
-			actual: "unknown",
+			actual: null,
 		};
 	}
 
@@ -174,6 +190,14 @@ export async function resolveVerdict(
 			return { kind: "notFound" as const, id };
 		}
 
+		// Decided under the lock, not from the caller's snapshot: a cancellation
+		// that landed while the validator was simulating must win, or the verdict
+		// resurrects a proposal its owner already withdrew.
+		const from = locked.status as Status;
+		if (from !== "submitted" && from !== "active") {
+			return { kind: "staleTransition" as const, id, expected: "submitted|active", actual: from };
+		}
+
 		let toStatus: Status;
 		let rejectionReason: RejectionReason | null = null;
 		let gasUsed: number | null = null;
@@ -200,7 +224,7 @@ export async function resolveVerdict(
 				break;
 		}
 
-		const statusChanged = locked.status !== toStatus;
+		const statusChanged = from !== toStatus;
 
 		await tx
 			.update(proposals)
@@ -223,7 +247,7 @@ export async function resolveVerdict(
 						proposalId: id,
 						subSolver: locked.subSolver as Address,
 						orderUid: locked.orderUid,
-						from: locked.status as Status,
+						from,
 						to: toStatus,
 						rejectionReason,
 						settlementTxHash: null,
@@ -241,7 +265,11 @@ export async function cancel(
 	db: Db,
 	id: number,
 	subSolver: Address,
-): Promise<{ auditEvent: AuditEvent } | StoreError> {
+): Promise<{ auditEvent: AuditEvent } | { deferred: true; auditEvent: AuditEvent } | StoreError> {
+	if (!isStorableId(id)) {
+		return { kind: "notFound", id };
+	}
+
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
 			.select({
@@ -259,31 +287,48 @@ export async function cancel(
 		if (locked.subSolver.toLowerCase() !== subSolver.toLowerCase()) {
 			return { kind: "notOwner" as const, id, owner: subSolver };
 		}
-		if (locked.status !== "submitted" && locked.status !== "active") {
-			return {
-				kind: "staleTransition" as const,
-				id,
-				expected: "submitted|active",
-				actual: locked.status,
+
+		if (locked.status === "submitted" || locked.status === "active") {
+			await tx
+				.update(proposals)
+				.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
+				.where(eq(proposals.id, id));
+
+			const auditEvent: AuditEvent = {
+				occurredAt: new Date(),
+				kind: {
+					type: "cancelled",
+					proposalId: id,
+					subSolver,
+					orderUid: locked.orderUid,
+				},
 			};
+
+			return { auditEvent };
 		}
 
-		await tx
-			.update(proposals)
-			.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
-			.where(eq(proposals.id, id));
+		if (locked.status === "executing") {
+			await tx.update(proposals).set({ pendingCancellation: true }).where(eq(proposals.id, id));
 
-		const auditEvent: AuditEvent = {
-			occurredAt: new Date(),
-			kind: {
-				type: "cancelled",
-				proposalId: id,
-				subSolver,
-				orderUid: locked.orderUid,
-			},
+			const auditEvent: AuditEvent = {
+				occurredAt: new Date(),
+				kind: {
+					type: "cancellationDeferred",
+					proposalId: id,
+					subSolver,
+					orderUid: locked.orderUid,
+				},
+			};
+
+			return { deferred: true, auditEvent };
+		}
+
+		return {
+			kind: "staleTransition" as const,
+			id,
+			expected: "submitted|active|executing",
+			actual: locked.status,
 		};
-
-		return { auditEvent };
 	});
 
 	return result;
@@ -296,7 +341,10 @@ export async function applySettlementOutcome(
 ): Promise<{ auditEvent: AuditEvent | null; insertedPenalty: boolean } | StoreError> {
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
-			.select({ status: proposals.status })
+			.select({
+				status: proposals.status,
+				pendingCancellation: proposals.pendingCancellation,
+			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
 			.for("update");
@@ -328,7 +376,7 @@ export async function applySettlementOutcome(
 				break;
 			case "abandoned":
 				if (from === "executing") {
-					toStatus = "active";
+					toStatus = locked.pendingCancellation ? "cancelled" : "active";
 					insertPenalty = true;
 				}
 				break;
@@ -342,6 +390,7 @@ export async function applySettlementOutcome(
 			.update(proposals)
 			.set({
 				status: toStatus,
+				pendingCancellation: false,
 				...(txHash ? { settlementTxHash: txHash.toLowerCase() } : {}),
 				statusChangedAt: sql`now()`,
 			})
@@ -396,7 +445,7 @@ export async function recordPenalty(
 			kind: "staleTransition",
 			id: proposal.id,
 			expected: "settleFailed",
-			actual: "unknown",
+			actual: null,
 		};
 	}
 
@@ -417,34 +466,63 @@ export async function recordPenalty(
 }
 
 export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Promise<AuditEvent[]> {
-	const rows = await db
+	const staleCondition = and(
+		eq(proposals.status, "executing"),
+		sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
+	);
+
+	const released = await db
 		.update(proposals)
 		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
-		.where(
-			and(
-				eq(proposals.status, "executing"),
-				sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
-			),
-		)
+		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
 		.returning({
 			id: proposals.id,
 			subSolver: proposals.subSolver,
 			orderUid: proposals.orderUid,
 		});
 
-	return rows.map((r) => ({
-		occurredAt: new Date(),
-		kind: {
-			type: "statusChanged" as const,
-			proposalId: r.id,
-			subSolver: r.subSolver as Address,
-			orderUid: r.orderUid,
-			from: "executing" as Status,
-			to: "active" as Status,
-			rejectionReason: null,
-			settlementTxHash: null,
-		},
-	}));
+	const cancelled = await db
+		.update(proposals)
+		.set({
+			status: "cancelled" as Status,
+			pendingCancellation: false,
+			statusChangedAt: sql`now()`,
+		})
+		.where(and(staleCondition, eq(proposals.pendingCancellation, true)))
+		.returning({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		});
+
+	return [
+		...released.map((r) => ({
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged" as const,
+				proposalId: r.id,
+				subSolver: r.subSolver as Address,
+				orderUid: r.orderUid,
+				from: "executing" as Status,
+				to: "active" as Status,
+				rejectionReason: null,
+				settlementTxHash: null,
+			},
+		})),
+		...cancelled.map((r) => ({
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged" as const,
+				proposalId: r.id,
+				subSolver: r.subSolver as Address,
+				orderUid: r.orderUid,
+				from: "executing" as Status,
+				to: "cancelled" as Status,
+				rejectionReason: null,
+				settlementTxHash: null,
+			},
+		})),
+	];
 }
 
 const SWEEPABLE_STATUSES: Status[] = ["rejected", "simFailed", "expired", "cancelled"];
@@ -513,6 +591,7 @@ export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Pro
 // --- Reads ---
 
 export async function get(db: Db, id: number): Promise<Proposal | null> {
+	if (!isStorableId(id)) return null;
 	const [row] = await db.select().from(proposals).where(eq(proposals.id, id));
 	if (!row) return null;
 	return rowToProposal(row);
@@ -523,6 +602,10 @@ export async function getForOwner(
 	id: number,
 	subSolver: Address,
 ): Promise<Proposal | StoreError> {
+	if (!isStorableId(id)) {
+		return { kind: "notFound", id };
+	}
+
 	const [row] = await db
 		.select()
 		.from(proposals)
@@ -646,6 +729,7 @@ export async function solutionProposals(
 			trampoline: proposals.trampoline,
 			settlementTxHash: proposals.settlementTxHash,
 			penaltyTxHash: proposals.penaltyTxHash,
+			pendingCancellation: proposals.pendingCancellation,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

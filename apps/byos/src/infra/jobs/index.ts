@@ -7,6 +7,7 @@ export function createRedisConnection(url: string): Redis {
 
 export interface Queues {
 	validation: Queue;
+	validateProposal: Queue;
 	retention: Queue;
 	penalty: Queue;
 	audit: Queue;
@@ -15,6 +16,7 @@ export interface Queues {
 export function createQueues(connection: Redis): Queues {
 	return {
 		validation: new Queue("byos:validation", { connection }),
+		validateProposal: new Queue("byos:validate-proposal", { connection }),
 		retention: new Queue("byos:retention", { connection }),
 		penalty: new Queue("byos:penalty", { connection }),
 		audit: new Queue("byos:audit", { connection }),

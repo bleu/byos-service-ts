@@ -37,10 +37,22 @@ export function createPublicRoutes(config: RoutesConfig) {
 		const rawBody = await c.req.json();
 		const parseResult = createProposalRequestSchema.safeParse(rawBody);
 		if (!parseResult.success) {
-			throw new AppError(Kind.BadRequest, "Invalid request body");
+			// Per-field description, as Rust's edge parsers report.
+			const path = parseResult.error.issues[0]?.path.join(".");
+			throw new AppError(Kind.BadRequest, path ? `invalid ${path}` : "Malformed request");
 		}
 
 		const body = parseResult.data;
+
+		// The schema pins the hex grammar; the shape of a signature (exactly
+		// 65 bytes) is its own failure kind, as in Rust's Signature::try_from.
+		const signatureDigits = body.signature.startsWith("0x")
+			? body.signature.length - 2
+			: body.signature.length;
+		if (signatureDigits !== 130) {
+			throw new AppError(Kind.InvalidSignature);
+		}
+
 		let parsed: ReturnType<typeof parseCreateProposalRequest>;
 		try {
 			parsed = parseCreateProposalRequest(body);
@@ -96,6 +108,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			trampoline: null,
 			settlementTxHash: null,
 			penaltyTxHash: null,
+			pendingCancellation: false,
 		});
 
 		config.onAuditEvent(auditEvent);
@@ -104,8 +117,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 	// GET /proposal/:id — Get single proposal (owner-scoped)
 	app.get("/proposal/:id", async (c) => {
+		// Not just NaN: Number("1.5") and Number("1e30") both parse, then fail in
+		// the driver as a 500 for what is a malformed id.
 		const id = Number(c.req.param("id"));
-		if (Number.isNaN(id)) {
+		if (!Number.isSafeInteger(id) || id < 0) {
 			throw new AppError(Kind.BadRequest, "Invalid proposal id");
 		}
 
@@ -126,7 +141,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		return c.json(proposalToGetResponse(result));
 	});
 
-	// GET /proposals/:orderUid — List by order UID (owner-scoped)
+	// GET /proposals/by-sub-solver — List by sub-solver (owner-scoped)
 	app.get("/proposals/by-sub-solver", async (c) => {
 		const sig = extractSignature(c);
 		let reader: Address;
@@ -140,6 +155,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		return c.json(proposalToListResponse(proposals));
 	});
 
+	// GET /proposals/:orderUid — List by order UID (owner-scoped)
 	app.get("/proposals/:orderUid", async (c) => {
 		const orderUid = c.req.param("orderUid");
 		const sig = extractSignature(c);
@@ -156,8 +172,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 	// DELETE /proposal/:id — Cancel proposal
 	app.delete("/proposal/:id", async (c) => {
+		// Not just NaN: Number("1.5") and Number("1e30") both parse, then fail in
+		// the driver as a 500 for what is a malformed id.
 		const id = Number(c.req.param("id"));
-		if (Number.isNaN(id)) {
+		if (!Number.isSafeInteger(id) || id < 0) {
 			throw new AppError(Kind.BadRequest, "Invalid proposal id");
 		}
 
@@ -176,15 +194,31 @@ export function createPublicRoutes(config: RoutesConfig) {
 				case "notOwner":
 					throw new AppError(Kind.ProposalNotFound);
 				case "staleTransition":
-					throw new AppError(Kind.ProposalNotCancellable);
+					throw new AppError(Kind.ProposalNotCancellable, cancelDescription(result.actual));
 				default:
 					throw new AppError(Kind.Internal);
 			}
 		}
 
 		config.onAuditEvent(result.auditEvent);
+
+		if ("deferred" in result) {
+			return c.json(
+				{
+					status: "pending",
+					description: "Cancellation will take effect when the current settlement completes.",
+				},
+				202,
+			);
+		}
+
 		return c.body(null, 204);
 	});
 
 	return app;
+}
+
+function cancelDescription(actualStatus: string | null): string {
+	if (!actualStatus) return "Proposal cannot be cancelled from its current status.";
+	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }
