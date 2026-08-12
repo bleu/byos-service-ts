@@ -29,15 +29,25 @@ export interface SolveConfig {
 	onAuditEvent: (event: AuditEvent) => void;
 }
 
+const U64_MAX = 2n ** 64n - 1n;
+
 export function createSolveRoute(config: SolveConfig) {
 	const app = new Hono();
 
 	app.post("/solve", async (c) => {
 		const auction = (await c.req.json()) as Auction;
 
-		// Publish gas price
+		// Publish the auction's gas price for the escrow validator. A price
+		// past u64::MAX is scored with but never published: the validator's
+		// threshold multiplies it unbounded, which would push every sub-solver
+		// under the escrow minimum and reject the live book — and Rejected is
+		// terminal.
+		let auctionGasPrice = config.gasPriceRef.value;
 		try {
-			config.gasPriceRef.value = BigInt(auction.effectiveGasPrice);
+			auctionGasPrice = BigInt(auction.effectiveGasPrice);
+			if (auctionGasPrice <= U64_MAX) {
+				config.gasPriceRef.value = auctionGasPrice;
+			}
 		} catch {
 			// If it doesn't parse, leave previous value
 		}
@@ -96,7 +106,9 @@ export function createSolveRoute(config: SolveConfig) {
 					if (exceeds) continue;
 				}
 
-				const gasCost = effectiveGas(proposal.gasUsed) * config.gasPriceRef.value;
+				// Score with the auction's own price, published or not (an
+				// oversized price then legitimately produces no bids this round).
+				const gasCost = effectiveGas(proposal.gasUsed) * auctionGasPrice;
 
 				const candidate: Candidate = {
 					orderSell: BigInt(order.sellAmount),

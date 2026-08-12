@@ -46,6 +46,12 @@ describe("/solve", () => {
 		expect(app.gasPriceRef.value).toBe(42_000_000_000n);
 	});
 
+	it("a gas price that does not fit u64 leaves the previous one in place", async () => {
+		await postSolve(emptyAuction({ effectiveGasPrice: "42000000000" }));
+		await postSolve(emptyAuction({ effectiveGasPrice: (2n ** 64n).toString() }));
+		expect(app.gasPriceRef.value).toBe(42_000_000_000n);
+	});
+
 	it("returns solution for active proposal with gasUsed", async () => {
 		// Submit a proposal with significant surplus (buy much more than order minimum)
 		// Proposal: sell 1e18, buy 2e18 (surplus = 2e18 - 1e18 = 1e18 buy tokens)
