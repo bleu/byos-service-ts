@@ -127,6 +127,20 @@ describe("/solve", () => {
 		expect(solution.gas).toBeGreaterThan(0);
 	});
 
+	it("malformed auction body returns 400", async () => {
+		const { status } = await postSolve({ ...emptyAuction(), orders: "nope" } as never);
+		expect(status).toBe(400);
+	});
+
+	it("invalid JSON returns 400", async () => {
+		const resp = await app.internalApp.request("/solve", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: "{not json",
+		});
+		expect(resp.status).toBe(400);
+	});
+
 	it("internal healthz returns 200", async () => {
 		const resp = await app.internalApp.request("/healthz");
 		expect(resp.status).toBe(200);

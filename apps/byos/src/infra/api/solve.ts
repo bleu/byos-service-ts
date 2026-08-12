@@ -14,13 +14,14 @@ import {
 } from "../../domain/scoring.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
-import type {
-	Auction,
-	AuctionOrder,
-	Fulfillment,
-	Solution,
-	SolutionInteraction,
-	SolveResponse,
+import { AppError, Kind } from "./error.js";
+import {
+	type AuctionOrder,
+	auctionSchema,
+	type Fulfillment,
+	type Solution,
+	type SolutionInteraction,
+	type SolveResponse,
 } from "./types.js";
 
 export interface SolveConfig {
@@ -35,7 +36,17 @@ export function createSolveRoute(config: SolveConfig) {
 	const app = new Hono();
 
 	app.post("/solve", async (c) => {
-		const auction = (await c.req.json()) as Auction;
+		let raw: unknown;
+		try {
+			raw = await c.req.json();
+		} catch {
+			throw new AppError(Kind.BadRequest, "Invalid JSON body");
+		}
+		const parsed = auctionSchema.safeParse(raw);
+		if (!parsed.success) {
+			throw new AppError(Kind.BadRequest, "Invalid auction body");
+		}
+		const auction = parsed.data;
 
 		// Publish the auction's gas price for the escrow validator. A price
 		// past u64::MAX is scored with but never published: the validator's
