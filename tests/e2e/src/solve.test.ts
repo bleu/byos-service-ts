@@ -167,7 +167,6 @@ describe("/solve", () => {
 		expect(status).toBe(400);
 	});
 
-
 	it("internal healthz returns 200", async () => {
 		const resp = await app.internalApp.request("/healthz");
 		expect(resp.status).toBe(200);
