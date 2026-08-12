@@ -68,6 +68,18 @@ function tryRowToProposal(row: ProposalRow): Proposal | null {
 	}
 }
 
+/**
+ * Whether the `id` column can hold this value.
+ *
+ * Ids reach the store from the sequence, always in range, and from the URL
+ * path, which is whatever `Number()` made of it. Sending a fraction or a value
+ * past the column's range to Postgres raises a driver error, and the handler
+ * turns that into a 500 for what is really a miss.
+ */
+function isStorableId(id: number): boolean {
+	return Number.isSafeInteger(id) && id >= 0;
+}
+
 function interactionsToJson(interactions: Proposal["interactions"]) {
 	return interactions.map((i) => ({
 		target: i.target.toLowerCase(),
@@ -253,6 +265,10 @@ export async function cancel(
 	id: number,
 	subSolver: Address,
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
+	if (!isStorableId(id)) {
+		return { kind: "notFound", id };
+	}
+
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
 			.select({
@@ -524,6 +540,7 @@ export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Pro
 // --- Reads ---
 
 export async function get(db: Db, id: number): Promise<Proposal | null> {
+	if (!isStorableId(id)) return null;
 	const [row] = await db.select().from(proposals).where(eq(proposals.id, id));
 	if (!row) return null;
 	return rowToProposal(row);
@@ -534,6 +551,10 @@ export async function getForOwner(
 	id: number,
 	subSolver: Address,
 ): Promise<Proposal | StoreError> {
+	if (!isStorableId(id)) {
+		return { kind: "notFound", id };
+	}
+
 	const [row] = await db
 		.select()
 		.from(proposals)

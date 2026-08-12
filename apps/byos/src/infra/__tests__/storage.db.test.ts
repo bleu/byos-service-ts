@@ -63,6 +63,22 @@ describe("proposal store", () => {
 		expect(proposal).toBeNull();
 	});
 
+	// An id the column cannot hold names no row, so it is a miss rather than a
+	// driver error the handler would surface as a 500.
+	const unstorable = [1.5, 1e30, Number.MAX_SAFE_INTEGER + 2, Number.NaN, Number.POSITIVE_INFINITY];
+
+	it.each(unstorable)("reads an unstorable id (%p) as a miss", async (id) => {
+		await expect(store.get(ctx.db, id)).resolves.toBeNull();
+
+		const owned = await store.getForOwner(ctx.db, id, sampleProposal().subSolver);
+		expect("kind" in owned && owned.kind === "notFound").toBe(true);
+	});
+
+	it.each(unstorable)("cancelling an unstorable id (%p) is a miss", async (id) => {
+		const result = await store.cancel(ctx.db, id, sampleProposal().subSolver);
+		expect("kind" in result && result.kind === "notFound").toBe(true);
+	});
+
 	it("transitions status with CAS", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
 		const proposal = (await store.get(ctx.db, id))!;
