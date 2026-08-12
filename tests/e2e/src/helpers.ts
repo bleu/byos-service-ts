@@ -1,5 +1,7 @@
 import type { AuditEvent } from "@byos/byos/src/domain/audit.js";
+import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
+import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
 import type { ContractInteraction } from "@byos/common";
 import {
@@ -127,6 +129,41 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	});
 
 	return { response, body, orderUid };
+}
+
+// --- Direct-insert seeding (the Rust tests' test_proposal fixture) ---
+
+/** Inserts a proposal directly into the store, bypassing the HTTP layer, so
+ * tests can seed any status/simulation state. Defaults mirror the Rust
+ * test_proposal fixture: sell 1_000_000, buy 990_000, far-future expiry. */
+export async function seedProposal(
+	db: TestContext["db"],
+	overrides: Partial<Omit<Proposal, "id">> & { orderUid: string },
+): Promise<number> {
+	const orderUid = overrides.orderUid.toLowerCase() as Hex;
+	const proposal: Omit<Proposal, "id"> = {
+		subSolver: "0x0101010101010101010101010101010101010101" as Address,
+		orderUidHash: keccak256(orderUid),
+		sellAmount: 1_000_000n,
+		buyAmount: 990_000n,
+		sellToken: "0x0000000000000000000000000000000000000000" as Address,
+		buyToken: "0x0000000000000000000000000000000000000000" as Address,
+		interactions: [],
+		interactionsHash: `0x${"00".repeat(32)}` as Hex,
+		validUntil: 2n ** 40n,
+		nonce: 1n,
+		signature: "0x" as Hex,
+		status: "active",
+		rejectionReason: null,
+		gasUsed: null,
+		trampoline: null,
+		settlementTxHash: null,
+		penaltyTxHash: null,
+		...overrides,
+		orderUid,
+	};
+	const { id } = await store.insert(db, proposal);
+	return id;
 }
 
 // --- Auth Helpers ---
