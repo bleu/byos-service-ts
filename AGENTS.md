@@ -17,7 +17,7 @@ packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
 tests/e2e/              End-to-end tests
 docs/adr/               Architecture decision records
 docs/reference/         CoW protocol background (slashing, auctions, CIPs)
-openapi.yml             Proposal API spec
+apps/byos/openapi.yml   Proposal API spec
 docker-compose.yml      Dev Postgres + Redis
 ```
 

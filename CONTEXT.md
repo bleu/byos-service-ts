@@ -33,7 +33,7 @@ This repo holds the off-chain half of that design: the **BYOS service** (`apps/b
 ## Components (RFP scope)
 
 1. **Solver engine** (`apps/byos`) — answers the standard CoW driver's `/solve` from the proposal store; internal `surplus - gas` pre-ranking; single best proposal per order UID; fat-Trampoline settlement crafting ([ADR-0002](docs/adr/0002-solver-engine.md)).
-2. **Proposal API** (`apps/byos`) — public HTTP, EIP-712-signed, **permissionless but collateral-gated**; `POST`/`GET`(metadata only)/`DELETE`; two-layer rate limiting ([ADR-0001](docs/adr/0001-proposal-api.md)). Specified in [`openapi.yml`](openapi.yml).
+2. **Proposal API** (`apps/byos`) — public HTTP, EIP-712-signed, **permissionless but collateral-gated**; `POST`/`GET`(metadata only)/`DELETE`; two-layer rate limiting ([ADR-0001](docs/adr/0001-proposal-api.md)). Specified in [`apps/byos/openapi.yml`](apps/byos/openapi.yml).
 3. **Background workers** (`apps/byos`) — re-simulation and expiry, Track A debits, the retention sweep, escrow-balance cache refresh, off-chain Track-B reserve tracking.
 4. **Reference sub-solver** (`apps/subsolver`) — example client and e2e-test counterpart.
 5. Plus: operational runbook + monitoring.
