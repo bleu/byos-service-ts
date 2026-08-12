@@ -51,6 +51,7 @@ function matchingProposal(overrides?: Partial<Proposal>): Proposal {
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 		...overrides,
 	};
 }

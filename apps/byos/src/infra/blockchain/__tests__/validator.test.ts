@@ -62,6 +62,7 @@ function submittedProposal(): Proposal {
 		trampoline: "0x4444444444444444444444444444444444441234",
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 	};
 }
 
