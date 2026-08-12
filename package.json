@@ -2,6 +2,7 @@
 	"name": "byos-service-ts",
 	"private": true,
 	"type": "module",
+	"packageManager": "pnpm@10.3.0",
 	"engines": {
 		"node": ">=22",
 		"pnpm": ">=10"
