@@ -31,6 +31,7 @@ function sampleProposal(): Proposal {
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 	};
 }
 

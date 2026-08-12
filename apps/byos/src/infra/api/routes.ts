@@ -218,6 +218,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 	return app;
 }
 
-function cancelDescription(actualStatus: string): string {
+function cancelDescription(actualStatus: string | null): string {
+	if (!actualStatus) return "Proposal cannot be cancelled from its current status.";
 	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }

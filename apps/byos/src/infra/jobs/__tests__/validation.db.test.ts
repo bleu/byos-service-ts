@@ -40,6 +40,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 		...overrides,
 	};
 }

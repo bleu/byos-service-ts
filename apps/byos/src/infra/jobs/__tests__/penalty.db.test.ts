@@ -48,6 +48,7 @@ function sampleProposal(): Omit<Proposal, "id"> {
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
 	};
 }
 
