@@ -122,6 +122,36 @@ describe("proposal store", () => {
 		}
 	});
 
+	it("verdict on a terminal proposal is stale", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "settled" }));
+
+		const result = await store.resolveVerdict(ctx.db, id, { kind: "accept", simulation: null });
+
+		expect("kind" in result && result.kind === "staleTransition").toBe(true);
+		if ("kind" in result && result.kind === "staleTransition") {
+			expect(result.actual).toBe("settled");
+		}
+		expect((await store.get(ctx.db, id))?.status).toBe("settled");
+	});
+
+	it("cancellation during validation wins over the verdict", async () => {
+		const sub = sampleProposal();
+		const { id } = await store.insert(ctx.db, sub);
+		expect("auditEvent" in (await store.cancel(ctx.db, id, sub.subSolver))).toBe(true);
+
+		// The verdict the validator was already computing when the cancel landed.
+		const result = await store.resolveVerdict(ctx.db, id, { kind: "accept", simulation: null });
+
+		// The variant matters, not just the failure: a plain "is it an error"
+		// would also pass on a connection blip, which proves nothing about the
+		// compare-and-swap.
+		expect("kind" in result && result.kind === "staleTransition").toBe(true);
+		if ("kind" in result && result.kind === "staleTransition") {
+			expect(result.actual).toBe("cancelled");
+		}
+		expect((await store.get(ctx.db, id))?.status).toBe("cancelled");
+	});
+
 	it("cancels a submitted proposal", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);

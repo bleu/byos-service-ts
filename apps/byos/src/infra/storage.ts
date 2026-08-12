@@ -177,6 +177,14 @@ export async function resolveVerdict(
 			return { kind: "notFound" as const, id };
 		}
 
+		// Decided under the lock, not from the caller's snapshot: a cancellation
+		// that landed while the validator was simulating must win, or the verdict
+		// resurrects a proposal its owner already withdrew.
+		const from = locked.status as Status;
+		if (from !== "submitted" && from !== "active") {
+			return { kind: "staleTransition" as const, id, expected: "submitted|active", actual: from };
+		}
+
 		let toStatus: Status;
 		let rejectionReason: RejectionReason | null = null;
 		let gasUsed: number | null = null;
@@ -203,7 +211,7 @@ export async function resolveVerdict(
 				break;
 		}
 
-		const statusChanged = locked.status !== toStatus;
+		const statusChanged = from !== toStatus;
 
 		await tx
 			.update(proposals)
@@ -226,7 +234,7 @@ export async function resolveVerdict(
 						proposalId: id,
 						subSolver: locked.subSolver as Address,
 						orderUid: locked.orderUid,
-						from: locked.status as Status,
+						from,
 						to: toStatus,
 						rejectionReason,
 						settlementTxHash: null,
