@@ -1,11 +1,10 @@
 # ADR-0008: Observability
 
 **Status:** Accepted
-**Replaces:** Rust ADR-0008 (Observability)
 
 ## Context
 
-The Rust service uses `tracing` + `tracing-subscriber` with structured JSON output and env-filter. The TypeScript service needs equivalent structured logging.
+The service needs structured logging with JSON output for production and human-readable output for local development.
 
 ## Decision
 

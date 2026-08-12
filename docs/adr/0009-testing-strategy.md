@@ -1,11 +1,10 @@
 # ADR-0009: Testing Strategy
 
 **Status:** Accepted
-**Replaces:** Rust ADR-0009 (Testing Strategy)
 
 ## Context
 
-The Rust service uses `cargo-nextest` with `#[ignore]`-gated DB tests and a multi-tier e2e strategy. The TypeScript service needs equivalent test coverage with different tooling.
+The service needs multi-tier test coverage: fast unit tests, database-backed integration tests, and end-to-end tests that exercise the full API.
 
 ## Decision
 
@@ -21,7 +20,7 @@ The Rust service uses `cargo-nextest` with `#[ignore]`-gated DB tests and a mult
 
 ### Database isolation
 
-Each DB test gets a **unique Postgres database** (`byos_test_{pid}_{timestamp}_{counter}`). This mirrors the Rust test harness:
+Each DB test gets a **unique Postgres database** (`byos_test_{pid}_{timestamp}_{counter}`):
 - No test interdependence
 - Tests can run in parallel safely
 - Stale databases older than 3 hours are swept automatically
@@ -37,7 +36,7 @@ This avoids the overhead of starting/stopping HTTP servers and manages port conf
 
 ### What's NOT tested here
 
-- Settlement mechanics on GPv2 (requires anvil + contract state — stays in the Rust e2e crate)
+- Settlement mechanics on GPv2 (requires anvil + contract state — covered by the on-chain test tier)
 - Full driver integration (requires offline-mode docker stack)
 - Escrow balance checks with real RPC (covered by the simulation validator's integration with anvil)
 

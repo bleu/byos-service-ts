@@ -1,8 +1,8 @@
-# BYOS Service (TypeScript)
+# BYOS Service
 
-A **Bring Your Own Solver** service for [CoW Protocol](https://cow.fi/) — accepts settlement proposals from permissionless external sub-solvers, validates them, and answers the CoW driver's `/solve` auction with the best route per order. TypeScript rewrite of the [Rust BYOS service](https://github.com/bleu/byos-service).
+A **Bring Your Own Solver** service for [CoW Protocol](https://cow.fi/) — accepts settlement proposals from permissionless external sub-solvers, validates them, and answers the CoW driver's `/solve` auction with the best route per order.
 
-Read [`CONTEXT.md`](CONTEXT.md) for domain language and architecture. Read [`AGENTS.md`](AGENTS.md) for contributor conventions.
+See [`docs/shared/`](docs/shared/) for the normative BYOS specification, domain glossary, and design document. Read [`CONTEXT.md`](CONTEXT.md) for this implementation's architecture. Read [`AGENTS.md`](AGENTS.md) for contributor conventions.
 
 ## Repo structure
 
@@ -115,15 +115,14 @@ The service runs three BullMQ background jobs:
 ## Documentation
 
 - [`CONTEXT.md`](CONTEXT.md) — Domain glossary, architecture, risk classes
-- [`AGENTS.md`](AGENTS.md) — Agent/contributor guidelines, conventions, how to port
+- [`AGENTS.md`](AGENTS.md) — Agent/contributor guidelines and conventions
 - [`docs/adr/`](docs/adr/) — Architecture decision records
-- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — Migration plan from Rust
-- [`docs/shared/`](docs/shared/) — Shared BYOS specification (submodule)
+- [`docs/shared/`](docs/shared/) — Shared BYOS specification (submodule → [bleu/byos-docs](https://github.com/bleu/byos-docs))
 - [`apps/byos/openapi.yml`](apps/byos/openapi.yml) — Proposal API specification
 
 ## Related repositories
 
-- [`bleu/byos-service`](https://github.com/bleu/byos-service) — Rust reference implementation
+- [`bleu/byos-docs`](https://github.com/bleu/byos-docs) — Shared BYOS specification (submodule at `docs/shared/`)
 - [`bleu/byos-contracts`](https://github.com/bleu/byos-contracts) — Escrow, Trampoline, TrampolineFactory (Foundry)
 - [`cowprotocol/services`](https://github.com/cowprotocol/services) — CoW backend (driver/autopilot)
 - [`cowdao-grants/offline-mode`](https://github.com/cowdao-grants/offline-mode) — Offline CoW stack for e2e testing

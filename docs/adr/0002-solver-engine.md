@@ -5,7 +5,7 @@ Status: proposed
 Spec: docs/shared/design-document.md#solver-engine
       https://bleu.github.io/byos-docs/design-document#solver-engine
 
-> Ported from [`bleu/cow-byos-architecture` ADR-0005](https://github.com/bleu/cow-byos-architecture/blob/main/docs/adr/0005-solver-engine.md). Still **proposed** — the open questions at the bottom are unresolved and several depend on CoW core team input. This is the ADR the `byos` crate implements; treat the open questions as the first things to settle during M2.
+> Ported from [`bleu/cow-byos-architecture` ADR-0005](https://github.com/bleu/cow-byos-architecture/blob/main/docs/adr/0005-solver-engine.md). Still **proposed** — the open questions at the bottom are unresolved and several depend on CoW core team input. This is the ADR that `apps/byos` implements; treat the open questions as the first things to settle during M2.
 
 ## Context
 

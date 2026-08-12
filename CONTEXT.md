@@ -1,8 +1,8 @@
 # BYOS Service — Project Context
 
-This is the **TypeScript rewrite** of the Rust BYOS service ([`bleu/byos-service`](https://github.com/bleu/byos-service)). BYOS (Bring Your Own Solver) is a bonded CoW solver whose proposed solutions are sourced from a permissionless set of external sub-solvers. Sub-solvers submit signed routing proposals against specific order UIDs, collateralized by an escrow balance held by BYOS. This repo holds the off-chain service; the on-chain half (Escrow, Trampoline, TrampolineFactory) lives in [`bleu/byos-contracts`](https://github.com/bleu/byos-contracts).
+BYOS (Bring Your Own Solver) is a bonded CoW solver whose proposed solutions are sourced from a permissionless set of external sub-solvers. Sub-solvers submit signed routing proposals against specific order UIDs, collateralized by an escrow balance held by BYOS. This repo holds the off-chain service; the on-chain half (Escrow, Trampoline, TrampolineFactory) lives in [`bleu/byos-contracts`](https://github.com/bleu/byos-contracts).
 
-Domain vocabulary and the normative specification are in `docs/shared/`. See `docs/shared/glossary.md` for terms and `docs/shared/design-document.md` for the spec. The wire contract this service must satisfy is in `bleu/byos-service` at `crates/byos/openapi.yml`.
+Domain vocabulary and the normative specification are in `docs/shared/` (a Git submodule → [bleu/byos-docs](https://github.com/bleu/byos-docs)). See `docs/shared/glossary.md` for terms, `docs/shared/design-document.md` for the spec, and `apps/byos/openapi.yml` for the API wire contract.
 
 ## Components
 

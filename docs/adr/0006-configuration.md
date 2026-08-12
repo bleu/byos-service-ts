@@ -1,11 +1,10 @@
 # ADR-0006: Configuration
 
 **Status:** Accepted
-**Replaces:** Rust ADR-0006 (Configuration and CLI)
 
 ## Context
 
-The Rust service uses clap CLI args with env var fallback. For the TypeScript service running in containers, CLI flags are unnecessary — environment variables are the standard.
+For a containerized service, environment variables are the standard configuration mechanism — CLI flags add unnecessary complexity.
 
 ## Decision
 
