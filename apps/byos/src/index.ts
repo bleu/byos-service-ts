@@ -76,7 +76,8 @@ async function main() {
 		? createPenaltyWorker(ctx.redis, {
 				db: ctx.db,
 				operator: ctx.operator,
-				cL: BigInt(config.MIN_COLLATERAL ?? "0"),
+				// operator implies RPC_URL, which the schema couples to MIN_COLLATERAL
+				cL: BigInt(config.MIN_COLLATERAL as string),
 				onAuditEvent: ctx.onAuditEvent,
 				logger: logger.child({ worker: "penalty" }),
 			})

@@ -85,8 +85,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		}
 		logger.info("rpc connected");
 
+		// The config schema requires these alongside RPC_URL, so the casts
+		// cannot see undefined — same guarantee clap's requires_all gives Rust.
 		const escrowAddress = config.ESCROW_ADDRESS as Address;
-		const minCollateral = BigInt(config.MIN_COLLATERAL ?? "0");
+		const minCollateral = BigInt(config.MIN_COLLATERAL as string);
 
 		// Escrow validator
 		const escrowValidator = new EscrowValidator(
@@ -97,7 +99,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		);
 
 		// Orderbook client
-		const orderbook = new OrderbookClient(config.ORDERBOOK_URL!);
+		const orderbook = new OrderbookClient(config.ORDERBOOK_URL as string);
 
 		// Simulation validator
 		const simulationValidator = new SimulationValidator(
