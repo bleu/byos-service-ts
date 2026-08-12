@@ -1,11 +1,10 @@
 # ADR-0004: pnpm Monorepo and Tooling
 
 **Status:** Accepted
-**Replaces:** Rust ADR-0004 (Cargo Workspace and Tooling)
 
 ## Context
 
-The TypeScript BYOS service is a monorepo with two runnable apps and shared packages. We need a workspace manager, build tool, linter/formatter, and test runner.
+The BYOS service is a monorepo with two runnable apps and shared packages. We need a workspace manager, build tool, linter/formatter, and test runner.
 
 ## Decision
 
@@ -38,6 +37,6 @@ Root `package.json` scripts orchestrate workspace-wide operations:
 
 ## CI
 
-Two GitHub Actions workflows mirroring the Rust repo:
+Two GitHub Actions workflows:
 - `lint.yml` — typecheck + biome + OpenAPI spec validation
 - `test.yml` — Postgres service + build + unit tests + DB tests

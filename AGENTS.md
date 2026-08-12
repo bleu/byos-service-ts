@@ -4,19 +4,24 @@ Instructions for AI agents working on this codebase.
 
 ## Project overview
 
-This repo is the **TypeScript rewrite** of the Rust BYOS service ([`bleu/byos-service`](https://github.com/bleu/byos-service)). BYOS (Bring Your Own Solver) is a CoW Protocol solver that sources routes from permissionless external sub-solvers. It is a migration — the Rust codebase is the reference implementation. Domain logic, behavior, and API contracts must match. The full migration plan lives in [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+This repo is the **BYOS service** — a CoW Protocol solver that sources routes from permissionless external sub-solvers. BYOS (Bring Your Own Solver) accepts settlement proposals, validates them against escrow collateral, and answers the CoW driver's `/solve` auction with the best route per order.
+
+## Shared specification
+
+The normative BYOS specification lives in `docs/shared/` (a Git submodule pointing to [bleu/byos-docs](https://github.com/bleu/byos-docs)). Domain vocabulary is in `docs/shared/glossary.md`. The design document is `docs/shared/design-document.md`. The API wire contract is at `apps/byos/openapi.yml`.
+
+**Rule**: ADRs in this repo record *why* a decision was made. They do not restate *what is true* — the specification does that. Each domain ADR carries a `Spec:` line citing the relevant section. If an ADR and the specification disagree, the specification is correct.
 
 ## Repo structure
 
 ```
 CONTEXT.md              Domain language and architecture map — read first
-docs/IMPLEMENTATION_PLAN.md  Migration plan, file mappings, phase order
 apps/byos/              The BYOS service (proposal API, solver engine, workers)
 apps/subsolver/         Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
 tests/e2e/              End-to-end tests
 docs/adr/               Architecture decision records
-docs/reference/         CoW protocol background (slashing, auctions, CIPs)
+docs/shared/            Shared BYOS specification (submodule → bleu/byos-docs)
 apps/byos/openapi.yml   Proposal API spec
 docker-compose.yml      Dev Postgres + Redis
 ```
@@ -24,9 +29,8 @@ docker-compose.yml      Dev Postgres + Redis
 ## Before working
 
 - Read [`CONTEXT.md`](CONTEXT.md), then the ADRs in [`docs/adr/`](docs/adr/) that touch the area you're about to work in. ADRs 0001–0003 are the domain decisions; the remainder cover engineering conventions.
-- Read [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) to understand the migration phases, file mappings, and cross-cutting patterns.
+- Read the shared specification in [`docs/shared/`](docs/shared/) for normative behavior — `design-document.md` is the source of truth.
 - If your output contradicts an existing ADR, surface it explicitly rather than silently overriding: _"Contradicts ADR-0001 (GET returns metadata only) — but worth reopening because…"_
-- The **Rust source** at `../byos-service` is the reference implementation. When porting a module, read the corresponding Rust file first (see the file mapping table in the implementation plan). Preserve behavior and edge cases — don't simplify unless the plan explicitly says to.
 - Contract interfaces (Escrow, Trampoline, EIP-712 `ProposalData`) are owned by [`bleu/byos-contracts`](https://github.com/bleu/byos-contracts) — check there before assuming a signature or event shape.
 
 ## Technology stack
@@ -68,12 +72,12 @@ docker-compose.yml      Dev Postgres + Redis
 - Native `bigint` for 256-bit values internally. Decimal strings on the wire (JSON) and in the database (TEXT columns). Zod transforms at boundaries.
 - No `any` — use `unknown` and narrow.
 - No classes except `AppError`. Prefer plain objects and functions.
-- **Prefer `@cowprotocol/cow-sdk` types** when they are identical to what we need (e.g., `OrderKind`, `SupportedChainId`, `BUY_ETH_ADDRESS`). Keep manual types when cow-sdk's version doesn't match our context (e.g., `SigningScheme` — cow-sdk uses numeric values, we need the orderbook wire format strings). See the cow-sdk mapping table in the implementation plan for the full list.
+- **Prefer `@cowprotocol/cow-sdk` types** when they are identical to what we need (e.g., `OrderKind`, `SupportedChainId`, `BUY_ETH_ADDRESS`). Keep manual types when cow-sdk's version doesn't match our context (e.g., `SigningScheme` — cow-sdk uses numeric values, we need the orderbook wire format strings).
 
 ### Error handling
 
 - Single `AppError` class with a `kind` field (string enum). Hono's `app.onError` maps `kind` → HTTP status + JSON body.
-- Store errors carry a `retryable` flag (mirrors Rust's `StoreError::should_retry()`).
+- Store errors carry a `retryable` flag (`should_retry()` classification).
 - No `try/catch` in domain logic — domain functions return values or throw `AppError`.
 
 ### Background jobs (BullMQ)
@@ -82,13 +86,13 @@ docker-compose.yml      Dev Postgres + Redis
 - One `Queue` + `Worker` per job type: validation (every 12s), retention sweep (every 5m), penalty loop.
 - The **audit trail** is a dedicated BullMQ queue for durable write-behind persistence. Events survive process crashes.
 - **Rate limiting** uses Redis sliding windows (not in-memory).
-- Jobs run with `concurrency: 1` by default — no overlapping ticks, same semantics as the Rust service's `MissedTickBehavior::Delay`.
+- Jobs run with `concurrency: 1` by default — no overlapping ticks, missed ticks are delayed (not dropped).
 - Shutdown order: close HTTP servers → `worker.close()` on all BullMQ workers (finishes current job) → drain audit queue → close Redis → close DB pool.
 
 ### Dependency injection
 
 - Plain `AppContext` object built at startup, passed explicitly to Hono apps (via Hono `Env` type) and BullMQ worker processors. Contains DB pool, Redis connection, viem clients, BullMQ queues, and config.
-- In tests, construct an `AppContext` with overrides — same pattern as the Rust test harness.
+- In tests, construct an `AppContext` with overrides (e.g., AcceptAll validator, test DB).
 
 ### Configuration
 
@@ -114,7 +118,7 @@ The e2e tier builds both Hono apps in-process — it does not need a running ser
 - **camelCase JSON** for all API request/response bodies.
 - **256-bit amounts as decimal strings** (`"1000000000000000000"`, not hex, not number).
 - **Addresses and order UIDs as `0x`-prefixed hex strings**.
-- This matches the existing Rust API contract — do not change it.
+- This matches the API contract defined in `apps/byos/openapi.yml` — do not change it.
 
 ## Domain language
 
@@ -124,19 +128,9 @@ The glossary lives in [`CONTEXT.md`](CONTEXT.md) — sub-solver, proposal, inges
 - `gas cut` — not "fee". The order's signed `feeAmount` is a different field.
 - `ingestion` — the `POST /proposals` path. Does NOT include simulation or escrow checks.
 
-## How to port a Rust module
-
-1. **Read the Rust source** — understand the full behavior, including edge cases and error paths.
-2. **Read the corresponding ADRs** — understand why it was built that way.
-3. **Read the Rust tests** — these define the expected behavior. Port them first (TDD).
-4. **Write the TypeScript equivalent** — match behavior, not syntax. Use idiomatic TypeScript (no Rust patterns like `Result<T, E>` wrappers).
-5. **Verify** — all ported tests pass, `pnpm typecheck` clean, `pnpm lint` clean.
-
-When in doubt about behavior, the Rust code is authoritative. When in doubt about TypeScript patterns, follow the conventions in this file and the implementation plan.
-
 ## Related repositories
 
-- [`bleu/byos-service`](https://github.com/bleu/byos-service) — the Rust reference implementation (at `../byos-service` locally).
+- [`bleu/byos-docs`](https://github.com/bleu/byos-docs) — Shared BYOS specification (submodule at `docs/shared/`).
 - [`bleu/byos-contracts`](https://github.com/bleu/byos-contracts) — Escrow, Trampoline, TrampolineFactory (Foundry). EIP-712 domain and `ProposalData` schema defined there.
 - [`cowprotocol/services`](https://github.com/cowprotocol/services) — the CoW backend (driver/autopilot) BYOS integrates with.
 - [`cowdao-grants/offline-mode`](https://github.com/cowdao-grants/offline-mode) — offline CoW-stack for full e2e testing.

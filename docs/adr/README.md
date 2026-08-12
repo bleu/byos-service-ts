@@ -1,10 +1,10 @@
 # Architecture Decision Records
 
-This directory holds the ADRs for the TypeScript BYOS service. Domain-level ADRs (0001-0003, 0005, 0007, 0010-0014) are carried over from the [Rust BYOS service](https://github.com/bleu/byos-service/tree/main/docs/adr) with file path updates. Implementation-specific ADRs (0004, 0006, 0008, 0009) are written fresh for the TypeScript stack.
+This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 0005, 0007, 0010–0014) cover service-wide design decisions. Implementation ADRs (0004, 0006, 0008, 0009) cover TypeScript-specific tooling and conventions. Each domain ADR cites the relevant section of the shared specification in `docs/shared/design-document.md`; if an ADR and the spec disagree, the spec wins.
 
 ## Index
 
-### Domain ADRs (from Rust repo)
+### Domain ADRs
 
 - [0001 — Proposal API](0001-proposal-api.md): Public HTTP API for sub-solver proposal ingestion, EIP-712 auth, two-listener architecture
 - [0002 — Solver Engine](0002-solver-engine.md): `/solve` hot path, `surplus - gas` scoring, gas cut, Trampoline settlement crafting
