@@ -4,6 +4,11 @@
 	"private": true,
 	"type": "module",
 	"main": "./dist/index.js",
+	"exports": {
+		".": "./dist/index.js",
+		"./src/*": "./src/*",
+		"./test/*": "./test/*"
+	},
 	"scripts": {
 		"build": "tsup",
 		"dev": "tsup --watch --onSuccess 'node dist/index.js'",

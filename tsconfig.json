@@ -3,7 +3,6 @@
 	"references": [
 		{ "path": "packages/common" },
 		{ "path": "apps/byos" },
-		{ "path": "apps/subsolver" },
-		{ "path": "tests/e2e" }
+		{ "path": "apps/subsolver" }
 	]
 }
