@@ -29,7 +29,7 @@ This document describes the full migration plan for converting the Rust BYOS ser
 | Contract ABIs | One `.ts` file per contract, `as const` export |
 | CoW protocol types | `@cowprotocol/cow-sdk` where identical + manual types for BYOS-specific structures |
 | Gas price cache | Simple mutable property on `AppContext` |
-| Validation concurrency | `Promise.all` (unbounded) |
+| Validation concurrency | One BullMQ job per proposal, worker concurrency 8 (mirrors the Rust semaphore) |
 | DB test isolation | Unique database per test |
 | File naming | kebab-case |
 | Task runner | pnpm scripts only |
@@ -333,7 +333,7 @@ Wire the service together using BullMQ for background work and Redis as the job 
 
 **Deliverables:**
 1. **Redis connection** — `infra/jobs/index.ts`: shared `IORedis` connection for all queues and workers
-2. **Validation job** — `infra/jobs/validation.ts`: BullMQ repeatable job every 12s, picks up Submitted proposals, runs escrow + simulation, transitions to Active/Rejected/SimFailed. Uses `Promise.all` for concurrent validation within a single job run.
+2. **Validation job** — `infra/jobs/validation.ts`: BullMQ repeatable tick every 12s releases stale Executing proposals, expires past-`validUntil` ones, and enqueues one `byos:validate-proposal` job per remaining live proposal (job id deduped per proposal). A second worker processes those jobs with concurrency 8, matching the Rust loop's semaphore bound on RPC bursts; each job re-reads the proposal from Postgres, runs escrow + simulation, and transitions it to Active/Rejected/SimFailed.
 3. **Retention sweep job** — `infra/jobs/retention.ts`: BullMQ repeatable job every 5m, deletes terminal proposals older than retention window
 4. **Penalty job** — `infra/jobs/penalty.ts`: BullMQ repeatable job, processes Track A debits for SettleFailed proposals
 5. **Audit trail** — `infra/audit.ts`: BullMQ queue for durable write-behind. Audit events are enqueued (survives crashes) and a worker drains them to Postgres. Replaces the Rust in-memory channel approach with a persistent queue.
