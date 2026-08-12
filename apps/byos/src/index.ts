@@ -102,7 +102,23 @@ async function main() {
 		await Promise.all(nonAuditWorkers.map((w) => w.close()));
 		logger.info("background workers closed");
 
-		// Drain remaining audit jobs before closing
+		// Drain the audit backlog before closing: worker.close() only finishes
+		// the job in hand, and events still queued in Redis would not reach
+		// Postgres until the next boot — or ever, if the deploy recreates the
+		// Redis volume. Unbounded on purpose, like the Rust writer: exiting
+		// with evidence unflushed is worse than a hanging shutdown.
+		const auditBacklog = async () => {
+			const counts = await ctx.queues.audit.getJobCounts("waiting", "active", "delayed");
+			return (counts.waiting ?? 0) + (counts.active ?? 0) + (counts.delayed ?? 0);
+		};
+		let backlog = await auditBacklog();
+		if (backlog > 0) {
+			logger.info({ backlog }, "draining audit queue");
+		}
+		while (backlog > 0) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			backlog = await auditBacklog();
+		}
 		await auditWorker.close();
 		logger.info("audit worker drained");
 
