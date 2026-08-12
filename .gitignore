@@ -1,0 +1,27 @@
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Dotenv files
+.env
+.env.*
+!.env.example
+
+# Local agent state
+.claude/
+.scratch/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Test coverage
+coverage/
