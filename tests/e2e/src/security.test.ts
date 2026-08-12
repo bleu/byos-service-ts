@@ -67,6 +67,9 @@ describe("bearer token enforcement", () => {
 				body: JSON.stringify({ id: "1", orders: [], tokens: {}, effectiveGasPrice: "10000000000" }),
 			});
 			expect(noAuthResp.status).toBe(401);
+			// A bare challenge, as in Rust: no error body to distinguish failure modes.
+			expect(noAuthResp.headers.get("WWW-Authenticate")).toBe("Bearer");
+			expect(await noAuthResp.text()).toBe("");
 
 			// With correct Authorization header → 200
 			const authedResp = await authedApp.request("/solve", {
@@ -92,21 +95,21 @@ describe("auth rejection", () => {
 		const resp = await app.publicApp.request(`/proposal/${id}`);
 		expect(resp.status).toBe(400);
 		const body = await resp.json();
-		expect(body.kind).toBe("BadRequest");
+		expect(body.kind).toBe("InvalidSignature");
 	});
 
 	it("GET /proposals/by-sub-solver without X-Signature is rejected", async () => {
 		const resp = await app.publicApp.request("/proposals/by-sub-solver");
 		expect(resp.status).toBe(400);
 		const body = await resp.json();
-		expect(body.kind).toBe("BadRequest");
+		expect(body.kind).toBe("InvalidSignature");
 	});
 
 	it("GET /proposals/:orderUid without X-Signature is rejected", async () => {
 		const resp = await app.publicApp.request(`/proposals/0x${"ab".repeat(56)}`);
 		expect(resp.status).toBe(400);
 		const body = await resp.json();
-		expect(body.kind).toBe("BadRequest");
+		expect(body.kind).toBe("InvalidSignature");
 	});
 
 	it("DELETE /proposal/:id by non-owner returns 404 (not 403)", async () => {

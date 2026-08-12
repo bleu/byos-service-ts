@@ -2,35 +2,45 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { Hex } from "viem";
 import { AppError, Kind } from "./error.js";
 
-/** Bearer token auth middleware for internal routes. */
+/** Bearer token auth middleware for internal routes. Any failure answers a
+ * bare 401 with a WWW-Authenticate challenge, matching the Rust guard —
+ * one uniform response, no error body to distinguish failure modes. */
 export function bearerAuth(expectedToken: string): MiddlewareHandler {
 	return async (c, next) => {
 		const header = c.req.header("Authorization");
-		if (!header) {
-			c.header("WWW-Authenticate", "Bearer");
-			return c.json({ kind: Kind.BadRequest, description: "Missing Authorization header" }, 401);
-		}
+		// RFC 7235: the auth scheme name is case-insensitive ("Bearer" ==
+		// "bearer"); the token itself is not. Split at the first space only,
+		// so a token containing spaces still compares whole.
+		const space = header?.indexOf(" ") ?? -1;
+		const authorized =
+			header !== undefined &&
+			space > 0 &&
+			header.slice(0, space).toLowerCase() === "bearer" &&
+			header.slice(space + 1) === expectedToken;
 
-		const parts = header.split(" ");
-		if (parts.length !== 2 || parts[0]?.toLowerCase() !== "bearer") {
+		if (!authorized) {
 			c.header("WWW-Authenticate", "Bearer");
-			return c.json({ kind: Kind.BadRequest, description: "Invalid Authorization header" }, 401);
-		}
-
-		if (parts[1] !== expectedToken) {
-			c.header("WWW-Authenticate", "Bearer");
-			return c.json({ kind: Kind.BadRequest, description: "Invalid bearer token" }, 401);
+			return c.body(null, 401);
 		}
 
 		await next();
 	};
 }
 
-/** Extracts the X-Signature header, throws AppError if missing. */
+/** Extracts and validates the X-Signature header: hex with an optional 0x
+ * prefix, exactly 65 bytes. Failures are invalidSignature, as in Rust's
+ * signature_from_header. */
 export function extractSignature(c: Context): Hex {
 	const sig = c.req.header("X-Signature");
 	if (!sig) {
-		throw new AppError(Kind.BadRequest, "Missing X-Signature header");
+		throw new AppError(Kind.InvalidSignature, "missing X-Signature header");
 	}
-	return sig as Hex;
+	if (!/^(0x)?([0-9a-fA-F]{2})*$/.test(sig)) {
+		throw new AppError(Kind.InvalidSignature, "X-Signature is not valid hex");
+	}
+	const bare = sig.startsWith("0x") ? sig.slice(2) : sig;
+	if (bare.length !== 130) {
+		throw new AppError(Kind.InvalidSignature, "invalid signature bytes");
+	}
+	return `0x${bare}` as Hex;
 }

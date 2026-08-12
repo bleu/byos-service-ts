@@ -26,10 +26,13 @@ export function parseCreateProposalRequest(body: CreateProposalRequest): ParsedP
 	const orderUidHex = (orderUid.startsWith("0x") ? orderUid : `0x${orderUid}`) as Hex;
 	const orderUidHash = keccak256(orderUidHex);
 
+	// The wire grammar allows bare hex (no 0x); viem requires the prefix.
+	const hex = (s: string): Hex => (s.startsWith("0x") ? s : `0x${s}`) as Hex;
+
 	const interactions: ContractInteraction[] = body.interactions.map((i) => ({
 		target: i.target as Address,
 		value: BigInt(i.value),
-		callData: i.callData as Hex,
+		callData: hex(i.callData),
 	}));
 
 	const interactionsHash = computeInteractionsHash(interactions);
@@ -43,7 +46,7 @@ export function parseCreateProposalRequest(body: CreateProposalRequest): ParsedP
 		interactionsHash,
 		validUntil: BigInt(body.validUntil),
 		nonce: BigInt(body.nonce),
-		signature: body.signature as Hex,
+		signature: hex(body.signature),
 	};
 }
 

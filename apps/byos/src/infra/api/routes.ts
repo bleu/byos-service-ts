@@ -37,10 +37,22 @@ export function createPublicRoutes(config: RoutesConfig) {
 		const rawBody = await c.req.json();
 		const parseResult = createProposalRequestSchema.safeParse(rawBody);
 		if (!parseResult.success) {
-			throw new AppError(Kind.BadRequest, "Invalid request body");
+			// Per-field description, as Rust's edge parsers report.
+			const path = parseResult.error.issues[0]?.path.join(".");
+			throw new AppError(Kind.BadRequest, path ? `invalid ${path}` : "Malformed request");
 		}
 
 		const body = parseResult.data;
+
+		// The schema pins the hex grammar; the shape of a signature (exactly
+		// 65 bytes) is its own failure kind, as in Rust's Signature::try_from.
+		const signatureDigits = body.signature.startsWith("0x")
+			? body.signature.length - 2
+			: body.signature.length;
+		if (signatureDigits !== 130) {
+			throw new AppError(Kind.InvalidSignature);
+		}
+
 		let parsed: ReturnType<typeof parseCreateProposalRequest>;
 		try {
 			parsed = parseCreateProposalRequest(body);
