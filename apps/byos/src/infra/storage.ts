@@ -13,7 +13,10 @@ import type { Verdict } from "../domain/validator.js";
 export type StoreError =
 	| { kind: "notFound"; id: number }
 	| { kind: "notOwner"; id: number; owner: Address }
-	| { kind: "staleTransition"; id: number; expected: string; actual: string }
+	// `actual` is the status the row was found in. A compare-and-swap that
+	// affected no rows never learns it, so it is null there rather than a
+	// stand-in string a reader could mistake for a real status.
+	| { kind: "staleTransition"; id: number; expected: string; actual: string | null }
 	| { kind: "database"; cause: unknown }
 	| { kind: "corruptRow"; table: string; column: string; detail: string };
 
@@ -132,7 +135,7 @@ export async function transition(
 			kind: "staleTransition",
 			id: proposal.id,
 			expected: proposal.status,
-			actual: "unknown",
+			actual: null,
 		};
 	}
 
@@ -396,7 +399,7 @@ export async function recordPenalty(
 			kind: "staleTransition",
 			id: proposal.id,
 			expected: "settleFailed",
-			actual: "unknown",
+			actual: null,
 		};
 	}
 
