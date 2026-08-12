@@ -27,7 +27,7 @@ This document describes the full migration plan for converting the Rust BYOS ser
 | DI / wiring | Plain `AppContext` object passed explicitly |
 | BigInt strategy | Native `bigint` internally, string at boundaries (wire + DB) |
 | Contract ABIs | One `.ts` file per contract, `as const` export |
-| CoW protocol types | Manual TypeScript definitions |
+| CoW protocol types | `@cowprotocol/cow-sdk` where identical + manual types for BYOS-specific structures |
 | Gas price cache | Simple mutable property on `AppContext` |
 | Validation concurrency | `Promise.all` (unbounded) |
 | DB test isolation | Unique database per test |
@@ -496,6 +496,30 @@ function bigintToDecimal(n: bigint): string { return n.toString(); }
 function decimalToBigint(s: string): bigint { return BigInt(s); }
 ```
 
+### CoW SDK Usage (`@cowprotocol/cow-sdk`)
+
+The `@cowprotocol/cow-sdk` provides standard CoW Protocol types and utilities. We use it where types are identical to avoid drift. BYOS-specific types (Proposal, EIP-712 schemas, trampoline encoding) stay manual.
+
+**Used from cow-sdk:**
+
+| cow-sdk export | Used in | Replaces |
+|----------------|---------|----------|
+| `OrderKind` (`SELL`, `BUY`) | `settlement.ts`, re-exported from `index.ts` | Manual `OrderKind` enum |
+| `BUY_ETH_ADDRESS` | Re-exported from `index.ts` | Manual constant |
+| `SupportedChainId` | Re-exported from `index.ts`, config validation | Manual chain ID enum |
+| `OrderSigningUtils` | `apps/subsolver` (future) | Manual order signing |
+| `computeOrderUid` | `apps/subsolver` (future) | Manual UID computation |
+
+**Kept manual (not identical to cow-sdk):**
+
+| Our type | Why not cow-sdk | Difference |
+|----------|----------------|------------|
+| `SigningScheme` (string enum) | cow-sdk uses numeric (0,1,2,3) | Orderbook API returns string values (`"eip712"`, `"ethsign"`, etc.) |
+| `CowOrder` interface | cow-sdk `Order` lacks `signingScheme` and `signature` fields | Those fields are separate in cow-sdk's model |
+| `Proposal`, `ContractInteraction` | BYOS-specific on-chain structs | Not part of CoW Protocol |
+| EIP-712 types (ProposalData, CancelProposal, ReadAuth) | BYOS domain, not CoW order domain | Different EIP-712 schema entirely |
+| All DTOs (`dto.ts`) | BYOS proposal API, not CoW orderbook API | Different API contract |
+
 ## Dependencies
 
 ### Root devDependencies (shared tooling)
@@ -505,6 +529,7 @@ function decimalToBigint(s: string): bigint { return BigInt(s); }
 - `vitest`
 
 ### packages/common
+- `@cowprotocol/cow-sdk`
 - `viem`
 - `zod`
 
