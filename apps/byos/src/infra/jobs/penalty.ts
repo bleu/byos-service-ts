@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
-import { type Hex, keccak256 } from "viem";
+import { type Address, type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import {
@@ -189,30 +189,38 @@ export async function runSlippageDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, onAuditEvent, logger } = config;
+	const { db, operator, cL, onAuditEvent, logger } = config;
 
-	// Snapshot settled proposals where minBuyAmount < quoteBuyAmount
+	// Step 1: Snapshot settled proposals with loose slippage that have
+	// no ledger entry yet.
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
 		pending = await store.snapshotByStatuses(db, ["settled"]);
 	} catch (e) {
-		logger.error({ err: e }, "penalty: failed to snapshot settled for slippage");
+		logger.error({ err: e }, "slippage: failed to snapshot settled proposals");
 		return;
 	}
 
-	// Filter to proposals with loose slippage (minBuyAmount < quoteBuyAmount)
 	const slippagePending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
-	if (slippagePending.length === 0) return;
+	const affectedSubSolvers = new Set<Address>();
 
+	// Step 2: For each proposal without a ledger entry, compute and insert one.
 	for (const proposal of slippagePending) {
 		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
+
+		// Skip proposals that already have a ledger entry
+		try {
+			if (await store.slippageEntryExistsForProposal(db, proposal.id)) continue;
+		} catch (e) {
+			noteDebitFailure(attempts, proposal.id, e, "slippage entry existence check", logger);
+			continue;
+		}
 
 		if (!proposal.settlementTxHash) {
 			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute slippage");
 			continue;
 		}
 
-		// Read the delivered delta from the Executed event
 		let delta: bigint;
 		try {
 			delta = await operator.readExecutedDelta(proposal.settlementTxHash, proposal.orderUidHash);
@@ -221,15 +229,6 @@ export async function runSlippageDebits(
 			continue;
 		}
 
-		const gap = proposal.quoteBuyAmount - delta;
-		if (gap <= 0n) {
-			// Over-delivered or exact: no debit needed. Proposal stays in
-			// "settled" (terminal); retention sweep will clean it up.
-			attempts.delete(proposal.id);
-			continue;
-		}
-
-		// Look up the buy-token reference price stored at /solve time
 		let refPriceStr: string | null;
 		try {
 			refPriceStr = await store.buyTokenRefPriceForProposal(db, proposal.id);
@@ -239,47 +238,90 @@ export async function runSlippageDebits(
 		}
 
 		if (!refPriceStr || refPriceStr === "0") {
-			logger.warn({ id: proposal.id }, "no buy-token ref price for slippage debit; skipping");
+			logger.warn({ id: proposal.id }, "no buy-token ref price for slippage; skipping");
 			attempts.delete(proposal.id);
 			continue;
 		}
 
+		const gap = proposal.quoteBuyAmount - delta;
 		const refPrice = BigInt(refPriceStr);
-		const amount = slippageDebit(gap, refPrice);
-		if (amount === 0n) {
+		const ethAmount = slippageDebit(gap < 0n ? -gap : gap, refPrice);
+		// Preserve sign: positive = subsolver owes, negative = BYOS owes
+		const signedEthAmount = gap < 0n ? -ethAmount : ethAmount;
+
+		try {
+			await store.insertSlippageEntry(db, {
+				subSolver: proposal.subSolver,
+				proposalId: proposal.id,
+				orderUid: proposal.orderUid,
+				delta: delta.toString(),
+				gap: gap.toString(),
+				ethAmount: signedEthAmount.toString(),
+			});
+			affectedSubSolvers.add(proposal.subSolver);
 			attempts.delete(proposal.id);
-			continue;
-		}
-
-		let penaltyTxHash: Awaited<ReturnType<typeof operator.debit>>;
-		try {
-			penaltyTxHash = await operator.debit(proposal.subSolver, amount, proposal.settlementTxHash);
+			logger.info(
+				{ id: proposal.id, gap: gap.toString(), ethAmount: signedEthAmount.toString() },
+				"slippage entry recorded",
+			);
 		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "slippage escrow debit", logger);
+			noteDebitFailure(attempts, proposal.id, e, "slippage entry insert", logger);
+		}
+	}
+
+	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
+	for (const subSolver of affectedSubSolvers) {
+		let balance: bigint;
+		try {
+			balance = await store.outstandingSlippageBalance(db, subSolver);
+		} catch (e) {
+			logger.error({ err: e, subSolver }, "slippage: failed to read outstanding balance");
 			continue;
 		}
 
-		attempts.delete(proposal.id);
+		if (balance <= cL) continue;
 
+		// Slash the full outstanding balance
+		let clearTxHash: Hex;
 		try {
-			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash, "settled");
-			if ("auditEvent" in result) {
-				onAuditEvent(result.auditEvent);
-				logger.info(
-					{ id: proposal.id, gap: gap.toString(), amount: amount.toString(), tx: penaltyTxHash },
-					"slippage debit landed",
-				);
-			} else {
-				logger.error(
-					{ id: proposal.id, error: result },
-					"slippage debit landed but proposal not marked penalized; may re-charge next tick",
-				);
-			}
+			clearTxHash = await operator.debit(
+				subSolver,
+				balance,
+				keccak256(`0x${subSolver.slice(2)}${"00".repeat(12)}` as Hex),
+			);
 		} catch (e) {
 			logger.error(
-				{ err: e, id: proposal.id },
-				"slippage debit landed but proposal not marked penalized; may re-charge next tick",
+				{ err: e, subSolver, balance: balance.toString() },
+				"slippage escrow debit failed",
 			);
+			continue;
 		}
+
+		let entryCount: number;
+		try {
+			entryCount = await store.clearSlippageEntries(db, subSolver, clearTxHash);
+		} catch (e) {
+			logger.error(
+				{ err: e, subSolver },
+				"slippage debit landed but entries not cleared; may re-charge next tick",
+			);
+			continue;
+		}
+
+		onAuditEvent({
+			occurredAt: new Date(),
+			kind: {
+				type: "slippageDebited",
+				subSolver,
+				amount: balance,
+				clearTxHash,
+				entryCount,
+			},
+		});
+
+		logger.info(
+			{ subSolver, balance: balance.toString(), entryCount, tx: clearTxHash },
+			"slippage balance slashed",
+		);
 	}
 }

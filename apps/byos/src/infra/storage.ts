@@ -2,7 +2,7 @@ import type { RejectionReason, Status } from "@byos/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
-import { penalties, proposals, solutions } from "../db/schema.js";
+import { penalties, proposals, slippageEntries, solutions } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
@@ -757,6 +757,123 @@ export async function solutionProposals(
 		.orderBy(proposals.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
+}
+
+// --- Slippage Entries ---
+
+export interface SlippageEntry {
+	id: number;
+	subSolver: Address;
+	proposalId: number;
+	orderUid: string;
+	delta: string;
+	gap: string;
+	ethAmount: string;
+	cleared: boolean;
+	clearTxHash: string | null;
+	createdAt: Date;
+}
+
+/** Checks whether a slippage entry already exists for a proposal. */
+export async function slippageEntryExistsForProposal(db: Db, proposalId: number): Promise<boolean> {
+	const rows = await db
+		.select({ id: slippageEntries.id })
+		.from(slippageEntries)
+		.where(eq(slippageEntries.proposalId, proposalId))
+		.limit(1);
+	return rows.length > 0;
+}
+
+/** Inserts a slippage entry for a settled proposal. */
+export async function insertSlippageEntry(
+	db: Db,
+	entry: {
+		subSolver: Address;
+		proposalId: number;
+		orderUid: string;
+		delta: string;
+		gap: string;
+		ethAmount: string;
+	},
+): Promise<number> {
+	const result = await db
+		.insert(slippageEntries)
+		.values({
+			subSolver: entry.subSolver.toLowerCase(),
+			proposalId: entry.proposalId,
+			orderUid: entry.orderUid.toLowerCase(),
+			delta: entry.delta,
+			gap: entry.gap,
+			ethAmount: entry.ethAmount,
+		})
+		.returning({ id: slippageEntries.id });
+	return result[0]!.id;
+}
+
+/** Returns the outstanding (uncleared) slippage balance for a subsolver in ETH (as bigint). */
+export async function outstandingSlippageBalance(db: Db, subSolver: Address): Promise<bigint> {
+	const rows = await db
+		.select({ ethAmount: slippageEntries.ethAmount })
+		.from(slippageEntries)
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, false),
+			),
+		);
+	let total = 0n;
+	for (const row of rows) {
+		total += BigInt(row.ethAmount);
+	}
+	return total;
+}
+
+/** Returns all uncleared slippage entries for a subsolver. */
+export async function unclearedSlippageEntries(
+	db: Db,
+	subSolver: Address,
+): Promise<SlippageEntry[]> {
+	const rows = await db
+		.select()
+		.from(slippageEntries)
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, false),
+			),
+		)
+		.orderBy(slippageEntries.createdAt);
+	return rows.map((r) => ({
+		id: r.id,
+		subSolver: r.subSolver as Address,
+		proposalId: r.proposalId,
+		orderUid: r.orderUid,
+		delta: r.delta,
+		gap: r.gap,
+		ethAmount: r.ethAmount,
+		cleared: r.cleared,
+		clearTxHash: r.clearTxHash,
+		createdAt: r.createdAt,
+	}));
+}
+
+/** Marks all uncleared entries for a subsolver as cleared with the given tx hash. */
+export async function clearSlippageEntries(
+	db: Db,
+	subSolver: Address,
+	clearTxHash: Hex,
+): Promise<number> {
+	const result = await db
+		.update(slippageEntries)
+		.set({ cleared: true, clearTxHash: clearTxHash.toLowerCase() })
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, false),
+			),
+		)
+		.returning({ id: slippageEntries.id });
+	return result.length;
 }
 
 export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {

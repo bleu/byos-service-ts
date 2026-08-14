@@ -23,6 +23,7 @@ export interface RoutesConfig {
 	chainId: number;
 	trampolineFactory: Address;
 	maxProposalLifetimeSecs: number;
+	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 }
 
@@ -170,6 +171,36 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		const proposals = await store.listByOrderUidForOwner(config.db, orderUid, reader);
 		return c.json(proposalToListResponse(proposals));
+	});
+
+	// GET /slippage-balance — Off-chain slippage accounting (owner-scoped)
+	app.get("/slippage-balance", async (c) => {
+		const sig = extractSignature(c);
+		let reader: Address;
+		try {
+			reader = await recoverReader(sig, domain);
+		} catch {
+			throw new AppError(Kind.SignatureRecoveryFailed);
+		}
+
+		const entries = await store.unclearedSlippageEntries(config.db, reader);
+		let outstandingBalance = 0n;
+		for (const entry of entries) {
+			outstandingBalance += BigInt(entry.ethAmount);
+		}
+
+		return c.json({
+			outstandingBalance: outstandingBalance.toString(),
+			threshold: config.cL.toString(),
+			entries: entries.map((e) => ({
+				proposalId: e.proposalId,
+				orderUid: e.orderUid,
+				delta: e.delta,
+				gap: e.gap,
+				ethAmount: e.ethAmount,
+				createdAt: e.createdAt.toISOString(),
+			})),
+		});
 	});
 
 	// DELETE /proposal/:id — Cancel proposal
