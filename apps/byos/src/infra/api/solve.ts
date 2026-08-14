@@ -165,9 +165,7 @@ export function createSolveRoute(config: SolveConfig) {
 			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
 				const buyTokenInfo = auction.tokens[order.buyToken];
-				const buyTokenRefPrice = buyTokenInfo?.referencePrice
-					? buyTokenInfo.referencePrice
-					: "0";
+				const buyTokenRefPrice = buyTokenInfo?.referencePrice ? buyTokenInfo.referencePrice : "0";
 				try {
 					await store.recordSolution(
 						config.db,

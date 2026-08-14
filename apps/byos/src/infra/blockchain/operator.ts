@@ -1,6 +1,6 @@
 import { EscrowAbi, TrampolineAbi } from "@byos/common";
-import { decodeEventLog } from "viem";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import { decodeEventLog } from "viem";
 
 const CONFIRMATION_TIMEOUT = 120_000; // 120 seconds
 
