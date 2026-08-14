@@ -185,6 +185,23 @@ export async function runNonSettlementDebits(
 	}
 }
 
+/**
+ * Processes slippage accounting for settled proposals with aggressive slippage
+ * (minBuyAmount < maxBuyAmount).
+ *
+ * Step 1: Record a ledger entry per proposal (signed: positive = subsolver owes,
+ *         negative = BYOS owes for over-delivery).
+ * Step 2: For each subsolver with uncleared entries, check if the outstanding
+ *         balance exceeds c_L. If so, slash the full balance from escrow and
+ *         mark all entries cleared.
+ *
+ * Debits use a mark-before-debit pattern to prevent double-charging on DB
+ * failures after a successful on-chain debit.
+ *
+ * Payouts for negative balances (BYOS owes subsolver) are NOT automated.
+ * The BYOS operator reviews negative balances via the slippage_entries table
+ * or the GET /slippage-balance endpoint and deposits collateral manually.
+ */
 export async function runSlippageDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,

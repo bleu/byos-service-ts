@@ -40,9 +40,15 @@ Hooks are handled by BYOS and the driver, not by sub-solvers (COW-1243). The ord
 
 ### Why a slippage debit for aggressive buy-amount ranges
 
-A sell-order proposal can set `minBuyAmount` below `quoteBuyAmount`. The engine uses `quoteBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job measures the gap between `quoteBuyAmount` and the amount the user received. It converts this gap to ETH at the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
+A sell-order proposal can set `minBuyAmount` below `quoteBuyAmount`. The engine uses `quoteBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job reads the delivered amount from the `Executed` event and records a signed ledger entry: positive when the sub-solver under-delivered, negative when it over-delivered. Credits offset debits naturally.
 
-This mechanism makes the sub-solver responsible for the slippage it accepted. A wider range gives the sub-solver more chance to win the auction, but a larger delivered-amount shortfall costs the sub-solver proportionally. Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
+The penalty job slashes the sub-solver's escrow only when the outstanding balance exceeds `c_L`. It debits the full accumulated balance in one transaction and marks all entries as cleared. This batching reduces on-chain costs and lets small shortfalls net out against over-deliveries before any charge lands.
+
+Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
+
+### Why payouts for over-delivery are manual
+
+When a sub-solver consistently over-delivers (`delivered > quoteBuyAmount`), the slippage ledger accumulates negative entries (BYOS owes the sub-solver). The service records these credits but does not pay them out automatically. The BYOS operator reviews negative balances and deposits collateral to the sub-solver's escrow manually. Automated payouts are deferred: they require a withdrawal mechanism on the escrow contract and policy decisions about payout frequency, minimum thresholds, and fraud checks that are outside the scope of v1.
 
 ### Non-settlement detection
 

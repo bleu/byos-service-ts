@@ -92,6 +92,10 @@ export const solutions = pgTable(
 );
 
 // --- slippage_entries ---
+// Per-proposal ledger for the maxBuyAmount-vs-delivered gap. Positive eth_amount
+// means the subsolver owes BYOS; negative means BYOS owes the subsolver.
+// Debits are slashed automatically when the balance exceeds c_L.
+// Credits (negative balances) are paid out manually by the BYOS operator.
 
 export const slippageEntries = pgTable(
 	"slippage_entries",
