@@ -66,6 +66,7 @@ export async function createTestApp(): Promise<TestApp> {
 		chainId: CHAIN_ID,
 		trampolineFactory: TRAMPOLINE_FACTORY,
 		maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
+		cL: 10_000_000_000_000_000n, // 0.01 ETH — mainnet c_L
 		gasPriceRef,
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
 	};

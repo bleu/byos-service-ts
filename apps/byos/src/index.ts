@@ -29,11 +29,17 @@ async function main() {
 	const ctx = await buildContext(config, logger);
 
 	// 4. Create Hono apps
+	const cL = config.MIN_COLLATERAL ? BigInt(config.MIN_COLLATERAL) : undefined;
+	if (cL === undefined) {
+		throw new Error("MIN_COLLATERAL is required for slippage accounting");
+	}
+
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
 		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
+		cL,
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
@@ -44,6 +50,7 @@ async function main() {
 		chainId: config.CHAIN_ID,
 		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
+		cL,
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,

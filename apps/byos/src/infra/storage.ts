@@ -822,7 +822,9 @@ export async function unclearedSlippageSubSolvers(db: Db): Promise<Address[]> {
 /** Returns the outstanding (uncleared) slippage balance for a subsolver in ETH (as bigint). */
 export async function outstandingSlippageBalance(db: Db, subSolver: Address): Promise<bigint> {
 	const rows = await db
-		.select({ ethAmount: slippageEntries.ethAmount })
+		.select({
+			total: sql<string>`COALESCE(SUM(CAST(${slippageEntries.ethAmount} AS numeric)), 0)`,
+		})
 		.from(slippageEntries)
 		.where(
 			and(
@@ -830,11 +832,7 @@ export async function outstandingSlippageBalance(db: Db, subSolver: Address): Pr
 				eq(slippageEntries.cleared, false),
 			),
 		);
-	let total = 0n;
-	for (const row of rows) {
-		total += BigInt(row.ethAmount);
-	}
-	return total;
+	return BigInt(rows[0]?.total ?? "0");
 }
 
 /** Returns all uncleared slippage entries for a subsolver. */
