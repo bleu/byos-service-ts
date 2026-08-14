@@ -87,7 +87,8 @@ export function encodeSettle(
 	preInteractions: readonly SettlementInteraction[],
 	postInteractions: readonly SettlementInteraction[],
 ): Hex {
-	const executedAmount = order.kind === OrderKind.SELL ? proposal.sellAmount : proposal.maxBuyAmount;
+	const executedAmount =
+		order.kind === OrderKind.SELL ? proposal.sellAmount : proposal.maxBuyAmount;
 
 	const trade = {
 		sellTokenIndex: 0n,

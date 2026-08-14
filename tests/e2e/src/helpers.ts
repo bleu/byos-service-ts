@@ -34,9 +34,9 @@ export const OTHER_SIGNER_KEY =
 export const SIGNER_ACCOUNT = privateKeyToAccount(SIGNER_KEY);
 export const OTHER_SIGNER_ACCOUNT = privateKeyToAccount(OTHER_SIGNER_KEY);
 
-// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 function makeSignFn(
 	account: ReturnType<typeof privateKeyToAccount>,
+	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 ): (params: any) => Promise<Hex> {
 	const client = createWalletClient({ account, chain: foundry, transport: http() });
 	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types

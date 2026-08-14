@@ -4,7 +4,12 @@ import type { Logger } from "pino";
 import { type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import { type DebitEscrow, nonSettlementDebit, revertDebit, slippageDebit } from "../../domain/penalty.js";
+import {
+	type DebitEscrow,
+	nonSettlementDebit,
+	revertDebit,
+	slippageDebit,
+} from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
 const MAX_DEBIT_ATTEMPTS = 10;
