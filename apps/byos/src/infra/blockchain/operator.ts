@@ -1,4 +1,5 @@
-import { EscrowAbi } from "@byos/common";
+import { EscrowAbi, TrampolineAbi } from "@byos/common";
+import { decodeEventLog } from "viem";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
 
 const CONFIRMATION_TIMEOUT = 120_000; // 120 seconds
@@ -37,5 +38,25 @@ export class EscrowOperator {
 		}
 
 		return hash;
+	}
+
+	/** Reads the delivered delta from the Executed event in a settlement tx receipt. */
+	async readExecutedDelta(txHash: Hex): Promise<bigint> {
+		const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash });
+		for (const log of receipt.logs) {
+			try {
+				const event = decodeEventLog({
+					abi: TrampolineAbi,
+					data: log.data,
+					topics: log.topics,
+				});
+				if (event.eventName === "Executed") {
+					return (event.args as { _delta: bigint })._delta;
+				}
+			} catch {
+				// Not an Executed event from the Trampoline ABI, skip
+			}
+		}
+		throw new Error(`No Executed event found in tx ${txHash}`);
 	}
 }

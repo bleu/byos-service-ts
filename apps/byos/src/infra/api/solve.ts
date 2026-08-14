@@ -122,7 +122,7 @@ export function createSolveRoute(config: SolveConfig) {
 					const exceeds =
 						order.kind === "sell"
 							? proposal.sellAmount > BigInt(order.sellAmount)
-							: proposal.buyAmount > BigInt(order.buyAmount);
+							: proposal.maxBuyAmount > BigInt(order.buyAmount);
 					if (exceeds) continue;
 				}
 
@@ -134,7 +134,7 @@ export function createSolveRoute(config: SolveConfig) {
 					orderSell: BigInt(order.sellAmount),
 					orderBuy: BigInt(order.buyAmount),
 					proposalSell: proposal.sellAmount,
-					proposalBuy: proposal.buyAmount,
+					proposalBuy: proposal.maxBuyAmount,
 					isSellOrder: order.kind === "sell",
 					gasCost,
 				};
@@ -164,8 +164,18 @@ export function createSolveRoute(config: SolveConfig) {
 			// Record attribution before bidding: if we cannot record it, we
 			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
+				const buyTokenInfo = auction.tokens[order.buyToken];
+				const buyTokenRefPrice = buyTokenInfo?.referencePrice
+					? buyTokenInfo.referencePrice
+					: "0";
 				try {
-					await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id);
+					await store.recordSolution(
+						config.db,
+						auctionId,
+						solutionId,
+						bestProposal.id,
+						buyTokenRefPrice,
+					);
 				} catch {
 					continue;
 				}
@@ -196,7 +206,8 @@ function buildSolution(
 		{
 			orderUidHash: proposal.orderUidHash,
 			sellAmount: proposal.sellAmount,
-			buyAmount: proposal.buyAmount,
+			minBuyAmount: proposal.minBuyAmount,
+			maxBuyAmount: proposal.maxBuyAmount,
 			validUntil: proposal.validUntil,
 			nonce: proposal.nonce,
 		},
@@ -224,7 +235,7 @@ function buildSolution(
 	return {
 		id,
 		prices: {
-			[order.sellToken]: proposal.buyAmount.toString(),
+			[order.sellToken]: proposal.maxBuyAmount.toString(),
 			[order.buyToken]: proposal.sellAmount.toString(),
 		},
 		trades: [trade],

@@ -43,7 +43,8 @@ function rowToProposal(row: ProposalRow): Proposal {
 		orderUid: row.orderUid,
 		orderUidHash: row.orderUidHash as Hex,
 		sellAmount: BigInt(row.sellAmount),
-		buyAmount: BigInt(row.buyAmount),
+		minBuyAmount: BigInt(row.minBuyAmount),
+		maxBuyAmount: BigInt(row.maxBuyAmount),
 		sellToken: row.sellToken as Address,
 		buyToken: row.buyToken as Address,
 		interactions,
@@ -102,7 +103,8 @@ export async function insert(
 			orderUid: proposal.orderUid.toLowerCase(),
 			orderUidHash: proposal.orderUidHash.toLowerCase(),
 			sellAmount: proposal.sellAmount.toString(),
-			buyAmount: proposal.buyAmount.toString(),
+			minBuyAmount: proposal.minBuyAmount.toString(),
+			maxBuyAmount: proposal.maxBuyAmount.toString(),
 			sellToken: proposal.sellToken.toLowerCase(),
 			buyToken: proposal.buyToken.toLowerCase(),
 			interactions: interactionsToJson(proposal.interactions),
@@ -546,14 +548,28 @@ export async function recordSolution(
 	auctionId: number,
 	solutionId: number,
 	proposalId: number,
+	buyTokenRefPrice: string,
 ): Promise<void> {
 	await db
 		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId })
+		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
 		.onConflictDoUpdate({
 			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId },
+			set: { proposalId, buyTokenRefPrice },
 		});
+}
+
+/** Fetches the buy-token reference price stored at solution-build time for a proposal. */
+export async function buyTokenRefPriceForProposal(
+	db: Db,
+	proposalId: number,
+): Promise<string | null> {
+	const rows = await db
+		.select({ buyTokenRefPrice: solutions.buyTokenRefPrice })
+		.from(solutions)
+		.where(eq(solutions.proposalId, proposalId))
+		.limit(1);
+	return rows[0]?.buyTokenRefPrice ?? null;
 }
 
 export async function recordNonSettlementDebit(
@@ -715,7 +731,8 @@ export async function solutionProposals(
 			orderUid: proposals.orderUid,
 			orderUidHash: proposals.orderUidHash,
 			sellAmount: proposals.sellAmount,
-			buyAmount: proposals.buyAmount,
+			minBuyAmount: proposals.minBuyAmount,
+			maxBuyAmount: proposals.maxBuyAmount,
 			sellToken: proposals.sellToken,
 			buyToken: proposals.buyToken,
 			interactions: proposals.interactions,

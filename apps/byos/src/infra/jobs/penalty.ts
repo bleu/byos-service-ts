@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import { type DebitEscrow, nonSettlementDebit, revertDebit } from "../../domain/penalty.js";
+import { type DebitEscrow, nonSettlementDebit, revertDebit, slippageDebit } from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
 const MAX_DEBIT_ATTEMPTS = 10;
@@ -30,11 +30,14 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 	const revertAttempts = new Map<number, number>();
 	const nonSettlementAttempts = new Map<number, number>();
 
+	const slippageAttempts = new Map<number, number>();
+
 	return new Worker(
 		"byos:penalty",
 		async () => {
 			await runRevertDebits(config, revertAttempts);
 			await runNonSettlementDebits(config, nonSettlementAttempts);
+			await runSlippageDebits(config, slippageAttempts);
 		},
 		{
 			connection,
@@ -172,6 +175,105 @@ export async function runNonSettlementDebits(
 			logger.error(
 				{ err: e, penaltyId: penalty.id },
 				"non-settlement debit landed but was not recorded; may re-charge next tick",
+			);
+		}
+	}
+}
+
+export async function runSlippageDebits(
+	config: PenaltyWorkerConfig,
+	attempts: Map<number, number>,
+): Promise<void> {
+	const { db, operator, onAuditEvent, logger } = config;
+
+	// Snapshot settled proposals where minBuyAmount < maxBuyAmount
+	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
+	try {
+		pending = await store.snapshotByStatuses(db, ["settled"]);
+	} catch (e) {
+		logger.error({ err: e }, "penalty: failed to snapshot settled for slippage");
+		return;
+	}
+
+	// Filter to proposals with aggressive slippage (minBuyAmount < maxBuyAmount)
+	const slippagePending = pending.filter((p) => p.minBuyAmount < p.maxBuyAmount);
+	if (slippagePending.length === 0) return;
+
+	for (const proposal of slippagePending) {
+		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
+
+		if (!proposal.settlementTxHash) {
+			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute slippage");
+			continue;
+		}
+
+		// Read the delivered delta from the Executed event
+		let delta: bigint;
+		try {
+			delta = await operator.readExecutedDelta(proposal.settlementTxHash);
+		} catch (e) {
+			noteDebitFailure(attempts, proposal.id, e, "readExecutedDelta", logger);
+			continue;
+		}
+
+		const gap = proposal.maxBuyAmount - delta;
+		if (gap <= 0n) {
+			// Over-delivered or exact: no debit needed. Mark as processed by
+			// transitioning to penalized with zero-cost penalty.
+			attempts.delete(proposal.id);
+			continue;
+		}
+
+		// Look up the buy-token reference price stored at /solve time
+		let refPriceStr: string | null;
+		try {
+			refPriceStr = await store.buyTokenRefPriceForProposal(db, proposal.id);
+		} catch (e) {
+			noteDebitFailure(attempts, proposal.id, e, "buyTokenRefPrice lookup", logger);
+			continue;
+		}
+
+		if (!refPriceStr || refPriceStr === "0") {
+			logger.warn({ id: proposal.id }, "no buy-token ref price for slippage debit; skipping");
+			attempts.delete(proposal.id);
+			continue;
+		}
+
+		const refPrice = BigInt(refPriceStr);
+		const amount = slippageDebit(gap, refPrice);
+		if (amount === 0n) {
+			attempts.delete(proposal.id);
+			continue;
+		}
+
+		let penaltyTxHash: Awaited<ReturnType<typeof operator.debit>>;
+		try {
+			penaltyTxHash = await operator.debit(proposal.subSolver, amount, proposal.settlementTxHash);
+		} catch (e) {
+			noteDebitFailure(attempts, proposal.id, e, "slippage escrow debit", logger);
+			continue;
+		}
+
+		attempts.delete(proposal.id);
+
+		try {
+			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash);
+			if ("auditEvent" in result) {
+				onAuditEvent(result.auditEvent);
+				logger.info(
+					{ id: proposal.id, gap: gap.toString(), amount: amount.toString(), tx: penaltyTxHash },
+					"slippage debit landed",
+				);
+			} else {
+				logger.error(
+					{ id: proposal.id, error: result },
+					"slippage debit landed but proposal not marked penalized; may re-charge next tick",
+				);
+			}
+		} catch (e) {
+			logger.error(
+				{ err: e, id: proposal.id },
+				"slippage debit landed but proposal not marked penalized; may re-charge next tick",
 			);
 		}
 	}
