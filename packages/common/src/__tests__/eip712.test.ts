@@ -34,7 +34,7 @@ describe("EIP-712", () => {
 		it("matches the on-chain PROPOSAL_TYPEHASH constant", () => {
 			const manual = keccak256(
 				new TextEncoder().encode(
-					"ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 buyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)",
+					"ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 maxBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)",
 				),
 			);
 			expect(manual).toBe(PROPOSAL_TYPEHASH);
@@ -79,7 +79,8 @@ describe("EIP-712", () => {
 				const proposal: Proposal = {
 					orderUidHash: keccak256(vector.orderUid as Hex),
 					sellAmount: BigInt(vector.sellAmount),
-					buyAmount: BigInt(vector.buyAmount),
+					minBuyAmount: BigInt(vector.minBuyAmount),
+					maxBuyAmount: BigInt(vector.maxBuyAmount),
 					validUntil: BigInt(vector.validUntil),
 					nonce: BigInt(vector.nonce),
 				};
@@ -93,7 +94,8 @@ describe("EIP-712", () => {
 				const proposal: Proposal = {
 					orderUidHash: vector.orderUidHash as Hex,
 					sellAmount: BigInt(vector.sellAmount),
-					buyAmount: BigInt(vector.buyAmount),
+					minBuyAmount: BigInt(vector.minBuyAmount),
+					maxBuyAmount: BigInt(vector.maxBuyAmount),
 					validUntil: BigInt(vector.validUntil),
 					nonce: BigInt(vector.nonce),
 				};
@@ -119,7 +121,8 @@ describe("EIP-712", () => {
 			const proposal: Proposal = {
 				orderUidHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				sellAmount: 1_000_000n,
-				buyAmount: 990_000n,
+				minBuyAmount: 990_000n,
+				maxBuyAmount: 990_000n,
 				validUntil: 1_700_000_000n,
 				nonce: 42n,
 			};
@@ -154,7 +157,8 @@ describe("EIP-712", () => {
 			const proposal: Proposal = {
 				orderUidHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 				sellAmount: 500_000n,
-				buyAmount: 495_000n,
+				minBuyAmount: 495_000n,
+				maxBuyAmount: 495_000n,
 				validUntil: 1_700_000_000n,
 				nonce: 1n,
 			};

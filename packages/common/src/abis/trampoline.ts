@@ -2,7 +2,8 @@
 export const proposalComponents = [
 	{ name: "orderUidHash", type: "bytes32" },
 	{ name: "sellAmount", type: "uint256" },
-	{ name: "buyAmount", type: "uint256" },
+	{ name: "minBuyAmount", type: "uint256" },
+	{ name: "maxBuyAmount", type: "uint256" },
 	{ name: "validUntil", type: "uint256" },
 	{ name: "nonce", type: "uint256" },
 ] as const;
@@ -34,6 +35,7 @@ export const TrampolineAbi = [
 			{ name: "_orderUidHash", type: "bytes32", indexed: true },
 			{ name: "_delta", type: "uint256", indexed: false },
 			{ name: "_floor", type: "uint256", indexed: false },
+			{ name: "_ceiling", type: "uint256", indexed: false },
 		],
 	},
 	{

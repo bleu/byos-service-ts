@@ -75,7 +75,7 @@ function toInteractionTuples(interactions: readonly SettlementInteraction[]) {
 /**
  * Encodes the full `settle()` calldata simulating this proposal.
  *
- * Tokens `[sell, buy]`, clearing prices `[proposal.buyAmount, proposal.sellAmount]`,
+ * Tokens `[sell, buy]`, clearing prices `[proposal.maxBuyAmount, proposal.sellAmount]`,
  * the order as a single trade, and the trampoline intra-interactions.
  */
 export function encodeSettle(
@@ -87,7 +87,7 @@ export function encodeSettle(
 	preInteractions: readonly SettlementInteraction[],
 	postInteractions: readonly SettlementInteraction[],
 ): Hex {
-	const executedAmount = order.kind === OrderKind.SELL ? proposal.sellAmount : proposal.buyAmount;
+	const executedAmount = order.kind === OrderKind.SELL ? proposal.sellAmount : proposal.maxBuyAmount;
 
 	const trade = {
 		sellTokenIndex: 0n,
@@ -117,7 +117,7 @@ export function encodeSettle(
 		functionName: "settle",
 		args: [
 			[order.sellToken, order.buyToken],
-			[proposal.buyAmount, proposal.sellAmount],
+			[proposal.maxBuyAmount, proposal.sellAmount],
 			[trade],
 			[
 				toInteractionTuples(preInteractions),
