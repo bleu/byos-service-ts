@@ -91,6 +91,30 @@ export const solutions = pgTable(
 	],
 );
 
+// --- slippage_entries ---
+
+export const slippageEntries = pgTable(
+	"slippage_entries",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		subSolver: text("sub_solver").notNull(),
+		proposalId: bigint("proposal_id", { mode: "number" })
+			.notNull()
+			.references(() => proposals.id, { onDelete: "cascade" }),
+		orderUid: text("order_uid").notNull(),
+		delta: text().notNull(),
+		gap: text().notNull(),
+		ethAmount: text("eth_amount").notNull(),
+		cleared: boolean().notNull().default(false),
+		clearTxHash: text("clear_tx_hash"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		index("slippage_entries_sub_solver_cleared_idx").on(table.subSolver, table.cleared),
+		index("slippage_entries_proposal_id_idx").on(table.proposalId),
+	],
+);
+
 // --- penalties ---
 
 export const penalties = pgTable(
