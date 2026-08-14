@@ -66,7 +66,8 @@ describe("owner-scoped reads", () => {
 		expect(status).toBe(200);
 		expect(body.id).toBe(id);
 		expect(body.sellAmount).toBe("1000000");
-		expect(body.buyAmount).toBe("990000");
+		expect(body.minBuyAmount).toBe("990000");
+		expect(body.maxBuyAmount).toBe("990000");
 	});
 
 	// Once the debit lands, the owner's GET shows penalized and cites the

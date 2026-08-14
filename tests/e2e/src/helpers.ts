@@ -81,7 +81,8 @@ export async function createTestApp(): Promise<TestApp> {
 export interface ProposalOverrides {
 	orderUid?: Hex;
 	sellAmount?: bigint;
-	buyAmount?: bigint;
+	minBuyAmount?: bigint;
+	maxBuyAmount?: bigint;
 	validUntil?: bigint;
 	nonce?: bigint;
 	interactions?: ContractInteraction[];
@@ -90,7 +91,8 @@ export interface ProposalOverrides {
 export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverrides) {
 	const orderUid = overrides?.orderUid ?? (`0x${"ab".repeat(56)}` as Hex);
 	const sellAmount = overrides?.sellAmount ?? 1_000_000n;
-	const buyAmount = overrides?.buyAmount ?? 990_000n;
+	const minBuyAmount = overrides?.minBuyAmount ?? 990_000n;
+	const maxBuyAmount = overrides?.maxBuyAmount ?? 990_000n;
 	const now = BigInt(Math.floor(Date.now() / 1000));
 	const validUntil = overrides?.validUntil ?? now + 240n;
 	const nonce = overrides?.nonce ?? 1n;
@@ -105,13 +107,21 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	const orderUidHash = keccak256(orderUid);
 	const _interactionsHash = computeInteractionsHash(interactions);
 
-	const proposal = { orderUidHash, sellAmount, buyAmount, validUntil, nonce };
+	const proposal = {
+		orderUidHash,
+		sellAmount,
+		minBuyAmount,
+		maxBuyAmount,
+		validUntil,
+		nonce,
+	};
 	const signature = await signProposal(SIGN_FN, DOMAIN, proposal, interactions);
 
 	const body = {
 		orderUid,
 		sellAmount: sellAmount.toString(),
-		buyAmount: buyAmount.toString(),
+		minBuyAmount: minBuyAmount.toString(),
+		maxBuyAmount: maxBuyAmount.toString(),
 		interactions: interactions.map((i) => ({
 			target: i.target,
 			value: i.value.toString(),
@@ -145,7 +155,8 @@ export async function seedProposal(
 		subSolver: "0x0101010101010101010101010101010101010101" as Address,
 		orderUidHash: keccak256(orderUid),
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		maxBuyAmount: 990_000n,
 		sellToken: "0x0000000000000000000000000000000000000000" as Address,
 		buyToken: "0x0000000000000000000000000000000000000000" as Address,
 		interactions: [],

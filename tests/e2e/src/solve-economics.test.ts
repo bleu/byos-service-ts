@@ -89,13 +89,14 @@ async function postSolve(auction: Auction): Promise<SolveResponse> {
 async function seedActive(
 	orderUid: string,
 	sellAmount: bigint,
-	buyAmount: bigint,
+	minBuyAmount: bigint,
 	gasUsed = 200_000n,
 ): Promise<number> {
 	return seedProposal(app.ctx.db, {
 		orderUid,
 		sellAmount,
-		buyAmount,
+		minBuyAmount,
+		maxBuyAmount: minBuyAmount,
 		gasUsed,
 		trampoline: "0x0000000000000000000000000000000000000000" as Address,
 	});
@@ -226,7 +227,8 @@ describe("/solve economics", () => {
 		await seedProposal(app.ctx.db, {
 			orderUid: u,
 			sellAmount: 1_000_000_000n,
-			buyAmount: 1_000_000_000n,
+			minBuyAmount: 1_000_000_000n,
+			maxBuyAmount: 1_000_000_000n,
 			gasUsed: null,
 			trampoline: "0x0000000000000000000000000000000000000000" as Address,
 		});
@@ -306,7 +308,8 @@ describe("/solve economics", () => {
 			trampoline: "0x0000000000000000000000000000000000000000" as Address,
 			status: "executing",
 			sellAmount: 1_000n,
-			buyAmount: 950n,
+			minBuyAmount: 950n,
+			maxBuyAmount: 950n,
 		});
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000", "900", "0"));
@@ -322,7 +325,8 @@ describe("/solve economics", () => {
 		await seedProposal(app.ctx.db, {
 			orderUid: second,
 			sellAmount: 2_000n,
-			buyAmount: 1_900n,
+			minBuyAmount: 1_900n,
+			maxBuyAmount: 1_900n,
 			gasUsed: 200_000n,
 			trampoline: TRAMPOLINE,
 		});
@@ -371,7 +375,8 @@ describe("/solve economics", () => {
 		await seedProposal(app.ctx.db, {
 			orderUid: u,
 			sellAmount: 1_000n,
-			buyAmount: 950n,
+			minBuyAmount: 950n,
+			maxBuyAmount: 950n,
 			gasUsed: 200_000n,
 			trampoline: TRAMPOLINE,
 			interactions: route,
@@ -391,7 +396,8 @@ describe("/solve economics", () => {
 			{
 				orderUidHash: keccak256(u as Hex),
 				sellAmount: 1_000n,
-				buyAmount: 950n,
+				minBuyAmount: 950n,
+				maxBuyAmount: 950n,
 				validUntil: 2n ** 40n,
 				nonce: 1n,
 			},
@@ -419,7 +425,8 @@ describe("/solve economics", () => {
 		await seedProposal(app.ctx.db, {
 			orderUid: u,
 			sellAmount: 1_000n,
-			buyAmount: 950n,
+			minBuyAmount: 950n,
+			maxBuyAmount: 950n,
 			gasUsed: 200_000n,
 			trampoline: null,
 		});
