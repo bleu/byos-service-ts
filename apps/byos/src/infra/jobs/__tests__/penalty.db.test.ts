@@ -7,7 +7,7 @@ import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
 import * as store from "../../storage.js";
-import { runNonSettlementDebits, runRevertDebits } from "../penalty.js";
+import { runNonSettlementDebits, runRevertDebits, runSlippageDebits } from "../penalty.js";
 
 let ctx: TestContext;
 
@@ -329,5 +329,224 @@ describe("non-settlement debits", () => {
 
 		expect(debitCalls).toBe(10);
 		expect(await store.pendingPenalties(ctx.db)).not.toHaveLength(0);
+	});
+});
+
+describe("slippage debits", () => {
+	const SUB_SOLVER = "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address;
+	const ETHER = 10n ** 18n;
+	const CLEAR_TX: Hex = `0x${"88".repeat(32)}`;
+
+	/** Creates a settled proposal with aggressive slippage and a recorded solution with ref price. */
+	async function settledSlippageProposal(
+		maxBuyAmount: bigint,
+		minBuyAmount: bigint,
+		refPrice: string,
+	): Promise<{ id: number; tx: Hex }> {
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: SUB_SOLVER,
+			minBuyAmount,
+			maxBuyAmount,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+
+		// Drive to settled: submitted → active → executing → settled
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+
+		// Record a solution with the buy-token reference price
+		await store.recordSolution(ctx.db, 9000 + id, 1, id, refPrice);
+
+		return { id, tx };
+	}
+
+	function slippageOperator(
+		deltaByTx: Map<string, bigint>,
+		debitCalls: Array<{ subSolver: Address; amount: bigint }> = [],
+	): DebitEscrow {
+		return {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async debit(subSolver, amount) {
+				debitCalls.push({ subSolver, amount });
+				return CLEAR_TX;
+			},
+			async readExecutedDelta(txHash) {
+				const delta = deltaByTx.get(txHash.toLowerCase());
+				if (delta === undefined) throw new Error(`no delta for ${txHash}`);
+				return delta;
+			},
+		};
+	}
+
+	it("records a slippage entry for a settled proposal with under-delivery", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 950n; // under-delivered by 50
+		const refPrice = ETHER.toString(); // 1:1 price
+
+		const { id, tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const operator = slippageOperator(deltaByTx);
+
+		await runSlippageDebits(config(operator), new Map());
+
+		// Entry should exist
+		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const entry = entries.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry!.gap).toBe("50"); // maxBuy - delivered
+		expect(entry!.delta).toBe("950");
+		expect(BigInt(entry!.ethAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
+	});
+
+	it("records a negative entry for over-delivery", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 1050n; // over-delivered by 50
+		const refPrice = ETHER.toString();
+
+		const { id, tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const operator = slippageOperator(deltaByTx);
+
+		await runSlippageDebits(config(operator), new Map());
+
+		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const entry = entries.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry!.gap).toBe("-50");
+		expect(BigInt(entry!.ethAmount)).toBe(-50n);
+	});
+
+	it("does not create duplicate entries on repeated ticks", async () => {
+		const { id, tx } = await settledSlippageProposal(1000n, 900n, ETHER.toString());
+		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
+		const operator = slippageOperator(deltaByTx);
+
+		await runSlippageDebits(config(operator), new Map());
+		await runSlippageDebits(config(operator), new Map());
+
+		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const matching = entries.filter((e) => e.proposalId === id);
+		expect(matching).toHaveLength(1);
+	});
+
+	it("slashes when outstanding balance exceeds c_L", async () => {
+		// Create a proposal with a gap large enough to exceed c_L (0.01 ETH)
+		const maxBuy = ETHER; // 1e18
+		const minBuy = ETHER / 2n;
+		// delivered = 0.98e18, gap = 0.02e18. With ref price = 1 ETH/token,
+		// ethAmount = 0.02 ETH = 2e16 > c_L (1e16).
+		const delivered = (ETHER * 98n) / 100n;
+		const refPrice = ETHER.toString();
+
+		const { tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const events: AuditEvent[] = [];
+		const operator = slippageOperator(deltaByTx, debitCalls);
+
+		await runSlippageDebits(config(operator, events), new Map());
+
+		// The debit should have been called
+		const ourDebits = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === SUB_SOLVER.toLowerCase(),
+		);
+		expect(ourDebits.length).toBeGreaterThanOrEqual(1);
+
+		// All entries for this subsolver should be cleared
+		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared).toHaveLength(0);
+
+		// Audit event should have been emitted
+		expect(events.some((e) => e.kind.type === "slippageDebited")).toBe(true);
+	});
+
+	it("does not slash when balance is below c_L", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 999n; // gap = 1, ethAmount = 1 wei — well below c_L
+		const refPrice = ETHER.toString();
+
+		const { tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const operator = slippageOperator(deltaByTx, debitCalls);
+
+		await runSlippageDebits(config(operator, []), new Map());
+
+		// Entry recorded but no slash
+		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared.length).toBeGreaterThanOrEqual(1);
+		// No debit call for slippage (there may be calls from other tests' proposals)
+		// Check that no new debit was triggered by verifying entries remain uncleared
+		const allCleared = uncleared.every((e) => !e.cleared);
+		expect(allCleared).toBe(true);
+	});
+
+	it("credits offset debits before threshold check", async () => {
+		// First proposal: under-delivery of 0.008 ETH
+		const { tx: tx1 } = await settledSlippageProposal(ETHER, ETHER / 2n, ETHER.toString());
+		// Second proposal: over-delivery of 0.006 ETH
+		const { tx: tx2 } = await settledSlippageProposal(ETHER, ETHER / 2n, ETHER.toString());
+		const deltaByTx = new Map([
+			[tx1.toLowerCase(), ETHER - 8_000_000_000_000_000n], // gap = +0.008 ETH
+			[tx2.toLowerCase(), ETHER + 6_000_000_000_000_000n], // gap = -0.006 ETH
+		]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const operator = slippageOperator(deltaByTx, debitCalls);
+
+		await runSlippageDebits(config(operator, []), new Map());
+
+		// Net balance = 0.008 - 0.006 = 0.002 ETH < c_L (0.01 ETH)
+		// No slash should happen — entries remain uncleared
+		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("proposal stays settled after slippage entry is recorded", async () => {
+		const { id, tx } = await settledSlippageProposal(1000n, 900n, ETHER.toString());
+		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
+		const operator = slippageOperator(deltaByTx);
+
+		await runSlippageDebits(config(operator), new Map());
+
+		const proposal = await store.get(ctx.db, id);
+		expect(proposal?.status).toBe("settled");
+	});
+
+	it("ignores settled proposals without aggressive slippage", async () => {
+		// minBuyAmount == maxBuyAmount: no slippage accounting
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: SUB_SOLVER,
+			minBuyAmount: 1000n,
+			maxBuyAmount: 1000n,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+
+		const operator = slippageOperator(new Map());
+		await runSlippageDebits(config(operator), new Map());
+
+		// No entry should exist for this proposal
+		const exists = await store.slippageEntryExistsForProposal(ctx.db, id);
+		expect(exists).toBe(false);
 	});
 });
