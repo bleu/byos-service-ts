@@ -21,7 +21,8 @@ export const proposals = pgTable(
 		orderUid: text("order_uid").notNull(),
 		orderUidHash: text("order_uid_hash").notNull(),
 		sellAmount: text("sell_amount").notNull(),
-		buyAmount: text("buy_amount").notNull(),
+		minBuyAmount: text("min_buy_amount").notNull(),
+		maxBuyAmount: text("max_buy_amount").notNull(),
 		sellToken: text("sell_token").notNull(),
 		buyToken: text("buy_token").notNull(),
 		interactions: jsonb().notNull(),
@@ -81,6 +82,7 @@ export const solutions = pgTable(
 		proposalId: bigint("proposal_id", { mode: "number" })
 			.notNull()
 			.references(() => proposals.id, { onDelete: "cascade" }),
+		buyTokenRefPrice: text("buy_token_ref_price").notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [
