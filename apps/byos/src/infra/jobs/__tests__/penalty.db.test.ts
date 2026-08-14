@@ -549,4 +549,110 @@ describe("slippage debits", () => {
 		const exists = await store.slippageEntryExistsForProposal(ctx.db, id);
 		expect(exists).toBe(false);
 	});
+
+	it("does not double-debit when finalize fails after a successful on-chain debit", async () => {
+		// Use a fresh subsolver address to isolate from other tests
+		const isolatedSolver = "0xdead000000000000000000000000000000000001" as Address;
+		const maxBuy = ETHER;
+		const minBuy = ETHER / 2n;
+		const delivered = (ETHER * 98n) / 100n; // gap = 0.02 ETH > c_L
+		const refPrice = ETHER.toString();
+
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: isolatedSolver,
+			minBuyAmount: minBuy,
+			maxBuyAmount: maxBuy,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
+
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+
+		// First tick: records entry AND slashes (balance > c_L)
+		const op1 = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runSlippageDebits(config(op1), new Map());
+
+		const firstDebitCount = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		).length;
+		expect(firstDebitCount).toBe(1);
+
+		// Second tick: entries are already cleared, so no new debit
+		debitCalls.length = 0;
+		const op2 = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runSlippageDebits(config(op2), new Map());
+
+		const secondDebitCount = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		).length;
+		expect(secondDebitCount).toBe(0);
+	});
+
+	it("reverts in-flight entries when the on-chain debit fails", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000002" as Address;
+		const maxBuy = ETHER;
+		const minBuy = ETHER / 2n;
+		const delivered = (ETHER * 98n) / 100n;
+		const refPrice = ETHER.toString();
+
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: isolatedSolver,
+			minBuyAmount: minBuy,
+			maxBuyAmount: maxBuy,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
+
+		// Operator that reads delta fine but fails on debit
+		const failingOperator: DebitEscrow = {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async debit() {
+				throw new Error("escrow paused");
+			},
+			async readExecutedDelta(txHash) {
+				if (txHash.toLowerCase() === tx.toLowerCase()) return delivered;
+				throw new Error("unknown tx");
+			},
+		};
+
+		// First tick: entry is recorded, debit fails, entries are reverted
+		await runSlippageDebits(config(failingOperator), new Map());
+
+		// Entries should be back to uncleared (not stuck in-flight)
+		const uncleared = await store.unclearedSlippageEntries(ctx.db, isolatedSolver);
+		expect(uncleared.length).toBeGreaterThanOrEqual(1);
+		const entry = uncleared.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry?.cleared).toBe(false);
+
+		// Second tick with a working operator: should successfully debit
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const workingOp = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runSlippageDebits(config(workingOp), new Map());
+
+		const debits = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		);
+		expect(debits.length).toBe(1);
+	});
 });

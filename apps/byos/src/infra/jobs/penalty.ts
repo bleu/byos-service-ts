@@ -269,7 +269,23 @@ export async function runSlippageDebits(
 		}
 	}
 
+	// Also check subsolvers with pre-existing uncleared entries (from previous ticks
+	// where balance was below threshold, or where a prior debit failed and entries
+	// were reverted).
+	try {
+		const existing = await store.unclearedSlippageSubSolvers(db);
+		for (const s of existing) affectedSubSolvers.add(s);
+	} catch (e) {
+		logger.error({ err: e }, "slippage: failed to fetch subsolvers with uncleared entries");
+	}
+
 	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
+	// Uses a mark-before-debit pattern to prevent double-charging:
+	//   a) Mark entries in-flight (cleared=true, clear_tx_hash=NULL)
+	//   b) Call operator.debit()
+	//   c) Finalize with real tx hash — or revert if the debit fails
+	// In-flight entries are excluded from balance queries, so a crash between
+	// (a) and (b) results in under-charging (safe), never double-charging.
 	for (const subSolver of affectedSubSolvers) {
 		let balance: bigint;
 		try {
@@ -281,7 +297,16 @@ export async function runSlippageDebits(
 
 		if (balance <= cL) continue;
 
-		// Slash the full outstanding balance
+		// (a) Mark entries in-flight before the on-chain call
+		let entryCount: number;
+		try {
+			entryCount = await store.markSlippageEntriesInFlight(db, subSolver);
+		} catch (e) {
+			logger.error({ err: e, subSolver }, "slippage: failed to mark entries in-flight");
+			continue;
+		}
+
+		// (b) Debit escrow
 		let clearTxHash: Hex;
 		try {
 			clearTxHash = await operator.debit(
@@ -292,18 +317,30 @@ export async function runSlippageDebits(
 		} catch (e) {
 			logger.error(
 				{ err: e, subSolver, balance: balance.toString() },
-				"slippage escrow debit failed",
+				"slippage escrow debit failed; reverting in-flight entries",
 			);
+			try {
+				await store.revertInFlightSlippageEntries(db, subSolver);
+			} catch (revertErr) {
+				logger.error(
+					{ err: revertErr, subSolver },
+					"failed to revert in-flight entries after debit failure",
+				);
+			}
 			continue;
 		}
 
-		let entryCount: number;
+		// (c) Finalize with the real tx hash
 		try {
-			entryCount = await store.clearSlippageEntries(db, subSolver, clearTxHash);
+			await store.finalizeSlippageEntries(db, subSolver, clearTxHash);
 		} catch (e) {
+			// The debit landed but finalize failed. Entries remain in-flight
+			// (cleared=true, clear_tx_hash=NULL) — they will NOT be re-debited
+			// because they are already marked cleared. A manual reconciliation
+			// is needed to set the tx hash.
 			logger.error(
-				{ err: e, subSolver },
-				"slippage debit landed but entries not cleared; may re-charge next tick",
+				{ err: e, subSolver, tx: clearTxHash },
+				"slippage debit landed but finalize failed; entries are in-flight, no double-charge risk",
 			);
 			continue;
 		}

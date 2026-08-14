@@ -810,6 +810,15 @@ export async function insertSlippageEntry(
 	return result[0]!.id;
 }
 
+/** Returns all subsolver addresses that have uncleared slippage entries. */
+export async function unclearedSlippageSubSolvers(db: Db): Promise<Address[]> {
+	const rows = await db
+		.selectDistinct({ subSolver: slippageEntries.subSolver })
+		.from(slippageEntries)
+		.where(eq(slippageEntries.cleared, false));
+	return rows.map((r) => r.subSolver as Address);
+}
+
 /** Returns the outstanding (uncleared) slippage balance for a subsolver in ETH (as bigint). */
 export async function outstandingSlippageBalance(db: Db, subSolver: Address): Promise<bigint> {
 	const rows = await db
@@ -855,6 +864,61 @@ export async function unclearedSlippageEntries(
 		clearTxHash: r.clearTxHash,
 		createdAt: r.createdAt,
 	}));
+}
+
+/**
+ * Marks all uncleared entries as in-flight (cleared=true, clear_tx_hash=NULL).
+ * In-flight entries are excluded from balance computation, preventing double-debit
+ * if the on-chain debit succeeds but the subsequent DB update fails.
+ */
+export async function markSlippageEntriesInFlight(db: Db, subSolver: Address): Promise<number> {
+	const result = await db
+		.update(slippageEntries)
+		.set({ cleared: true, clearTxHash: null })
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, false),
+			),
+		)
+		.returning({ id: slippageEntries.id });
+	return result.length;
+}
+
+/** Finalizes in-flight entries with the actual debit tx hash. */
+export async function finalizeSlippageEntries(
+	db: Db,
+	subSolver: Address,
+	clearTxHash: Hex,
+): Promise<number> {
+	const result = await db
+		.update(slippageEntries)
+		.set({ clearTxHash: clearTxHash.toLowerCase() })
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, true),
+				sql`clear_tx_hash IS NULL`,
+			),
+		)
+		.returning({ id: slippageEntries.id });
+	return result.length;
+}
+
+/** Reverts in-flight entries back to uncleared (debit failed or was not attempted). */
+export async function revertInFlightSlippageEntries(db: Db, subSolver: Address): Promise<number> {
+	const result = await db
+		.update(slippageEntries)
+		.set({ cleared: false })
+		.where(
+			and(
+				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
+				eq(slippageEntries.cleared, true),
+				sql`clear_tx_hash IS NULL`,
+			),
+		)
+		.returning({ id: slippageEntries.id });
+	return result.length;
 }
 
 /** Marks all uncleared entries for a subsolver as cleared with the given tx hash. */
