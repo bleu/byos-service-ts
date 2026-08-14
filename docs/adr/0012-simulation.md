@@ -23,7 +23,7 @@ Because the order is real, the user has genuinely approved the vault relayer and
 
 ### What the simulation does not model
 
-The encoder sets `executedAmount` to the proposal's fill amount and `clearingPrices` to the raw proposal amounts. The driver's real transaction subtracts the gas cut and substitutes its own per-trade prices, then applies protocol fees. Neither is threaded through the encoder: the gas is the same (same tokens, same interactions, same trade, same storage touched), and the divergence is one-directional — the real transaction pays the user less than the simulated one, never more.
+The encoder sets `executedAmount` to the proposal's fill amount and `clearingPrices` to the proposal's `maxBuyAmount` (and `sellAmount`). The driver's real transaction subtracts the gas cut and substitutes its own per-trade prices, then applies protocol fees. Neither is threaded through the encoder: the gas is the same (same tokens, same interactions, same trade, same storage touched), and the divergence is one-directional — the real transaction pays the user less than the simulated one, never more.
 
 ### The two state overrides
 

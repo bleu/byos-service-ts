@@ -1,6 +1,6 @@
 # Solver engine
 
-Status: proposed
+Status: proposed; revised 2026-08-14 (minBuyAmount/maxBuyAmount split)
 
 Spec: docs/shared/design-document.md#solver-engine
       https://bleu.github.io/byos-docs/design-document#solver-engine
@@ -19,7 +19,7 @@ The selection pipeline, scoring formula, settlement crafting, solution shape, an
 
 ### Why `surplus - gas` and no fee term
 
-CoW's score is surplus plus protocol fees; gas reaches it only because the solver declares gas as its own fee, lowering surplus. The protocol fee cancels out of ranking. Once BYOS's cut equals the gas cost, `surplus - gas` is the score the autopilot will compute for the bid.
+CoW's score is surplus plus protocol fees; gas reaches it only because the solver declares gas as its own fee, lowering surplus. The protocol fee cancels out of ranking. Once BYOS's cut equals the gas cost, `surplus - gas` is the score the autopilot will compute for the bid. The scoring formula uses `maxBuyAmount` from the proposal to compute surplus and clearing prices.
 
 BYOS does not estimate protocol fees either — the driver applies them itself, then encodes and simulates. A solution that cannot absorb the fee fails that simulation and is dropped with no revert, no penalty, and no escrow debit. Estimating it before `/solve` is also impossible: fee policies arrive only in the `/solve` payload.
 
@@ -77,4 +77,5 @@ The path is: receive auction, indexed DB read (~1ms), pre-filter (microseconds),
 - **Outcome observation costs no extra infrastructure**, per [ADR-0010](0010-settlement-outcome-source.md).
 - **The profitability gate may reject viable proposals.** A proposal rejected during a gas spike would have been profitable minutes later. `Rejected` is terminal (ADR-0013), so the sub-solver has to resubmit.
 - **The gas cut recovers gas approximately, not exactly.** The gap is accepted and monitored.
+- **Slippage debit after settlement.** After a successful settlement, the penalty job computes the gap between `maxBuyAmount` and the delivered amount. It converts this gap to ETH with the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
 - **Proposal freshness gap.** With 3–5 block simulation intervals, proposals can be up to ~60s stale. The driver's re-simulation catches this, but with pick-one there is no fallback.
