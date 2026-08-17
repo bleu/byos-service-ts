@@ -4,7 +4,7 @@ import type { Address, Hex } from "viem";
 export interface DebitEscrow {
 	settlementCost(txHash: Hex): Promise<bigint>;
 	debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
-	readExecutedDelta(txHash: Hex): Promise<bigint>;
+	readExecutedDelta(txHash: Hex, orderUidHash: Hex): Promise<bigint>;
 }
 
 /** Reverted settlement debit = settlement's on-chain cost + c_l. */

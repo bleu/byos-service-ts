@@ -215,7 +215,7 @@ export async function runSlippageDebits(
 		// Read the delivered delta from the Executed event
 		let delta: bigint;
 		try {
-			delta = await operator.readExecutedDelta(proposal.settlementTxHash);
+			delta = await operator.readExecutedDelta(proposal.settlementTxHash, proposal.orderUidHash);
 		} catch (e) {
 			noteDebitFailure(attempts, proposal.id, e, "readExecutedDelta", logger);
 			continue;
@@ -223,8 +223,8 @@ export async function runSlippageDebits(
 
 		const gap = proposal.quoteBuyAmount - delta;
 		if (gap <= 0n) {
-			// Over-delivered or exact: no debit needed. Mark as processed by
-			// transitioning to penalized with zero-cost penalty.
+			// Over-delivered or exact: no debit needed. Proposal stays in
+			// "settled" (terminal); retention sweep will clean it up.
 			attempts.delete(proposal.id);
 			continue;
 		}
@@ -262,7 +262,7 @@ export async function runSlippageDebits(
 		attempts.delete(proposal.id);
 
 		try {
-			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash);
+			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash, "settled");
 			if ("auditEvent" in result) {
 				onAuditEvent(result.auditEvent);
 				logger.info(

@@ -431,6 +431,7 @@ export async function recordPenalty(
 	proposal: Proposal,
 	amount: bigint,
 	penaltyTxHash: Hex,
+	fromStatus: Status = "settleFailed",
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
 	const result = await db
 		.update(proposals)
@@ -439,14 +440,14 @@ export async function recordPenalty(
 			penaltyTxHash: penaltyTxHash.toLowerCase(),
 			statusChangedAt: sql`now()`,
 		})
-		.where(and(eq(proposals.id, proposal.id), eq(proposals.status, "settleFailed")))
+		.where(and(eq(proposals.id, proposal.id), eq(proposals.status, fromStatus)))
 		.returning({ id: proposals.id });
 
 	if (result.length === 0) {
 		return {
 			kind: "staleTransition",
 			id: proposal.id,
-			expected: "settleFailed",
+			expected: fromStatus,
 			actual: null,
 		};
 	}

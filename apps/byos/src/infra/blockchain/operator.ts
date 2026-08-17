@@ -41,7 +41,7 @@ export class EscrowOperator {
 	}
 
 	/** Reads the delivered delta from the Executed event in a settlement tx receipt. */
-	async readExecutedDelta(txHash: Hex): Promise<bigint> {
+	async readExecutedDelta(txHash: Hex, orderUidHash: Hex): Promise<bigint> {
 		const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash });
 		for (const log of receipt.logs) {
 			try {
@@ -50,13 +50,16 @@ export class EscrowOperator {
 					data: log.data,
 					topics: log.topics,
 				});
-				if (event.eventName === "Executed") {
+				if (
+					event.eventName === "Executed" &&
+					(event.args as { _orderUidHash: Hex })._orderUidHash === orderUidHash
+				) {
 					return (event.args as { _delta: bigint })._delta;
 				}
 			} catch {
 				// Not an Executed event from the Trampoline ABI, skip
 			}
 		}
-		throw new Error(`No Executed event found in tx ${txHash}`);
+		throw new Error(`No Executed event for ${orderUidHash} found in tx ${txHash}`);
 	}
 }
