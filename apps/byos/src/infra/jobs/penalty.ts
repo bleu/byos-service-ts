@@ -5,8 +5,8 @@ import { type Address, type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import {
-	type DebitEscrow,
 	bufferDebit,
+	type DebitEscrow,
 	nonSettlementDebit,
 	revertDebit,
 } from "../../domain/penalty.js";

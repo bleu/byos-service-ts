@@ -830,27 +830,18 @@ export async function outstandingBufferBalance(db: Db, subSolver: Address): Prom
 		})
 		.from(bufferEntries)
 		.where(
-			and(
-				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
-				eq(bufferEntries.cleared, false),
-			),
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
 		);
 	return BigInt(rows[0]?.total ?? "0");
 }
 
 /** Returns all uncleared buffer entries for a subsolver. */
-export async function unclearedBufferEntries(
-	db: Db,
-	subSolver: Address,
-): Promise<BufferEntry[]> {
+export async function unclearedBufferEntries(db: Db, subSolver: Address): Promise<BufferEntry[]> {
 	const rows = await db
 		.select()
 		.from(bufferEntries)
 		.where(
-			and(
-				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
-				eq(bufferEntries.cleared, false),
-			),
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
 		)
 		.orderBy(bufferEntries.createdAt);
 	return rows.map((r) => ({
@@ -878,10 +869,7 @@ export async function markBufferEntriesInFlight(db: Db, subSolver: Address): Pro
 		.update(bufferEntries)
 		.set({ cleared: true, clearTxHash: null })
 		.where(
-			and(
-				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
-				eq(bufferEntries.cleared, false),
-			),
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
 		)
 		.returning({ id: bufferEntries.id });
 	return result.length;
@@ -933,10 +921,7 @@ export async function clearBufferEntries(
 		.update(bufferEntries)
 		.set({ cleared: true, clearTxHash: clearTxHash.toLowerCase() })
 		.where(
-			and(
-				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
-				eq(bufferEntries.cleared, false),
-			),
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
 		)
 		.returning({ id: bufferEntries.id });
 	return result.length;
