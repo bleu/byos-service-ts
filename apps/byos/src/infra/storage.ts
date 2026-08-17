@@ -2,7 +2,7 @@ import type { RejectionReason, Status } from "@byos/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
-import { penalties, proposals, solutions } from "../db/schema.js";
+import { bufferEntries, penalties, proposals, solutions } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
@@ -757,6 +757,174 @@ export async function solutionProposals(
 		.orderBy(proposals.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
+}
+
+// --- Buffer Entries ---
+
+export interface BufferEntry {
+	id: number;
+	subSolver: Address;
+	proposalId: number;
+	orderUid: string;
+	buyToken: Address;
+	delta: string;
+	gap: string;
+	nativeTokenAmount: string;
+	cleared: boolean;
+	clearTxHash: string | null;
+	createdAt: Date;
+}
+
+/** Checks whether a buffer entry already exists for a proposal. */
+export async function bufferEntryExistsForProposal(db: Db, proposalId: number): Promise<boolean> {
+	const rows = await db
+		.select({ id: bufferEntries.id })
+		.from(bufferEntries)
+		.where(eq(bufferEntries.proposalId, proposalId))
+		.limit(1);
+	return rows.length > 0;
+}
+
+/** Inserts a buffer entry for a settled proposal. */
+export async function insertBufferEntry(
+	db: Db,
+	entry: {
+		subSolver: Address;
+		proposalId: number;
+		orderUid: string;
+		buyToken: Address;
+		delta: string;
+		gap: string;
+		nativeTokenAmount: string;
+	},
+): Promise<number> {
+	const result = await db
+		.insert(bufferEntries)
+		.values({
+			subSolver: entry.subSolver.toLowerCase(),
+			proposalId: entry.proposalId,
+			orderUid: entry.orderUid.toLowerCase(),
+			buyToken: entry.buyToken.toLowerCase(),
+			delta: entry.delta,
+			gap: entry.gap,
+			nativeTokenAmount: entry.nativeTokenAmount,
+		})
+		.returning({ id: bufferEntries.id });
+	return result[0]!.id;
+}
+
+/** Returns all subsolver addresses that have uncleared buffer entries. */
+export async function unclearedBufferSubSolvers(db: Db): Promise<Address[]> {
+	const rows = await db
+		.selectDistinct({ subSolver: bufferEntries.subSolver })
+		.from(bufferEntries)
+		.where(eq(bufferEntries.cleared, false));
+	return rows.map((r) => r.subSolver as Address);
+}
+
+/** Returns the outstanding (uncleared) buffer balance for a subsolver in native token (as bigint). */
+export async function outstandingBufferBalance(db: Db, subSolver: Address): Promise<bigint> {
+	const rows = await db
+		.select({
+			total: sql<string>`COALESCE(SUM(CAST(${bufferEntries.nativeTokenAmount} AS numeric)), 0)`,
+		})
+		.from(bufferEntries)
+		.where(
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+		);
+	return BigInt(rows[0]?.total ?? "0");
+}
+
+/** Returns all uncleared buffer entries for a subsolver. */
+export async function unclearedBufferEntries(db: Db, subSolver: Address): Promise<BufferEntry[]> {
+	const rows = await db
+		.select()
+		.from(bufferEntries)
+		.where(
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+		)
+		.orderBy(bufferEntries.createdAt);
+	return rows.map((r) => ({
+		id: r.id,
+		subSolver: r.subSolver as Address,
+		proposalId: r.proposalId,
+		orderUid: r.orderUid,
+		buyToken: r.buyToken as Address,
+		delta: r.delta,
+		gap: r.gap,
+		nativeTokenAmount: r.nativeTokenAmount,
+		cleared: r.cleared,
+		clearTxHash: r.clearTxHash,
+		createdAt: r.createdAt,
+	}));
+}
+
+/**
+ * Marks all uncleared entries as in-flight (cleared=true, clear_tx_hash=NULL).
+ * In-flight entries are excluded from balance computation, preventing double-debit
+ * if the on-chain debit succeeds but the subsequent DB update fails.
+ */
+export async function markBufferEntriesInFlight(db: Db, subSolver: Address): Promise<number> {
+	const result = await db
+		.update(bufferEntries)
+		.set({ cleared: true, clearTxHash: null })
+		.where(
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+		)
+		.returning({ id: bufferEntries.id });
+	return result.length;
+}
+
+/** Finalizes in-flight entries with the actual debit tx hash. */
+export async function finalizeBufferEntries(
+	db: Db,
+	subSolver: Address,
+	clearTxHash: Hex,
+): Promise<number> {
+	const result = await db
+		.update(bufferEntries)
+		.set({ clearTxHash: clearTxHash.toLowerCase() })
+		.where(
+			and(
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, true),
+				sql`clear_tx_hash IS NULL`,
+			),
+		)
+		.returning({ id: bufferEntries.id });
+	return result.length;
+}
+
+/** Reverts in-flight entries back to uncleared (debit failed or was not attempted). */
+export async function revertInFlightBufferEntries(db: Db, subSolver: Address): Promise<number> {
+	const result = await db
+		.update(bufferEntries)
+		.set({ cleared: false })
+		.where(
+			and(
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, true),
+				sql`clear_tx_hash IS NULL`,
+			),
+		)
+		.returning({ id: bufferEntries.id });
+	return result.length;
+}
+
+/** Marks all uncleared entries for a subsolver as cleared with the given tx hash. */
+export async function clearBufferEntries(
+	db: Db,
+	subSolver: Address,
+	clearTxHash: Hex,
+): Promise<number> {
+	const result = await db
+		.update(bufferEntries)
+		.set({ cleared: true, clearTxHash: clearTxHash.toLowerCase() })
+		.where(
+			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+		)
+		.returning({ id: bufferEntries.id });
+	return result.length;
 }
 
 export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {

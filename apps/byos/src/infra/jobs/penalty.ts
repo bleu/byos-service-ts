@@ -1,14 +1,14 @@
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
-import { type Hex, keccak256 } from "viem";
+import { type Address, type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import {
+	bufferDebit,
 	type DebitEscrow,
 	nonSettlementDebit,
 	revertDebit,
-	slippageDebit,
 } from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
@@ -35,14 +35,14 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 	const revertAttempts = new Map<number, number>();
 	const nonSettlementAttempts = new Map<number, number>();
 
-	const slippageAttempts = new Map<number, number>();
+	const bufferAttempts = new Map<number, number>();
 
 	return new Worker(
 		"byos:penalty",
 		async () => {
 			await runRevertDebits(config, revertAttempts);
 			await runNonSettlementDebits(config, nonSettlementAttempts);
-			await runSlippageDebits(config, slippageAttempts);
+			await runBufferDebits(config, bufferAttempts);
 		},
 		{
 			connection,
@@ -185,34 +185,57 @@ export async function runNonSettlementDebits(
 	}
 }
 
-export async function runSlippageDebits(
+/**
+ * Processes buffer accounting for settled proposals with aggressive slippage
+ * (minBuyAmount < quoteBuyAmount).
+ *
+ * Step 1: Record a ledger entry per proposal (signed: positive = under-delivery,
+ *         negative = over-delivery credit).
+ * Step 2: For each subsolver with uncleared entries, check if the outstanding
+ *         balance exceeds c_L. If so, slash the full balance from escrow and
+ *         mark all entries cleared.
+ *
+ * Over-delivery credits offset future shortfalls but are never paid out.
+ *
+ * Debits use a mark-before-debit pattern to prevent double-charging on DB
+ * failures after a successful on-chain debit.
+ */
+export async function runBufferDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, onAuditEvent, logger } = config;
+	const { db, operator, cL, onAuditEvent, logger } = config;
 
-	// Snapshot settled proposals where minBuyAmount < quoteBuyAmount
+	// Step 1: Snapshot settled proposals with loose slippage that have
+	// no ledger entry yet.
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
 		pending = await store.snapshotByStatuses(db, ["settled"]);
 	} catch (e) {
-		logger.error({ err: e }, "penalty: failed to snapshot settled for slippage");
+		logger.error({ err: e }, "buffer: failed to snapshot settled proposals");
 		return;
 	}
 
-	// Filter to proposals with loose slippage (minBuyAmount < quoteBuyAmount)
-	const slippagePending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
-	if (slippagePending.length === 0) return;
+	const bufferPending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
+	const affectedSubSolvers = new Set<Address>();
 
-	for (const proposal of slippagePending) {
+	// Step 2: For each proposal without a ledger entry, compute and insert one.
+	for (const proposal of bufferPending) {
 		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
-		if (!proposal.settlementTxHash) {
-			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute slippage");
+		// Skip proposals that already have a ledger entry
+		try {
+			if (await store.bufferEntryExistsForProposal(db, proposal.id)) continue;
+		} catch (e) {
+			noteDebitFailure(attempts, proposal.id, e, "buffer entry existence check", logger);
 			continue;
 		}
 
-		// Read the delivered delta from the Executed event
+		if (!proposal.settlementTxHash) {
+			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute buffer");
+			continue;
+		}
+
 		let delta: bigint;
 		try {
 			delta = await operator.readExecutedDelta(proposal.settlementTxHash, proposal.orderUidHash);
@@ -221,15 +244,6 @@ export async function runSlippageDebits(
 			continue;
 		}
 
-		const gap = proposal.quoteBuyAmount - delta;
-		if (gap <= 0n) {
-			// Over-delivered or exact: no debit needed. Proposal stays in
-			// "settled" (terminal); retention sweep will clean it up.
-			attempts.delete(proposal.id);
-			continue;
-		}
-
-		// Look up the buy-token reference price stored at /solve time
 		let refPriceStr: string | null;
 		try {
 			refPriceStr = await store.buyTokenRefPriceForProposal(db, proposal.id);
@@ -239,47 +253,128 @@ export async function runSlippageDebits(
 		}
 
 		if (!refPriceStr || refPriceStr === "0") {
-			logger.warn({ id: proposal.id }, "no buy-token ref price for slippage debit; skipping");
+			logger.warn({ id: proposal.id }, "no buy-token ref price for buffer; skipping");
 			attempts.delete(proposal.id);
 			continue;
 		}
 
+		const gap = proposal.quoteBuyAmount - delta;
 		const refPrice = BigInt(refPriceStr);
-		const amount = slippageDebit(gap, refPrice);
-		if (amount === 0n) {
+		const nativeAmount = bufferDebit(gap < 0n ? -gap : gap, refPrice);
+		// Preserve sign: positive = under-delivery debit, negative = over-delivery credit
+		const signedNativeAmount = gap < 0n ? -nativeAmount : nativeAmount;
+
+		try {
+			await store.insertBufferEntry(db, {
+				subSolver: proposal.subSolver,
+				proposalId: proposal.id,
+				orderUid: proposal.orderUid,
+				buyToken: proposal.buyToken,
+				delta: delta.toString(),
+				gap: gap.toString(),
+				nativeTokenAmount: signedNativeAmount.toString(),
+			});
+			affectedSubSolvers.add(proposal.subSolver);
 			attempts.delete(proposal.id);
-			continue;
-		}
-
-		let penaltyTxHash: Awaited<ReturnType<typeof operator.debit>>;
-		try {
-			penaltyTxHash = await operator.debit(proposal.subSolver, amount, proposal.settlementTxHash);
+			logger.info(
+				{ id: proposal.id, gap: gap.toString(), nativeTokenAmount: signedNativeAmount.toString() },
+				"buffer entry recorded",
+			);
 		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "slippage escrow debit", logger);
+			noteDebitFailure(attempts, proposal.id, e, "buffer entry insert", logger);
+		}
+	}
+
+	// Also check subsolvers with pre-existing uncleared entries (from previous ticks
+	// where balance was below threshold, or where a prior debit failed and entries
+	// were reverted).
+	try {
+		const existing = await store.unclearedBufferSubSolvers(db);
+		for (const s of existing) affectedSubSolvers.add(s);
+	} catch (e) {
+		logger.error({ err: e }, "buffer: failed to fetch subsolvers with uncleared entries");
+	}
+
+	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
+	// Uses a mark-before-debit pattern to prevent double-charging:
+	//   a) Mark entries in-flight (cleared=true, clear_tx_hash=NULL)
+	//   b) Call operator.debit()
+	//   c) Finalize with real tx hash — or revert if the debit fails
+	// In-flight entries are excluded from balance queries, so a crash between
+	// (a) and (b) results in under-charging (safe), never double-charging.
+	for (const subSolver of affectedSubSolvers) {
+		let balance: bigint;
+		try {
+			balance = await store.outstandingBufferBalance(db, subSolver);
+		} catch (e) {
+			logger.error({ err: e, subSolver }, "buffer: failed to read outstanding balance");
 			continue;
 		}
 
-		attempts.delete(proposal.id);
+		if (balance <= cL) continue;
 
+		// (a) Mark entries in-flight before the on-chain call
+		let entryCount: number;
 		try {
-			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash, "settled");
-			if ("auditEvent" in result) {
-				onAuditEvent(result.auditEvent);
-				logger.info(
-					{ id: proposal.id, gap: gap.toString(), amount: amount.toString(), tx: penaltyTxHash },
-					"slippage debit landed",
-				);
-			} else {
-				logger.error(
-					{ id: proposal.id, error: result },
-					"slippage debit landed but proposal not marked penalized; may re-charge next tick",
-				);
-			}
+			entryCount = await store.markBufferEntriesInFlight(db, subSolver);
+		} catch (e) {
+			logger.error({ err: e, subSolver }, "buffer: failed to mark entries in-flight");
+			continue;
+		}
+
+		// (b) Debit escrow
+		let clearTxHash: Hex;
+		try {
+			clearTxHash = await operator.debit(
+				subSolver,
+				balance,
+				keccak256(`0x${subSolver.slice(2)}${"00".repeat(12)}` as Hex),
+			);
 		} catch (e) {
 			logger.error(
-				{ err: e, id: proposal.id },
-				"slippage debit landed but proposal not marked penalized; may re-charge next tick",
+				{ err: e, subSolver, balance: balance.toString() },
+				"buffer escrow debit failed; reverting in-flight entries",
 			);
+			try {
+				await store.revertInFlightBufferEntries(db, subSolver);
+			} catch (revertErr) {
+				logger.error(
+					{ err: revertErr, subSolver },
+					"failed to revert in-flight entries after debit failure",
+				);
+			}
+			continue;
 		}
+
+		// (c) Finalize with the real tx hash
+		try {
+			await store.finalizeBufferEntries(db, subSolver, clearTxHash);
+		} catch (e) {
+			// The debit landed but finalize failed. Entries remain in-flight
+			// (cleared=true, clear_tx_hash=NULL) — they will NOT be re-debited
+			// because they are already marked cleared. A manual reconciliation
+			// is needed to set the tx hash.
+			logger.error(
+				{ err: e, subSolver, tx: clearTxHash },
+				"buffer debit landed but finalize failed; entries are in-flight, no double-charge risk",
+			);
+			continue;
+		}
+
+		onAuditEvent({
+			occurredAt: new Date(),
+			kind: {
+				type: "bufferDebited",
+				subSolver,
+				amount: balance,
+				clearTxHash,
+				entryCount,
+			},
+		});
+
+		logger.info(
+			{ subSolver, balance: balance.toString(), entryCount, tx: clearTxHash },
+			"buffer balance slashed",
+		);
 	}
 }

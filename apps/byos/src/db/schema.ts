@@ -91,6 +91,35 @@ export const solutions = pgTable(
 	],
 );
 
+// --- buffer_entries ---
+// Per-proposal ledger for the quoteBuyAmount-vs-delivered gap. Positive native_token_amount
+// means under-delivery (debit); negative means over-delivery (credit).
+// Debits are slashed automatically when the outstanding balance exceeds c_L.
+// Credits offset future shortfalls but are never paid out.
+
+export const bufferEntries = pgTable(
+	"buffer_entries",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		subSolver: text("sub_solver").notNull(),
+		proposalId: bigint("proposal_id", { mode: "number" })
+			.notNull()
+			.references(() => proposals.id, { onDelete: "cascade" }),
+		orderUid: text("order_uid").notNull(),
+		delta: text().notNull(),
+		gap: text().notNull(),
+		buyToken: text("buy_token").notNull(),
+		nativeTokenAmount: text("native_token_amount").notNull(),
+		cleared: boolean().notNull().default(false),
+		clearTxHash: text("clear_tx_hash"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		index("buffer_entries_sub_solver_cleared_idx").on(table.subSolver, table.cleared),
+		index("buffer_entries_proposal_id_idx").on(table.proposalId),
+	],
+);
+
 // --- penalties ---
 
 export const penalties = pgTable(

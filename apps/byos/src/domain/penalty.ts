@@ -19,8 +19,15 @@ export function nonSettlementDebit(cL: bigint): bigint {
 
 const ETHER = 10n ** 18n;
 
-/** Slippage debit: converts a buy-token gap to ETH using the auction reference price. */
-export function slippageDebit(gap: bigint, refPrice: bigint): bigint {
+/**
+ * Converts a buy-token gap to ETH using the auction reference price.
+ *
+ * The result feeds into the buffer ledger. Positive entries (under-delivery)
+ * accumulate until the outstanding balance exceeds c_L, then the full balance
+ * is debited from escrow. Negative entries (over-delivery) offset future
+ * shortfalls but are never paid out.
+ */
+export function bufferDebit(gap: bigint, refPrice: bigint): bigint {
 	return (gap * refPrice) / ETHER;
 }
 
