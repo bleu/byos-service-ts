@@ -122,7 +122,7 @@ export function createSolveRoute(config: SolveConfig) {
 					const exceeds =
 						order.kind === "sell"
 							? proposal.sellAmount > BigInt(order.sellAmount)
-							: proposal.quotedBuyAmount > BigInt(order.buyAmount);
+							: proposal.quoteBuyAmount > BigInt(order.buyAmount);
 					if (exceeds) continue;
 				}
 
@@ -134,7 +134,7 @@ export function createSolveRoute(config: SolveConfig) {
 					orderSell: BigInt(order.sellAmount),
 					orderBuy: BigInt(order.buyAmount),
 					proposalSell: proposal.sellAmount,
-					proposalBuy: proposal.quotedBuyAmount,
+					proposalBuy: proposal.quoteBuyAmount,
 					isSellOrder: order.kind === "sell",
 					gasCost,
 				};
@@ -205,7 +205,7 @@ function buildSolution(
 			orderUidHash: proposal.orderUidHash,
 			sellAmount: proposal.sellAmount,
 			minBuyAmount: proposal.minBuyAmount,
-			quotedBuyAmount: proposal.quotedBuyAmount,
+			quoteBuyAmount: proposal.quoteBuyAmount,
 			validUntil: proposal.validUntil,
 			nonce: proposal.nonce,
 		},
@@ -233,7 +233,7 @@ function buildSolution(
 	return {
 		id,
 		prices: {
-			[order.sellToken]: proposal.quotedBuyAmount.toString(),
+			[order.sellToken]: proposal.quoteBuyAmount.toString(),
 			[order.buyToken]: proposal.sellAmount.toString(),
 		},
 		trades: [trade],

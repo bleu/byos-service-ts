@@ -33,7 +33,7 @@ describe("simulation state overrides", () => {
 				orderUidHash: `0x${"cc".repeat(32)}`,
 				sellAmount: 1_000_000n,
 				minBuyAmount: 990_000n,
-				quotedBuyAmount: 990_000n,
+				quoteBuyAmount: 990_000n,
 				validUntil: 1_700_000_000n,
 				nonce: 1n,
 			},

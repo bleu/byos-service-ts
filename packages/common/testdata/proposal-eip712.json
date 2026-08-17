@@ -16,7 +16,7 @@
 			"orderUid": "0x00000000000000000000000000000000000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000000",
 			"sellAmount": "1000000000000000000",
 			"minBuyAmount": "5000000",
-			"quotedBuyAmount": "5000000",
+			"quoteBuyAmount": "5000000",
 			"validUntil": 1750000000,
 			"nonce": "0",
 			"interactions": [],
@@ -30,7 +30,7 @@
 			"orderUid": "0x00000000000000000000000000000000000000000000000000000001e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000007",
 			"sellAmount": "123456789",
 			"minBuyAmount": "900000000",
-			"quotedBuyAmount": "987654321",
+			"quoteBuyAmount": "987654321",
 			"validUntil": 1750000060,
 			"nonce": "1",
 			"interactions": [
@@ -50,7 +50,7 @@
 			"orderUid": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffe05fcc23807536bee418f142d19fa0d21bb0cff7ffffffffffffffff",
 			"sellAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
 			"minBuyAmount": "1",
-			"quotedBuyAmount": "1",
+			"quoteBuyAmount": "1",
 			"validUntil": 4294967295,
 			"nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
 			"interactions": [

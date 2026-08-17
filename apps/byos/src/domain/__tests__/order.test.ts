@@ -38,7 +38,7 @@ function matchingProposal(overrides?: Partial<Proposal>): Proposal {
 		orderUidHash: `0x${"cc".repeat(32)}`,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		quotedBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		sellToken: "0xB1F1ee126e9c96231Cc3d3fAD7C08b4cf873b1f1",
 		buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		interactions: [],
@@ -63,10 +63,10 @@ describe("order envelope", () => {
 		expect(result).toBe("UnsupportedOrder");
 	});
 
-	it("rejects minBuyAmount > quotedBuyAmount", () => {
+	it("rejects minBuyAmount > quoteBuyAmount", () => {
 		const result = checkEnvelope(
 			sampleRecord(),
-			matchingProposal({ minBuyAmount: 1_000_000n, quotedBuyAmount: 900_000n }),
+			matchingProposal({ minBuyAmount: 1_000_000n, quoteBuyAmount: 900_000n }),
 		);
 		expect(result).toBe("AmountMismatch");
 	});
@@ -80,7 +80,7 @@ describe("order envelope", () => {
 		it("accepts matching sell amount with loose slippage", () => {
 			const result = checkEnvelope(
 				sampleRecord(),
-				matchingProposal({ minBuyAmount: 980_000n, quotedBuyAmount: 990_000n }),
+				matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 990_000n }),
 			);
 			expect(result).toBeNull();
 		});
@@ -93,7 +93,7 @@ describe("order envelope", () => {
 		it("rejects minBuyAmount below order limit", () => {
 			const result = checkEnvelope(
 				sampleRecord(),
-				matchingProposal({ minBuyAmount: 979_999n, quotedBuyAmount: 990_000n }),
+				matchingProposal({ minBuyAmount: 979_999n, quoteBuyAmount: 990_000n }),
 			);
 			expect(result).toBe("AmountMismatch");
 		});
@@ -104,7 +104,7 @@ describe("order envelope", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 980_000n, quotedBuyAmount: 980_000n });
+			const proposal = matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 980_000n });
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
 
@@ -112,15 +112,15 @@ describe("order envelope", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 979_999n, quotedBuyAmount: 979_999n });
+			const proposal = matchingProposal({ minBuyAmount: 979_999n, quoteBuyAmount: 979_999n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects minBuyAmount != quotedBuyAmount", () => {
+		it("rejects minBuyAmount != quoteBuyAmount", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 970_000n, quotedBuyAmount: 980_000n });
+			const proposal = matchingProposal({ minBuyAmount: 970_000n, quoteBuyAmount: 980_000n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 	});
@@ -135,7 +135,7 @@ describe("order envelope", () => {
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 500_000n,
-				quotedBuyAmount: 500_000n,
+				quoteBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
@@ -144,7 +144,7 @@ describe("order envelope", () => {
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 490_000n,
-				quotedBuyAmount: 500_000n,
+				quoteBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
@@ -159,22 +159,22 @@ describe("order envelope", () => {
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects quotedBuyAmount below limit price", () => {
+		it("rejects quoteBuyAmount below limit price", () => {
 			// proposal_maxBuy * order_sell < proposal_sell * order_buy → below limit
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 489_999n,
-				quotedBuyAmount: 489_999n,
+				quoteBuyAmount: 489_999n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects minBuyAmount below scaled limit price", () => {
-			// quotedBuyAmount beats limit but minBuyAmount doesn't
+			// quoteBuyAmount beats limit but minBuyAmount doesn't
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 489_999n,
-				quotedBuyAmount: 500_000n,
+				quoteBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
@@ -188,35 +188,35 @@ describe("order envelope", () => {
 		it("accepts partial fill within limit", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 490_000n,
-				quotedBuyAmount: 490_000n,
+				quoteBuyAmount: 490_000n,
 				sellAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
 
 		it("rejects zero buy amount", () => {
-			const proposal = matchingProposal({ minBuyAmount: 0n, quotedBuyAmount: 0n });
+			const proposal = matchingProposal({ minBuyAmount: 0n, quoteBuyAmount: 0n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects buy amount exceeding order", () => {
-			const proposal = matchingProposal({ minBuyAmount: 980_001n, quotedBuyAmount: 980_001n });
+			const proposal = matchingProposal({ minBuyAmount: 980_001n, quoteBuyAmount: 980_001n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects zero sell amount", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 490_000n,
-				quotedBuyAmount: 490_000n,
+				quoteBuyAmount: 490_000n,
 				sellAmount: 0n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects minBuyAmount != quotedBuyAmount", () => {
+		it("rejects minBuyAmount != quoteBuyAmount", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 480_000n,
-				quotedBuyAmount: 490_000n,
+				quoteBuyAmount: 490_000n,
 				sellAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");

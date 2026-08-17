@@ -191,7 +191,7 @@ export async function runSlippageDebits(
 ): Promise<void> {
 	const { db, operator, onAuditEvent, logger } = config;
 
-	// Snapshot settled proposals where minBuyAmount < quotedBuyAmount
+	// Snapshot settled proposals where minBuyAmount < quoteBuyAmount
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
 		pending = await store.snapshotByStatuses(db, ["settled"]);
@@ -200,8 +200,8 @@ export async function runSlippageDebits(
 		return;
 	}
 
-	// Filter to proposals with loose slippage (minBuyAmount < quotedBuyAmount)
-	const slippagePending = pending.filter((p) => p.minBuyAmount < p.quotedBuyAmount);
+	// Filter to proposals with loose slippage (minBuyAmount < quoteBuyAmount)
+	const slippagePending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
 	if (slippagePending.length === 0) return;
 
 	for (const proposal of slippagePending) {
@@ -221,7 +221,7 @@ export async function runSlippageDebits(
 			continue;
 		}
 
-		const gap = proposal.quotedBuyAmount - delta;
+		const gap = proposal.quoteBuyAmount - delta;
 		if (gap <= 0n) {
 			// Over-delivered or exact: no debit needed. Mark as processed by
 			// transitioning to penalized with zero-cost penalty.

@@ -29,7 +29,7 @@ export interface SignedProposal {
 	orderUid: Hex;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
-	quotedBuyAmount: bigint;
+	quoteBuyAmount: bigint;
 	interactions: ContractInteraction[];
 	validUntil: bigint;
 	nonce: bigint;
@@ -144,7 +144,7 @@ export async function buildProposal(
 		orderUidHash,
 		sellAmount,
 		minBuyAmount: buyAmount,
-		quotedBuyAmount: buyAmount,
+		quoteBuyAmount: buyAmount,
 		validUntil: params.validUntil,
 		nonce: params.nonce,
 	};
@@ -155,7 +155,7 @@ export async function buildProposal(
 		orderUid: order.uid,
 		sellAmount,
 		minBuyAmount: buyAmount,
-		quotedBuyAmount: buyAmount,
+		quoteBuyAmount: buyAmount,
 		interactions,
 		validUntil: params.validUntil,
 		nonce: params.nonce,

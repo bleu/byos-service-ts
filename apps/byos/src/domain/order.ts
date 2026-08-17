@@ -23,8 +23,8 @@ export function checkEnvelope(record: OrderRecord, proposal: Proposal): Rejectio
 	if (!record.erc20Balances) {
 		return "UnsupportedOrder";
 	}
-	// Structural invariant: minBuyAmount must not exceed quotedBuyAmount
-	if (proposal.minBuyAmount > proposal.quotedBuyAmount) {
+	// Structural invariant: minBuyAmount must not exceed quoteBuyAmount
+	if (proposal.minBuyAmount > proposal.quoteBuyAmount) {
 		return "AmountMismatch";
 	}
 	if (record.order.partiallyFillable) {
@@ -43,11 +43,11 @@ function checkFillOrKill(order: CowOrder, proposal: Proposal): RejectionReason |
 			return "AmountMismatch";
 		}
 	} else {
-		// Buy orders: minBuyAmount must equal quotedBuyAmount
-		if (proposal.minBuyAmount !== proposal.quotedBuyAmount) {
+		// Buy orders: minBuyAmount must equal quoteBuyAmount
+		if (proposal.minBuyAmount !== proposal.quoteBuyAmount) {
 			return "AmountMismatch";
 		}
-		if (proposal.quotedBuyAmount !== order.buyAmount) {
+		if (proposal.quoteBuyAmount !== order.buyAmount) {
 			return "AmountMismatch";
 		}
 	}
@@ -59,8 +59,8 @@ function checkPartialFill(order: CowOrder, proposal: Proposal): RejectionReason 
 		if (proposal.sellAmount === 0n || proposal.sellAmount > order.sellAmount) {
 			return "AmountMismatch";
 		}
-		// Limit price check uses quotedBuyAmount: proposal_maxBuy * order_sell >= proposal_sell * order_buy
-		if (proposal.quotedBuyAmount * order.sellAmount < proposal.sellAmount * order.buyAmount) {
+		// Limit price check uses quoteBuyAmount: proposal_maxBuy * order_sell >= proposal_sell * order_buy
+		if (proposal.quoteBuyAmount * order.sellAmount < proposal.sellAmount * order.buyAmount) {
 			return "AmountMismatch";
 		}
 		// minBuyAmount must also beat the scaled limit price
@@ -68,18 +68,18 @@ function checkPartialFill(order: CowOrder, proposal: Proposal): RejectionReason 
 			return "AmountMismatch";
 		}
 	} else {
-		// Buy orders: minBuyAmount must equal quotedBuyAmount
-		if (proposal.minBuyAmount !== proposal.quotedBuyAmount) {
+		// Buy orders: minBuyAmount must equal quoteBuyAmount
+		if (proposal.minBuyAmount !== proposal.quoteBuyAmount) {
 			return "AmountMismatch";
 		}
-		if (proposal.quotedBuyAmount === 0n || proposal.quotedBuyAmount > order.buyAmount) {
+		if (proposal.quoteBuyAmount === 0n || proposal.quoteBuyAmount > order.buyAmount) {
 			return "AmountMismatch";
 		}
 		if (proposal.sellAmount === 0n) {
 			return "AmountMismatch";
 		}
 		// Limit price check: proposal_sell * order_buy <= proposal_maxBuy * order_sell
-		if (proposal.sellAmount * order.buyAmount > proposal.quotedBuyAmount * order.sellAmount) {
+		if (proposal.sellAmount * order.buyAmount > proposal.quoteBuyAmount * order.sellAmount) {
 			return "AmountMismatch";
 		}
 	}

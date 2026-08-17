@@ -22,7 +22,7 @@ export const proposals = pgTable(
 		orderUidHash: text("order_uid_hash").notNull(),
 		sellAmount: text("sell_amount").notNull(),
 		minBuyAmount: text("min_buy_amount").notNull(),
-		quotedBuyAmount: text("quoted_buy_amount").notNull(),
+		quoteBuyAmount: text("quote_buy_amount").notNull(),
 		sellToken: text("sell_token").notNull(),
 		buyToken: text("buy_token").notNull(),
 		interactions: jsonb().notNull(),

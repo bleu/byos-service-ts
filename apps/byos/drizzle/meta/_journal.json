@@ -20,7 +20,7 @@
 			"idx": 2,
 			"version": "7",
 			"when": 1786889600000,
-			"tag": "0002_min_quoted_buy_amount",
+			"tag": "0002_min_quote_buy_amount",
 			"breakpoints": true
 		}
 	]

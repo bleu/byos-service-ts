@@ -6,9 +6,9 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 
 ### Domain ADRs
 
-- [0001 — Proposal API](0001-proposal-api.md): Public HTTP API for sub-solver proposal ingestion, EIP-712 auth, two-listener architecture; revised 2026-08-14 (minBuyAmount/quotedBuyAmount split)
-- [0002 — Solver Engine](0002-solver-engine.md): `/solve` hot path, `surplus - gas` scoring, gas cut, Trampoline settlement crafting; revised 2026-08-14 (minBuyAmount/quotedBuyAmount split)
-- [0003 — Slash Attribution Flow](0003-slash-attribution-flow.md): Track A (gas + revert penalty) and Track B (EBBO/fairness) risk classes; revised 2026-08-14 (slippage debit for minBuyAmount/quotedBuyAmount)
+- [0001 — Proposal API](0001-proposal-api.md): Public HTTP API for sub-solver proposal ingestion, EIP-712 auth, two-listener architecture; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
+- [0002 — Solver Engine](0002-solver-engine.md): `/solve` hot path, `surplus - gas` scoring, gas cut, Trampoline settlement crafting; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
+- [0003 — Slash Attribution Flow](0003-slash-attribution-flow.md): Track A (gas + revert penalty) and Track B (EBBO/fairness) risk classes; revised 2026-08-14 (slippage debit for minBuyAmount/quoteBuyAmount)
 - [0005 — Crate Anatomy and Layering](0005-crate-anatomy-and-layering.md): `domain/` (pure) vs `infra/` (IO) separation, DTO conversion at edges
 - [0007 — Error Handling](0007-error-handling.md): Typed error kinds, machine-readable on the wire, `should_retry()` classification
 - [0010 — Settlement Outcome Source](0010-settlement-outcome-source.md): Driver `/notify` as source of truth (no chain watcher)

@@ -17,7 +17,7 @@ describe("DTO schemas", () => {
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000000000000000",
 				minBuyAmount: "5000000",
-				quotedBuyAmount: "5000000",
+				quoteBuyAmount: "5000000",
 				interactions: [
 					{
 						target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
@@ -44,7 +44,7 @@ describe("DTO schemas", () => {
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000",
 				minBuyAmount: "500",
-				quotedBuyAmount: "500",
+				quoteBuyAmount: "500",
 				interactions: [
 					{
 						target: "not-an-address",
@@ -117,7 +117,7 @@ describe("DTO schemas", () => {
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000",
 				minBuyAmount: "990000",
-				quotedBuyAmount: "990000",
+				quoteBuyAmount: "990000",
 				validUntil: "1750000000",
 				status: "active",
 				rejectionReason: undefined,
@@ -133,7 +133,7 @@ describe("DTO schemas", () => {
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000",
 				minBuyAmount: "990000",
-				quotedBuyAmount: "990000",
+				quoteBuyAmount: "990000",
 				validUntil: "1750000000",
 				status: "submitted",
 			});
@@ -173,7 +173,7 @@ describe("wire grammar", () => {
 		orderUid: `0x${"ab".repeat(56)}`,
 		sellAmount: "1000000000000000000",
 		minBuyAmount: "5000000",
-		quotedBuyAmount: "5000000",
+		quoteBuyAmount: "5000000",
 		interactions: [
 			{
 				target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
