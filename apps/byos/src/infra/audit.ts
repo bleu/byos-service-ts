@@ -41,7 +41,7 @@ export async function insertAuditEvent(db: Db, event: AuditEvent): Promise<void>
 			subSolver = kind.subSolver.toLowerCase();
 			orderUid = kind.orderUid.toLowerCase();
 			break;
-		case "slippageDebited":
+		case "bufferDebited":
 			proposalId = 0;
 			subSolver = kind.subSolver.toLowerCase();
 			orderUid = "";

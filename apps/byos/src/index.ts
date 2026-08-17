@@ -31,7 +31,7 @@ async function main() {
 	// 4. Create Hono apps
 	const cL = config.MIN_COLLATERAL ? BigInt(config.MIN_COLLATERAL) : undefined;
 	if (cL === undefined) {
-		throw new Error("MIN_COLLATERAL is required for slippage accounting");
+		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
 	const publicApp = createPublicApp({

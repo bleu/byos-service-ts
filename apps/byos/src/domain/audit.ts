@@ -39,7 +39,7 @@ export type AuditKind =
 			penaltyTxHash: Hex;
 	  }
 	| {
-			type: "slippageDebited";
+			type: "bufferDebited";
 			subSolver: Address;
 			amount: bigint;
 			clearTxHash: Hex;
@@ -71,8 +71,8 @@ export function eventType(kind: AuditKind): string {
 			return "penalized";
 		case "nonSettlementDebited":
 			return "non_settlement_debited";
-		case "slippageDebited":
-			return "slippage_debited";
+		case "bufferDebited":
+			return "buffer_debited";
 		case "driverNotified":
 			return "driver_notified";
 		case "statusChanged": {
@@ -137,7 +137,7 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 				amount: kind.amount.toString(),
 				penaltyTxHash: kind.penaltyTxHash,
 			};
-		case "slippageDebited":
+		case "bufferDebited":
 			return {
 				amount: kind.amount.toString(),
 				clearTxHash: kind.clearTxHash,

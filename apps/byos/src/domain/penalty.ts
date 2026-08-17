@@ -22,13 +22,13 @@ const ETHER = 10n ** 18n;
 /**
  * Converts a buy-token gap to ETH using the auction reference price.
  *
- * The result feeds into the slippage ledger. Positive entries (under-delivery)
+ * The result feeds into the buffer ledger. Positive entries (under-delivery)
  * accumulate until the outstanding balance exceeds c_L, then the full balance
  * is debited from escrow. Negative entries (over-delivery) offset debits but
  * are NOT paid out automatically — the BYOS operator reviews negative balances
  * and deposits collateral manually.
  */
-export function slippageDebit(gap: bigint, refPrice: bigint): bigint {
+export function bufferDebit(gap: bigint, refPrice: bigint): bigint {
 	return (gap * refPrice) / ETHER;
 }
 

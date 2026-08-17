@@ -2,7 +2,7 @@ import type { RejectionReason, Status } from "@byos/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
-import { penalties, proposals, slippageEntries, solutions } from "../db/schema.js";
+import { bufferEntries, penalties, proposals, solutions } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
@@ -759,9 +759,9 @@ export async function solutionProposals(
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
 }
 
-// --- Slippage Entries ---
+// --- Buffer Entries ---
 
-export interface SlippageEntry {
+export interface BufferEntry {
 	id: number;
 	subSolver: Address;
 	proposalId: number;
@@ -775,18 +775,18 @@ export interface SlippageEntry {
 	createdAt: Date;
 }
 
-/** Checks whether a slippage entry already exists for a proposal. */
-export async function slippageEntryExistsForProposal(db: Db, proposalId: number): Promise<boolean> {
+/** Checks whether a buffer entry already exists for a proposal. */
+export async function bufferEntryExistsForProposal(db: Db, proposalId: number): Promise<boolean> {
 	const rows = await db
-		.select({ id: slippageEntries.id })
-		.from(slippageEntries)
-		.where(eq(slippageEntries.proposalId, proposalId))
+		.select({ id: bufferEntries.id })
+		.from(bufferEntries)
+		.where(eq(bufferEntries.proposalId, proposalId))
 		.limit(1);
 	return rows.length > 0;
 }
 
-/** Inserts a slippage entry for a settled proposal. */
-export async function insertSlippageEntry(
+/** Inserts a buffer entry for a settled proposal. */
+export async function insertBufferEntry(
 	db: Db,
 	entry: {
 		subSolver: Address;
@@ -799,7 +799,7 @@ export async function insertSlippageEntry(
 	},
 ): Promise<number> {
 	const result = await db
-		.insert(slippageEntries)
+		.insert(bufferEntries)
 		.values({
 			subSolver: entry.subSolver.toLowerCase(),
 			proposalId: entry.proposalId,
@@ -809,50 +809,50 @@ export async function insertSlippageEntry(
 			gap: entry.gap,
 			nativeTokenAmount: entry.nativeTokenAmount,
 		})
-		.returning({ id: slippageEntries.id });
+		.returning({ id: bufferEntries.id });
 	return result[0]!.id;
 }
 
-/** Returns all subsolver addresses that have uncleared slippage entries. */
-export async function unclearedSlippageSubSolvers(db: Db): Promise<Address[]> {
+/** Returns all subsolver addresses that have uncleared buffer entries. */
+export async function unclearedBufferSubSolvers(db: Db): Promise<Address[]> {
 	const rows = await db
-		.selectDistinct({ subSolver: slippageEntries.subSolver })
-		.from(slippageEntries)
-		.where(eq(slippageEntries.cleared, false));
+		.selectDistinct({ subSolver: bufferEntries.subSolver })
+		.from(bufferEntries)
+		.where(eq(bufferEntries.cleared, false));
 	return rows.map((r) => r.subSolver as Address);
 }
 
-/** Returns the outstanding (uncleared) slippage balance for a subsolver in native token (as bigint). */
-export async function outstandingSlippageBalance(db: Db, subSolver: Address): Promise<bigint> {
+/** Returns the outstanding (uncleared) buffer balance for a subsolver in native token (as bigint). */
+export async function outstandingBufferBalance(db: Db, subSolver: Address): Promise<bigint> {
 	const rows = await db
 		.select({
-			total: sql<string>`COALESCE(SUM(CAST(${slippageEntries.nativeTokenAmount} AS numeric)), 0)`,
+			total: sql<string>`COALESCE(SUM(CAST(${bufferEntries.nativeTokenAmount} AS numeric)), 0)`,
 		})
-		.from(slippageEntries)
+		.from(bufferEntries)
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, false),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, false),
 			),
 		);
 	return BigInt(rows[0]?.total ?? "0");
 }
 
-/** Returns all uncleared slippage entries for a subsolver. */
-export async function unclearedSlippageEntries(
+/** Returns all uncleared buffer entries for a subsolver. */
+export async function unclearedBufferEntries(
 	db: Db,
 	subSolver: Address,
-): Promise<SlippageEntry[]> {
+): Promise<BufferEntry[]> {
 	const rows = await db
 		.select()
-		.from(slippageEntries)
+		.from(bufferEntries)
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, false),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, false),
 			),
 		)
-		.orderBy(slippageEntries.createdAt);
+		.orderBy(bufferEntries.createdAt);
 	return rows.map((r) => ({
 		id: r.id,
 		subSolver: r.subSolver as Address,
@@ -873,72 +873,72 @@ export async function unclearedSlippageEntries(
  * In-flight entries are excluded from balance computation, preventing double-debit
  * if the on-chain debit succeeds but the subsequent DB update fails.
  */
-export async function markSlippageEntriesInFlight(db: Db, subSolver: Address): Promise<number> {
+export async function markBufferEntriesInFlight(db: Db, subSolver: Address): Promise<number> {
 	const result = await db
-		.update(slippageEntries)
+		.update(bufferEntries)
 		.set({ cleared: true, clearTxHash: null })
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, false),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, false),
 			),
 		)
-		.returning({ id: slippageEntries.id });
+		.returning({ id: bufferEntries.id });
 	return result.length;
 }
 
 /** Finalizes in-flight entries with the actual debit tx hash. */
-export async function finalizeSlippageEntries(
+export async function finalizeBufferEntries(
 	db: Db,
 	subSolver: Address,
 	clearTxHash: Hex,
 ): Promise<number> {
 	const result = await db
-		.update(slippageEntries)
+		.update(bufferEntries)
 		.set({ clearTxHash: clearTxHash.toLowerCase() })
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, true),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, true),
 				sql`clear_tx_hash IS NULL`,
 			),
 		)
-		.returning({ id: slippageEntries.id });
+		.returning({ id: bufferEntries.id });
 	return result.length;
 }
 
 /** Reverts in-flight entries back to uncleared (debit failed or was not attempted). */
-export async function revertInFlightSlippageEntries(db: Db, subSolver: Address): Promise<number> {
+export async function revertInFlightBufferEntries(db: Db, subSolver: Address): Promise<number> {
 	const result = await db
-		.update(slippageEntries)
+		.update(bufferEntries)
 		.set({ cleared: false })
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, true),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, true),
 				sql`clear_tx_hash IS NULL`,
 			),
 		)
-		.returning({ id: slippageEntries.id });
+		.returning({ id: bufferEntries.id });
 	return result.length;
 }
 
 /** Marks all uncleared entries for a subsolver as cleared with the given tx hash. */
-export async function clearSlippageEntries(
+export async function clearBufferEntries(
 	db: Db,
 	subSolver: Address,
 	clearTxHash: Hex,
 ): Promise<number> {
 	const result = await db
-		.update(slippageEntries)
+		.update(bufferEntries)
 		.set({ cleared: true, clearTxHash: clearTxHash.toLowerCase() })
 		.where(
 			and(
-				eq(slippageEntries.subSolver, subSolver.toLowerCase()),
-				eq(slippageEntries.cleared, false),
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, false),
 			),
 		)
-		.returning({ id: slippageEntries.id });
+		.returning({ id: bufferEntries.id });
 	return result.length;
 }
 

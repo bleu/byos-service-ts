@@ -6,9 +6,9 @@ import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import {
 	type DebitEscrow,
+	bufferDebit,
 	nonSettlementDebit,
 	revertDebit,
-	slippageDebit,
 } from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
@@ -35,14 +35,14 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 	const revertAttempts = new Map<number, number>();
 	const nonSettlementAttempts = new Map<number, number>();
 
-	const slippageAttempts = new Map<number, number>();
+	const bufferAttempts = new Map<number, number>();
 
 	return new Worker(
 		"byos:penalty",
 		async () => {
 			await runRevertDebits(config, revertAttempts);
 			await runNonSettlementDebits(config, nonSettlementAttempts);
-			await runSlippageDebits(config, slippageAttempts);
+			await runBufferDebits(config, bufferAttempts);
 		},
 		{
 			connection,
@@ -186,7 +186,7 @@ export async function runNonSettlementDebits(
 }
 
 /**
- * Processes slippage accounting for settled proposals with aggressive slippage
+ * Processes buffer accounting for settled proposals with aggressive slippage
  * (minBuyAmount < quoteBuyAmount).
  *
  * Step 1: Record a ledger entry per proposal (signed: positive = subsolver owes,
@@ -199,10 +199,10 @@ export async function runNonSettlementDebits(
  * failures after a successful on-chain debit.
  *
  * Payouts for negative balances (BYOS owes subsolver) are NOT automated.
- * The BYOS operator reviews negative balances via the slippage_entries table
- * or the GET /slippage-balance endpoint and deposits collateral manually.
+ * The BYOS operator reviews negative balances via the buffer_entries table
+ * or the GET /buffer-balance endpoint and deposits collateral manually.
  */
-export async function runSlippageDebits(
+export async function runBufferDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
@@ -214,27 +214,27 @@ export async function runSlippageDebits(
 	try {
 		pending = await store.snapshotByStatuses(db, ["settled"]);
 	} catch (e) {
-		logger.error({ err: e }, "slippage: failed to snapshot settled proposals");
+		logger.error({ err: e }, "buffer: failed to snapshot settled proposals");
 		return;
 	}
 
-	const slippagePending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
+	const bufferPending = pending.filter((p) => p.minBuyAmount < p.quoteBuyAmount);
 	const affectedSubSolvers = new Set<Address>();
 
 	// Step 2: For each proposal without a ledger entry, compute and insert one.
-	for (const proposal of slippagePending) {
+	for (const proposal of bufferPending) {
 		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
 		// Skip proposals that already have a ledger entry
 		try {
-			if (await store.slippageEntryExistsForProposal(db, proposal.id)) continue;
+			if (await store.bufferEntryExistsForProposal(db, proposal.id)) continue;
 		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "slippage entry existence check", logger);
+			noteDebitFailure(attempts, proposal.id, e, "buffer entry existence check", logger);
 			continue;
 		}
 
 		if (!proposal.settlementTxHash) {
-			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute slippage");
+			logger.error({ id: proposal.id }, "settled without settlement tx; cannot compute buffer");
 			continue;
 		}
 
@@ -255,19 +255,19 @@ export async function runSlippageDebits(
 		}
 
 		if (!refPriceStr || refPriceStr === "0") {
-			logger.warn({ id: proposal.id }, "no buy-token ref price for slippage; skipping");
+			logger.warn({ id: proposal.id }, "no buy-token ref price for buffer; skipping");
 			attempts.delete(proposal.id);
 			continue;
 		}
 
 		const gap = proposal.quoteBuyAmount - delta;
 		const refPrice = BigInt(refPriceStr);
-		const nativeAmount = slippageDebit(gap < 0n ? -gap : gap, refPrice);
+		const nativeAmount = bufferDebit(gap < 0n ? -gap : gap, refPrice);
 		// Preserve sign: positive = subsolver owes, negative = BYOS owes
 		const signedNativeAmount = gap < 0n ? -nativeAmount : nativeAmount;
 
 		try {
-			await store.insertSlippageEntry(db, {
+			await store.insertBufferEntry(db, {
 				subSolver: proposal.subSolver,
 				proposalId: proposal.id,
 				orderUid: proposal.orderUid,
@@ -280,10 +280,10 @@ export async function runSlippageDebits(
 			attempts.delete(proposal.id);
 			logger.info(
 				{ id: proposal.id, gap: gap.toString(), nativeTokenAmount: signedNativeAmount.toString() },
-				"slippage entry recorded",
+				"buffer entry recorded",
 			);
 		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "slippage entry insert", logger);
+			noteDebitFailure(attempts, proposal.id, e, "buffer entry insert", logger);
 		}
 	}
 
@@ -291,10 +291,10 @@ export async function runSlippageDebits(
 	// where balance was below threshold, or where a prior debit failed and entries
 	// were reverted).
 	try {
-		const existing = await store.unclearedSlippageSubSolvers(db);
+		const existing = await store.unclearedBufferSubSolvers(db);
 		for (const s of existing) affectedSubSolvers.add(s);
 	} catch (e) {
-		logger.error({ err: e }, "slippage: failed to fetch subsolvers with uncleared entries");
+		logger.error({ err: e }, "buffer: failed to fetch subsolvers with uncleared entries");
 	}
 
 	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
@@ -307,9 +307,9 @@ export async function runSlippageDebits(
 	for (const subSolver of affectedSubSolvers) {
 		let balance: bigint;
 		try {
-			balance = await store.outstandingSlippageBalance(db, subSolver);
+			balance = await store.outstandingBufferBalance(db, subSolver);
 		} catch (e) {
-			logger.error({ err: e, subSolver }, "slippage: failed to read outstanding balance");
+			logger.error({ err: e, subSolver }, "buffer: failed to read outstanding balance");
 			continue;
 		}
 
@@ -318,9 +318,9 @@ export async function runSlippageDebits(
 		// (a) Mark entries in-flight before the on-chain call
 		let entryCount: number;
 		try {
-			entryCount = await store.markSlippageEntriesInFlight(db, subSolver);
+			entryCount = await store.markBufferEntriesInFlight(db, subSolver);
 		} catch (e) {
-			logger.error({ err: e, subSolver }, "slippage: failed to mark entries in-flight");
+			logger.error({ err: e, subSolver }, "buffer: failed to mark entries in-flight");
 			continue;
 		}
 
@@ -335,10 +335,10 @@ export async function runSlippageDebits(
 		} catch (e) {
 			logger.error(
 				{ err: e, subSolver, balance: balance.toString() },
-				"slippage escrow debit failed; reverting in-flight entries",
+				"buffer escrow debit failed; reverting in-flight entries",
 			);
 			try {
-				await store.revertInFlightSlippageEntries(db, subSolver);
+				await store.revertInFlightBufferEntries(db, subSolver);
 			} catch (revertErr) {
 				logger.error(
 					{ err: revertErr, subSolver },
@@ -350,7 +350,7 @@ export async function runSlippageDebits(
 
 		// (c) Finalize with the real tx hash
 		try {
-			await store.finalizeSlippageEntries(db, subSolver, clearTxHash);
+			await store.finalizeBufferEntries(db, subSolver, clearTxHash);
 		} catch (e) {
 			// The debit landed but finalize failed. Entries remain in-flight
 			// (cleared=true, clear_tx_hash=NULL) — they will NOT be re-debited
@@ -358,7 +358,7 @@ export async function runSlippageDebits(
 			// is needed to set the tx hash.
 			logger.error(
 				{ err: e, subSolver, tx: clearTxHash },
-				"slippage debit landed but finalize failed; entries are in-flight, no double-charge risk",
+				"buffer debit landed but finalize failed; entries are in-flight, no double-charge risk",
 			);
 			continue;
 		}
@@ -366,7 +366,7 @@ export async function runSlippageDebits(
 		onAuditEvent({
 			occurredAt: new Date(),
 			kind: {
-				type: "slippageDebited",
+				type: "bufferDebited",
 				subSolver,
 				amount: balance,
 				clearTxHash,
@@ -376,7 +376,7 @@ export async function runSlippageDebits(
 
 		logger.info(
 			{ subSolver, balance: balance.toString(), entryCount, tx: clearTxHash },
-			"slippage balance slashed",
+			"buffer balance slashed",
 		);
 	}
 }

@@ -27,7 +27,7 @@
 			"idx": 3,
 			"version": "7",
 			"when": 1786896000000,
-			"tag": "0003_slippage_entries",
+			"tag": "0003_buffer_entries",
 			"breakpoints": true
 		}
 	]

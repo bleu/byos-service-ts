@@ -7,7 +7,7 @@ import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
 import * as store from "../../storage.js";
-import { runNonSettlementDebits, runRevertDebits, runSlippageDebits } from "../penalty.js";
+import { runBufferDebits, runNonSettlementDebits, runRevertDebits } from "../penalty.js";
 
 let ctx: TestContext;
 
@@ -332,13 +332,13 @@ describe("non-settlement debits", () => {
 	});
 });
 
-describe("slippage debits", () => {
+describe("buffer debits", () => {
 	const SUB_SOLVER = "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address;
 	const ETHER = 10n ** 18n;
 	const CLEAR_TX: Hex = `0x${"88".repeat(32)}`;
 
-	/** Creates a settled proposal with aggressive slippage and a recorded solution with ref price. */
-	async function settledSlippageProposal(
+	/** Creates a settled proposal with aggressive buffer and a recorded solution with ref price. */
+	async function settledBufferProposal(
 		quoteBuyAmount: bigint,
 		minBuyAmount: bigint,
 		refPrice: string,
@@ -367,7 +367,7 @@ describe("slippage debits", () => {
 		return { id, tx };
 	}
 
-	function slippageOperator(
+	function bufferOperator(
 		deltaByTx: Map<string, bigint>,
 		debitCalls: Array<{ subSolver: Address; amount: bigint }> = [],
 	): DebitEscrow {
@@ -387,20 +387,20 @@ describe("slippage debits", () => {
 		};
 	}
 
-	it("records a slippage entry for a settled proposal with under-delivery", async () => {
+	it("records a buffer entry for a settled proposal with under-delivery", async () => {
 		const maxBuy = 1000n;
 		const minBuy = 900n;
 		const delivered = 950n; // under-delivered by 50
 		const refPrice = ETHER.toString(); // 1:1 price
 
-		const { id, tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
 		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
-		const operator = slippageOperator(deltaByTx);
+		const operator = bufferOperator(deltaByTx);
 
-		await runSlippageDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
 
 		// Entry should exist
-		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
 		expect(entry!.gap).toBe("50"); // maxBuy - delivered
@@ -414,13 +414,13 @@ describe("slippage debits", () => {
 		const delivered = 1050n; // over-delivered by 50
 		const refPrice = ETHER.toString();
 
-		const { id, tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
 		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
-		const operator = slippageOperator(deltaByTx);
+		const operator = bufferOperator(deltaByTx);
 
-		await runSlippageDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
 
-		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
 		expect(entry!.gap).toBe("-50");
@@ -428,14 +428,14 @@ describe("slippage debits", () => {
 	});
 
 	it("does not create duplicate entries on repeated ticks", async () => {
-		const { id, tx } = await settledSlippageProposal(1000n, 900n, ETHER.toString());
+		const { id, tx } = await settledBufferProposal(1000n, 900n, ETHER.toString());
 		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
-		const operator = slippageOperator(deltaByTx);
+		const operator = bufferOperator(deltaByTx);
 
-		await runSlippageDebits(config(operator), new Map());
-		await runSlippageDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
 
-		const entries = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		const matching = entries.filter((e) => e.proposalId === id);
 		expect(matching).toHaveLength(1);
 	});
@@ -449,13 +449,13 @@ describe("slippage debits", () => {
 		const delivered = (ETHER * 98n) / 100n;
 		const refPrice = ETHER.toString();
 
-		const { tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const { tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
 		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
 		const events: AuditEvent[] = [];
-		const operator = slippageOperator(deltaByTx, debitCalls);
+		const operator = bufferOperator(deltaByTx, debitCalls);
 
-		await runSlippageDebits(config(operator, events), new Map());
+		await runBufferDebits(config(operator, events), new Map());
 
 		// The debit should have been called
 		const ourDebits = debitCalls.filter(
@@ -464,11 +464,11 @@ describe("slippage debits", () => {
 		expect(ourDebits.length).toBeGreaterThanOrEqual(1);
 
 		// All entries for this subsolver should be cleared
-		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared).toHaveLength(0);
 
 		// Audit event should have been emitted
-		expect(events.some((e) => e.kind.type === "slippageDebited")).toBe(true);
+		expect(events.some((e) => e.kind.type === "bufferDebited")).toBe(true);
 	});
 
 	it("does not slash when balance is below c_L", async () => {
@@ -477,17 +477,17 @@ describe("slippage debits", () => {
 		const delivered = 999n; // gap = 1, nativeTokenAmount = 1 wei — well below c_L
 		const refPrice = ETHER.toString();
 
-		const { tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
+		const { tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
 		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
-		const operator = slippageOperator(deltaByTx, debitCalls);
+		const operator = bufferOperator(deltaByTx, debitCalls);
 
-		await runSlippageDebits(config(operator, []), new Map());
+		await runBufferDebits(config(operator, []), new Map());
 
 		// Entry recorded but no slash
-		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared.length).toBeGreaterThanOrEqual(1);
-		// No debit call for slippage (there may be calls from other tests' proposals)
+		// No debit call for buffer (there may be calls from other tests' proposals)
 		// Check that no new debit was triggered by verifying entries remain uncleared
 		const allCleared = uncleared.every((e) => !e.cleared);
 		expect(allCleared).toBe(true);
@@ -495,37 +495,37 @@ describe("slippage debits", () => {
 
 	it("credits offset debits before threshold check", async () => {
 		// First proposal: under-delivery of 0.008 ETH
-		const { tx: tx1 } = await settledSlippageProposal(ETHER, ETHER / 2n, ETHER.toString());
+		const { tx: tx1 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
 		// Second proposal: over-delivery of 0.006 ETH
-		const { tx: tx2 } = await settledSlippageProposal(ETHER, ETHER / 2n, ETHER.toString());
+		const { tx: tx2 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
 		const deltaByTx = new Map([
 			[tx1.toLowerCase(), ETHER - 8_000_000_000_000_000n], // gap = +0.008 ETH
 			[tx2.toLowerCase(), ETHER + 6_000_000_000_000_000n], // gap = -0.006 ETH
 		]);
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
-		const operator = slippageOperator(deltaByTx, debitCalls);
+		const operator = bufferOperator(deltaByTx, debitCalls);
 
-		await runSlippageDebits(config(operator, []), new Map());
+		await runBufferDebits(config(operator, []), new Map());
 
 		// Net balance = 0.008 - 0.006 = 0.002 ETH < c_L (0.01 ETH)
 		// No slash should happen — entries remain uncleared
-		const uncleared = await store.unclearedSlippageEntries(ctx.db, SUB_SOLVER);
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared.length).toBeGreaterThanOrEqual(2);
 	});
 
-	it("proposal stays settled after slippage entry is recorded", async () => {
-		const { id, tx } = await settledSlippageProposal(1000n, 900n, ETHER.toString());
+	it("proposal stays settled after buffer entry is recorded", async () => {
+		const { id, tx } = await settledBufferProposal(1000n, 900n, ETHER.toString());
 		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
-		const operator = slippageOperator(deltaByTx);
+		const operator = bufferOperator(deltaByTx);
 
-		await runSlippageDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
 
 		const proposal = await store.get(ctx.db, id);
 		expect(proposal?.status).toBe("settled");
 	});
 
-	it("ignores settled proposals without aggressive slippage", async () => {
-		// minBuyAmount == quoteBuyAmount: no slippage accounting
+	it("ignores settled proposals without aggressive buffer", async () => {
+		// minBuyAmount == quoteBuyAmount: no buffer accounting
 		const base = sampleProposal();
 		const { id } = await store.insert(ctx.db, {
 			...base,
@@ -542,11 +542,11 @@ describe("slippage debits", () => {
 			txHash: tx,
 		});
 
-		const operator = slippageOperator(new Map());
-		await runSlippageDebits(config(operator), new Map());
+		const operator = bufferOperator(new Map());
+		await runBufferDebits(config(operator), new Map());
 
 		// No entry should exist for this proposal
-		const exists = await store.slippageEntryExistsForProposal(ctx.db, id);
+		const exists = await store.bufferEntryExistsForProposal(ctx.db, id);
 		expect(exists).toBe(false);
 	});
 
@@ -578,8 +578,8 @@ describe("slippage debits", () => {
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
 
 		// First tick: records entry AND slashes (balance > c_L)
-		const op1 = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runSlippageDebits(config(op1), new Map());
+		const op1 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(op1), new Map());
 
 		const firstDebitCount = debitCalls.filter(
 			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
@@ -588,8 +588,8 @@ describe("slippage debits", () => {
 
 		// Second tick: entries are already cleared, so no new debit
 		debitCalls.length = 0;
-		const op2 = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runSlippageDebits(config(op2), new Map());
+		const op2 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(op2), new Map());
 
 		const secondDebitCount = debitCalls.filter(
 			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
@@ -636,10 +636,10 @@ describe("slippage debits", () => {
 		};
 
 		// First tick: entry is recorded, debit fails, entries are reverted
-		await runSlippageDebits(config(failingOperator), new Map());
+		await runBufferDebits(config(failingOperator), new Map());
 
 		// Entries should be back to uncleared (not stuck in-flight)
-		const uncleared = await store.unclearedSlippageEntries(ctx.db, isolatedSolver);
+		const uncleared = await store.unclearedBufferEntries(ctx.db, isolatedSolver);
 		expect(uncleared.length).toBeGreaterThanOrEqual(1);
 		const entry = uncleared.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
@@ -647,8 +647,8 @@ describe("slippage debits", () => {
 
 		// Second tick with a working operator: should successfully debit
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
-		const workingOp = slippageOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runSlippageDebits(config(workingOp), new Map());
+		const workingOp = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(workingOp), new Map());
 
 		const debits = debitCalls.filter(
 			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),

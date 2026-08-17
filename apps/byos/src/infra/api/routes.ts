@@ -173,8 +173,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 		return c.json(proposalToListResponse(proposals));
 	});
 
-	// GET /slippage-balance — Off-chain slippage accounting (owner-scoped)
-	app.get("/slippage-balance", async (c) => {
+	// GET /buffer-balance — Off-chain buffer accounting (owner-scoped)
+	app.get("/buffer-balance", async (c) => {
 		const sig = extractSignature(c);
 		let reader: Address;
 		try {
@@ -183,7 +183,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
-		const entries = await store.unclearedSlippageEntries(config.db, reader);
+		const entries = await store.unclearedBufferEntries(config.db, reader);
 		let outstandingBalance = 0n;
 		for (const entry of entries) {
 			outstandingBalance += BigInt(entry.nativeTokenAmount);

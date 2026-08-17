@@ -20,17 +20,17 @@ afterAll(async () => {
 	await app.ctx.cleanup();
 });
 
-async function getSlippageBalance(sigFn: () => Promise<Hex> = readAuthHeader) {
+async function getBufferBalance(sigFn: () => Promise<Hex> = readAuthHeader) {
 	const sig = await sigFn();
-	const resp = await app.publicApp.request("/slippage-balance", {
+	const resp = await app.publicApp.request("/buffer-balance", {
 		headers: { "X-Signature": sig },
 	});
 	return { status: resp.status, body: (await resp.json()) as Record<string, unknown> };
 }
 
-describe("GET /slippage-balance", () => {
-	it("returns empty balance with no slippage entries", async () => {
-		const { status, body } = await getSlippageBalance();
+describe("GET /buffer-balance", () => {
+	it("returns empty balance with no buffer entries", async () => {
+		const { status, body } = await getBufferBalance();
 		expect(status).toBe(200);
 		expect(body.outstandingBalance).toBe("0");
 		expect(body.threshold).toBeDefined();
@@ -38,7 +38,7 @@ describe("GET /slippage-balance", () => {
 	});
 
 	it("returns uncleared entries for the authenticated subsolver", async () => {
-		// Seed a settled proposal with slippage and insert a ledger entry
+		// Seed a settled proposal with buffer and insert a ledger entry
 		const orderUid = `0x${"e1".repeat(56)}`;
 		const id = await seedProposal(app.ctx.db, {
 			orderUid,
@@ -49,7 +49,7 @@ describe("GET /slippage-balance", () => {
 			settlementTxHash: `0x${"a1".repeat(32)}`,
 		});
 
-		await store.insertSlippageEntry(app.ctx.db, {
+		await store.insertBufferEntry(app.ctx.db, {
 			subSolver: SIGNER_ACCOUNT.address as Address,
 			proposalId: id,
 			orderUid,
@@ -59,7 +59,7 @@ describe("GET /slippage-balance", () => {
 			nativeTokenAmount: "50000000000000000",
 		});
 
-		const { status, body } = await getSlippageBalance();
+		const { status, body } = await getBufferBalance();
 		expect(status).toBe(200);
 		expect(BigInt(body.outstandingBalance as string)).toBe(50_000_000_000_000_000n);
 
@@ -84,7 +84,7 @@ describe("GET /slippage-balance", () => {
 			settlementTxHash: `0x${"a2".repeat(32)}`,
 		});
 
-		await store.insertSlippageEntry(app.ctx.db, {
+		await store.insertBufferEntry(app.ctx.db, {
 			subSolver: otherSolver,
 			proposalId: id,
 			orderUid,
@@ -95,7 +95,7 @@ describe("GET /slippage-balance", () => {
 		});
 
 		// Query as the other solver — should see the entry
-		const { body: otherBody } = await getSlippageBalance(otherReadAuthHeader);
+		const { body: otherBody } = await getBufferBalance(otherReadAuthHeader);
 		const otherEntries = otherBody.entries as Array<Record<string, unknown>>;
 		// The other signer is a different account, won't see entries for otherSolver
 		const leaked = otherEntries.find((e) => e.proposalId === id);
@@ -113,7 +113,7 @@ describe("GET /slippage-balance", () => {
 			settlementTxHash: `0x${"a3".repeat(32)}`,
 		});
 
-		await store.insertSlippageEntry(app.ctx.db, {
+		await store.insertBufferEntry(app.ctx.db, {
 			subSolver: SIGNER_ACCOUNT.address as Address,
 			proposalId: id,
 			orderUid,
@@ -125,16 +125,16 @@ describe("GET /slippage-balance", () => {
 
 		// Clear the entry
 		const clearTx = `0x${"b3".repeat(32)}` as Hex;
-		await store.clearSlippageEntries(app.ctx.db, SIGNER_ACCOUNT.address as Address, clearTx);
+		await store.clearBufferEntries(app.ctx.db, SIGNER_ACCOUNT.address as Address, clearTx);
 
-		const { body } = await getSlippageBalance();
+		const { body } = await getBufferBalance();
 		const entries = body.entries as Array<Record<string, unknown>>;
 		const cleared = entries.find((e) => e.proposalId === id);
 		expect(cleared).toBeUndefined();
 	});
 
 	it("rejects requests without a signature", async () => {
-		const resp = await app.publicApp.request("/slippage-balance");
+		const resp = await app.publicApp.request("/buffer-balance");
 		expect(resp.status).toBe(400);
 	});
 });

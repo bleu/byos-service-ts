@@ -77,5 +77,5 @@ The path is: receive auction, indexed DB read (~1ms), pre-filter (microseconds),
 - **Outcome observation costs no extra infrastructure**, per [ADR-0010](0010-settlement-outcome-source.md).
 - **The profitability gate may reject viable proposals.** A proposal rejected during a gas spike would have been profitable minutes later. `Rejected` is terminal (ADR-0013), so the sub-solver has to resubmit.
 - **The gas cut recovers gas approximately, not exactly.** The gap is accepted and monitored.
-- **Slippage debit after settlement.** After a successful settlement, the penalty job computes the gap between `quoteBuyAmount` and the delivered amount. It converts this gap to ETH with the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
+- **Buffer debit after settlement.** After a successful settlement, the penalty job computes the gap between `quoteBuyAmount` and the delivered amount. It converts this gap to ETH with the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
 - **Proposal freshness gap.** With 3–5 block simulation intervals, proposals can be up to ~60s stale. The driver's re-simulation catches this, but with pick-one there is no fallback.
