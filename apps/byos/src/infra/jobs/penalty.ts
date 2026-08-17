@@ -189,18 +189,16 @@ export async function runNonSettlementDebits(
  * Processes buffer accounting for settled proposals with aggressive slippage
  * (minBuyAmount < quoteBuyAmount).
  *
- * Step 1: Record a ledger entry per proposal (signed: positive = subsolver owes,
- *         negative = BYOS owes for over-delivery).
+ * Step 1: Record a ledger entry per proposal (signed: positive = under-delivery,
+ *         negative = over-delivery credit).
  * Step 2: For each subsolver with uncleared entries, check if the outstanding
  *         balance exceeds c_L. If so, slash the full balance from escrow and
  *         mark all entries cleared.
  *
+ * Over-delivery credits offset future shortfalls but are never paid out.
+ *
  * Debits use a mark-before-debit pattern to prevent double-charging on DB
  * failures after a successful on-chain debit.
- *
- * Payouts for negative balances (BYOS owes subsolver) are NOT automated.
- * The BYOS operator reviews negative balances via the buffer_entries table
- * or the GET /buffer-balance endpoint and deposits collateral manually.
  */
 export async function runBufferDebits(
 	config: PenaltyWorkerConfig,
@@ -263,7 +261,7 @@ export async function runBufferDebits(
 		const gap = proposal.quoteBuyAmount - delta;
 		const refPrice = BigInt(refPriceStr);
 		const nativeAmount = bufferDebit(gap < 0n ? -gap : gap, refPrice);
-		// Preserve sign: positive = subsolver owes, negative = BYOS owes
+		// Preserve sign: positive = under-delivery debit, negative = over-delivery credit
 		const signedNativeAmount = gap < 0n ? -nativeAmount : nativeAmount;
 
 		try {

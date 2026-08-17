@@ -93,9 +93,9 @@ export const solutions = pgTable(
 
 // --- buffer_entries ---
 // Per-proposal ledger for the quoteBuyAmount-vs-delivered gap. Positive native_token_amount
-// means the subsolver owes BYOS; negative means BYOS owes the subsolver.
-// Debits are slashed automatically when the balance exceeds c_L.
-// Credits (negative balances) are paid out manually by the BYOS operator.
+// means under-delivery (debit); negative means over-delivery (credit).
+// Debits are slashed automatically when the outstanding balance exceeds c_L.
+// Credits offset future shortfalls but are never paid out.
 
 export const bufferEntries = pgTable(
 	"buffer_entries",

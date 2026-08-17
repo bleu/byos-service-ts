@@ -46,9 +46,7 @@ The penalty job slashes the sub-solver's escrow only when the outstanding balanc
 
 Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
 
-### Why payouts for over-delivery are manual
-
-When a sub-solver consistently over-delivers (`delivered > quoteBuyAmount`), the buffer ledger accumulates negative entries (BYOS owes the sub-solver). The service records these credits but does not pay them out automatically. The BYOS operator reviews negative balances and deposits collateral to the sub-solver's escrow manually. Automated payouts are deferred: they require a withdrawal mechanism on the escrow contract and policy decisions about payout frequency, minimum thresholds, and fraud checks that are outside the scope of v1.
+Over-delivery (delivering more than `quoteBuyAmount`) produces a negative ledger entry that offsets future shortfalls. These credits reduce the outstanding balance but are never paid out — they exist solely to avoid penalizing a sub-solver whose net delivery is on target.
 
 ### Non-settlement detection
 
