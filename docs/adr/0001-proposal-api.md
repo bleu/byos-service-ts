@@ -1,6 +1,6 @@
 # Proposal API & sub-solver authorization
 
-Status: accepted
+Status: accepted; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
 
 Spec: docs/shared/design-document.md#proposal-api
       https://bleu.github.io/byos-docs/design-document#proposal-api
@@ -12,7 +12,7 @@ Spec: docs/shared/design-document.md#proposal-api
 ## Context
 
 The public HTTP API by which sub-solvers submit signed proposals. Endpoints (RFP):
-- `POST /proposals` — `{order_uid, sell_amount, buy_amount, interactions, valid_until, nonce, signature}`; token addresses come from the orderbook order, not the sub-solver ([ADR-0012](0012-simulation.md))
+- `POST /proposals` — `{order_uid, sell_amount, min_buy_amount, quote_buy_amount, interactions, valid_until, nonce, signature}`; token addresses come from the orderbook order, not the sub-solver ([ADR-0012](0012-simulation.md))
 - `GET /proposals/{order_uid}` — metadata only, never full contents (no leakage channel)
 - `DELETE /proposals/{id}` — cancellation by the original signer
 

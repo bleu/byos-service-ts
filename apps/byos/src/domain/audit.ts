@@ -94,7 +94,8 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 				orderUid: kind.proposal.orderUid,
 				orderUidHash: kind.proposal.orderUidHash,
 				sellAmount: kind.proposal.sellAmount.toString(),
-				buyAmount: kind.proposal.buyAmount.toString(),
+				minBuyAmount: kind.proposal.minBuyAmount.toString(),
+				quoteBuyAmount: kind.proposal.quoteBuyAmount.toString(),
 				interactions: kind.proposal.interactions.map((i) => ({
 					target: i.target,
 					value: i.value.toString(),

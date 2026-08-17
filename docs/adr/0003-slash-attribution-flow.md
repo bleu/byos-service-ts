@@ -1,6 +1,6 @@
 # Slashing policy & attribution flow
 
-Status: accepted
+Status: accepted; revised 2026-08-14 (slippage debit for minBuyAmount/quoteBuyAmount)
 
 Spec: docs/shared/design-document.md#penalties
       https://bleu.github.io/byos-docs/design-document#penalties
@@ -37,6 +37,12 @@ Passing gatekeeping does not absolve the sub-solver of liability if CoW later de
 ### Hooks and sub-solver responsibility
 
 Hooks are handled by BYOS and the driver, not by sub-solvers (COW-1243). The orderbook pre-encodes hooks as `HooksTrampoline.execute()` calls; BYOS includes them in simulation for accurate gas estimates, and the driver appends them to the settlement. Sub-solvers submit routing proposals without hook interactions. Some hooks change token balances available for the route; sub-solvers must account for their effects when computing routes, but do not encode or submit them.
+
+### Why a slippage debit for aggressive buy-amount ranges
+
+A sell-order proposal can set `minBuyAmount` below `quoteBuyAmount`. The engine uses `quoteBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job measures the gap between `quoteBuyAmount` and the amount the user received. It converts this gap to ETH at the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
+
+This mechanism makes the sub-solver responsible for the slippage it accepted. A wider range gives the sub-solver more chance to win the auction, but a larger delivered-amount shortfall costs the sub-solver proportionally. Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
 
 ### Non-settlement detection
 

@@ -16,7 +16,8 @@ describe("DTO schemas", () => {
 			const result = createProposalRequestSchema.safeParse({
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000000000000000",
-				buyAmount: "5000000",
+				minBuyAmount: "5000000",
+				quoteBuyAmount: "5000000",
 				interactions: [
 					{
 						target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
@@ -42,7 +43,8 @@ describe("DTO schemas", () => {
 			const result = createProposalRequestSchema.safeParse({
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000",
-				buyAmount: "500",
+				minBuyAmount: "500",
+				quoteBuyAmount: "500",
 				interactions: [
 					{
 						target: "not-an-address",
@@ -114,7 +116,8 @@ describe("DTO schemas", () => {
 				subSolver: "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7",
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000",
-				buyAmount: "990000",
+				minBuyAmount: "990000",
+				quoteBuyAmount: "990000",
 				validUntil: "1750000000",
 				status: "active",
 				rejectionReason: undefined,
@@ -129,7 +132,8 @@ describe("DTO schemas", () => {
 				subSolver: "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7",
 				orderUid: `0x${"ab".repeat(56)}`,
 				sellAmount: "1000000",
-				buyAmount: "990000",
+				minBuyAmount: "990000",
+				quoteBuyAmount: "990000",
 				validUntil: "1750000000",
 				status: "submitted",
 			});
@@ -168,7 +172,8 @@ describe("wire grammar", () => {
 	const valid = {
 		orderUid: `0x${"ab".repeat(56)}`,
 		sellAmount: "1000000000000000000",
-		buyAmount: "5000000",
+		minBuyAmount: "5000000",
+		quoteBuyAmount: "5000000",
 		interactions: [
 			{
 				target: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",

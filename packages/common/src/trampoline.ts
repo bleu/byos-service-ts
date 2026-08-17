@@ -43,7 +43,8 @@ export function encodeTrampolineInteractions(
 			{
 				orderUidHash: proposal.orderUidHash,
 				sellAmount: proposal.sellAmount,
-				buyAmount: proposal.buyAmount,
+				minBuyAmount: proposal.minBuyAmount,
+				quoteBuyAmount: proposal.quoteBuyAmount,
 				validUntil: proposal.validUntil,
 				nonce: proposal.nonce,
 			},

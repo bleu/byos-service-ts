@@ -10,7 +10,8 @@ function sampleProposal(): Proposal {
 	return {
 		orderUidHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		validUntil: 1_700_000_000n,
 		nonce: 1n,
 	};
@@ -63,7 +64,7 @@ describe("trampoline encoding", () => {
 		// Verify selector matches keccak256 of the function signature
 		const expectedSelector = keccak256(
 			toHex(
-				"execute((bytes32,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],address,address,bytes)",
+				"execute((bytes32,uint256,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],address,address,bytes)",
 			),
 		).slice(0, 10);
 		expect(execute.callData.slice(0, 10)).toBe(expectedSelector);
@@ -94,7 +95,8 @@ describe("trampoline encoding", () => {
 
 		expect(decodedProposal.orderUidHash).toBe(proposal.orderUidHash);
 		expect(decodedProposal.sellAmount).toBe(proposal.sellAmount);
-		expect(decodedProposal.buyAmount).toBe(proposal.buyAmount);
+		expect(decodedProposal.minBuyAmount).toBe(proposal.minBuyAmount);
+		expect(decodedProposal.quoteBuyAmount).toBe(proposal.quoteBuyAmount);
 		expect(decodedProposal.validUntil).toBe(proposal.validUntil);
 		expect(decodedProposal.nonce).toBe(proposal.nonce);
 		expect(decodedInteractions).toHaveLength(1);

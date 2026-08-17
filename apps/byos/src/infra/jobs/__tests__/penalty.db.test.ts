@@ -34,7 +34,8 @@ function sampleProposal(): Omit<Proposal, "id"> {
 		orderUid: `0x${uid.repeat(56)}`,
 		orderUidHash: `0x${"cc".repeat(32)}` as Hex,
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
 		buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
 		interactions: [],
@@ -94,6 +95,9 @@ describe("revert debits", () => {
 				calls.push({ subSolver, amount, reason });
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const events: AuditEvent[] = [];
 
@@ -121,6 +125,9 @@ describe("revert debits", () => {
 				if (debitCalls <= 2) throw new Error("nonce race");
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const attempts = new Map<number, number>();
 
@@ -146,6 +153,9 @@ describe("revert debits", () => {
 				debitCalls++;
 				throw new Error("operator lacks role");
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const attempts = new Map<number, number>();
 
@@ -170,6 +180,9 @@ describe("revert debits", () => {
 			async debit(_subSolver, _amount, reason) {
 				if (reason === tx) debitCalls++;
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const attempts = new Map<number, number>();
@@ -197,6 +210,9 @@ describe("revert debits", () => {
 			},
 			async debit() {
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const logLines: string[] = [];
@@ -228,6 +244,9 @@ describe("revert debits", () => {
 				const current = await store.get(ctx.db, id);
 				await store.transition(ctx.db, current as Proposal, "penalized");
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const events: AuditEvent[] = [];
@@ -272,6 +291,9 @@ describe("non-settlement debits", () => {
 				calls.push(amount);
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const events: AuditEvent[] = [];
 		const attempts = new Map<number, number>();
@@ -294,6 +316,9 @@ describe("non-settlement debits", () => {
 			async debit() {
 				debitCalls++;
 				throw new Error("escrow paused");
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const attempts = new Map<number, number>();

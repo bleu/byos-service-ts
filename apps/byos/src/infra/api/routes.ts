@@ -69,7 +69,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 				{
 					orderUidHash: parsed.orderUidHash,
 					sellAmount: parsed.sellAmount,
-					buyAmount: parsed.buyAmount,
+					minBuyAmount: parsed.minBuyAmount,
+					quoteBuyAmount: parsed.quoteBuyAmount,
 					validUntil: parsed.validUntil,
 					nonce: parsed.nonce,
 				},
@@ -94,7 +95,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
 			sellAmount: parsed.sellAmount,
-			buyAmount: parsed.buyAmount,
+			minBuyAmount: parsed.minBuyAmount,
+			quoteBuyAmount: parsed.quoteBuyAmount,
 			sellToken: "0x0000000000000000000000000000000000000000" as Address, // Set by validator
 			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			interactions: parsed.interactions,
