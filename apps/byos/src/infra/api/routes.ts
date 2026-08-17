@@ -186,7 +186,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		const entries = await store.unclearedSlippageEntries(config.db, reader);
 		let outstandingBalance = 0n;
 		for (const entry of entries) {
-			outstandingBalance += BigInt(entry.ethAmount);
+			outstandingBalance += BigInt(entry.nativeTokenAmount);
 		}
 
 		return c.json({
@@ -195,9 +195,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 			entries: entries.map((e) => ({
 				proposalId: e.proposalId,
 				orderUid: e.orderUid,
+				buyToken: e.buyToken,
 				delta: e.delta,
 				gap: e.gap,
-				ethAmount: e.ethAmount,
+				nativeTokenAmount: e.nativeTokenAmount,
 				createdAt: e.createdAt.toISOString(),
 			})),
 		});

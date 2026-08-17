@@ -92,7 +92,7 @@ export const solutions = pgTable(
 );
 
 // --- slippage_entries ---
-// Per-proposal ledger for the maxBuyAmount-vs-delivered gap. Positive eth_amount
+// Per-proposal ledger for the quoteBuyAmount-vs-delivered gap. Positive native_token_amount
 // means the subsolver owes BYOS; negative means BYOS owes the subsolver.
 // Debits are slashed automatically when the balance exceeds c_L.
 // Credits (negative balances) are paid out manually by the BYOS operator.
@@ -108,7 +108,8 @@ export const slippageEntries = pgTable(
 		orderUid: text("order_uid").notNull(),
 		delta: text().notNull(),
 		gap: text().notNull(),
-		ethAmount: text("eth_amount").notNull(),
+		buyToken: text("buy_token").notNull(),
+		nativeTokenAmount: text("native_token_amount").notNull(),
 		cleared: boolean().notNull().default(false),
 		clearTxHash: text("clear_tx_hash"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

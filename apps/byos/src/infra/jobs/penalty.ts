@@ -187,7 +187,7 @@ export async function runNonSettlementDebits(
 
 /**
  * Processes slippage accounting for settled proposals with aggressive slippage
- * (minBuyAmount < maxBuyAmount).
+ * (minBuyAmount < quoteBuyAmount).
  *
  * Step 1: Record a ledger entry per proposal (signed: positive = subsolver owes,
  *         negative = BYOS owes for over-delivery).
@@ -262,23 +262,24 @@ export async function runSlippageDebits(
 
 		const gap = proposal.quoteBuyAmount - delta;
 		const refPrice = BigInt(refPriceStr);
-		const ethAmount = slippageDebit(gap < 0n ? -gap : gap, refPrice);
+		const nativeAmount = slippageDebit(gap < 0n ? -gap : gap, refPrice);
 		// Preserve sign: positive = subsolver owes, negative = BYOS owes
-		const signedEthAmount = gap < 0n ? -ethAmount : ethAmount;
+		const signedNativeAmount = gap < 0n ? -nativeAmount : nativeAmount;
 
 		try {
 			await store.insertSlippageEntry(db, {
 				subSolver: proposal.subSolver,
 				proposalId: proposal.id,
 				orderUid: proposal.orderUid,
+				buyToken: proposal.buyToken,
 				delta: delta.toString(),
 				gap: gap.toString(),
-				ethAmount: signedEthAmount.toString(),
+				nativeTokenAmount: signedNativeAmount.toString(),
 			});
 			affectedSubSolvers.add(proposal.subSolver);
 			attempts.delete(proposal.id);
 			logger.info(
-				{ id: proposal.id, gap: gap.toString(), ethAmount: signedEthAmount.toString() },
+				{ id: proposal.id, gap: gap.toString(), nativeTokenAmount: signedNativeAmount.toString() },
 				"slippage entry recorded",
 			);
 		} catch (e) {

@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS "slippage_entries" (
 	"order_uid" text NOT NULL,
 	"delta" text NOT NULL,
 	"gap" text NOT NULL,
-	"eth_amount" text NOT NULL,
+	"buy_token" text NOT NULL,
+	"native_token_amount" text NOT NULL,
 	"cleared" boolean NOT NULL DEFAULT false,
 	"clear_tx_hash" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL

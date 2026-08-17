@@ -339,7 +339,7 @@ describe("slippage debits", () => {
 
 	/** Creates a settled proposal with aggressive slippage and a recorded solution with ref price. */
 	async function settledSlippageProposal(
-		maxBuyAmount: bigint,
+		quoteBuyAmount: bigint,
 		minBuyAmount: bigint,
 		refPrice: string,
 	): Promise<{ id: number; tx: Hex }> {
@@ -348,7 +348,7 @@ describe("slippage debits", () => {
 			...base,
 			subSolver: SUB_SOLVER,
 			minBuyAmount,
-			maxBuyAmount,
+			quoteBuyAmount,
 		});
 		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
 
@@ -405,7 +405,7 @@ describe("slippage debits", () => {
 		expect(entry).toBeDefined();
 		expect(entry!.gap).toBe("50"); // maxBuy - delivered
 		expect(entry!.delta).toBe("950");
-		expect(BigInt(entry!.ethAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
+		expect(BigInt(entry!.nativeTokenAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
 	});
 
 	it("records a negative entry for over-delivery", async () => {
@@ -424,7 +424,7 @@ describe("slippage debits", () => {
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
 		expect(entry!.gap).toBe("-50");
-		expect(BigInt(entry!.ethAmount)).toBe(-50n);
+		expect(BigInt(entry!.nativeTokenAmount)).toBe(-50n);
 	});
 
 	it("does not create duplicate entries on repeated ticks", async () => {
@@ -445,7 +445,7 @@ describe("slippage debits", () => {
 		const maxBuy = ETHER; // 1e18
 		const minBuy = ETHER / 2n;
 		// delivered = 0.98e18, gap = 0.02e18. With ref price = 1 ETH/token,
-		// ethAmount = 0.02 ETH = 2e16 > c_L (1e16).
+		// nativeTokenAmount = 0.02 ETH = 2e16 > c_L (1e16).
 		const delivered = (ETHER * 98n) / 100n;
 		const refPrice = ETHER.toString();
 
@@ -474,7 +474,7 @@ describe("slippage debits", () => {
 	it("does not slash when balance is below c_L", async () => {
 		const maxBuy = 1000n;
 		const minBuy = 900n;
-		const delivered = 999n; // gap = 1, ethAmount = 1 wei — well below c_L
+		const delivered = 999n; // gap = 1, nativeTokenAmount = 1 wei — well below c_L
 		const refPrice = ETHER.toString();
 
 		const { tx } = await settledSlippageProposal(maxBuy, minBuy, refPrice);
@@ -525,13 +525,13 @@ describe("slippage debits", () => {
 	});
 
 	it("ignores settled proposals without aggressive slippage", async () => {
-		// minBuyAmount == maxBuyAmount: no slippage accounting
+		// minBuyAmount == quoteBuyAmount: no slippage accounting
 		const base = sampleProposal();
 		const { id } = await store.insert(ctx.db, {
 			...base,
 			subSolver: SUB_SOLVER,
 			minBuyAmount: 1000n,
-			maxBuyAmount: 1000n,
+			quoteBuyAmount: 1000n,
 		});
 		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
 		const submitted = await store.get(ctx.db, id);
@@ -563,7 +563,7 @@ describe("slippage debits", () => {
 			...base,
 			subSolver: isolatedSolver,
 			minBuyAmount: minBuy,
-			maxBuyAmount: maxBuy,
+			quoteBuyAmount: maxBuy,
 		});
 		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
 		const submitted = await store.get(ctx.db, id);
@@ -609,7 +609,7 @@ describe("slippage debits", () => {
 			...base,
 			subSolver: isolatedSolver,
 			minBuyAmount: minBuy,
-			maxBuyAmount: maxBuy,
+			quoteBuyAmount: maxBuy,
 		});
 		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
 		const submitted = await store.get(ctx.db, id);

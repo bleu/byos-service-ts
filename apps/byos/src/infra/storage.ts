@@ -766,9 +766,10 @@ export interface SlippageEntry {
 	subSolver: Address;
 	proposalId: number;
 	orderUid: string;
+	buyToken: Address;
 	delta: string;
 	gap: string;
-	ethAmount: string;
+	nativeTokenAmount: string;
 	cleared: boolean;
 	clearTxHash: string | null;
 	createdAt: Date;
@@ -791,9 +792,10 @@ export async function insertSlippageEntry(
 		subSolver: Address;
 		proposalId: number;
 		orderUid: string;
+		buyToken: Address;
 		delta: string;
 		gap: string;
-		ethAmount: string;
+		nativeTokenAmount: string;
 	},
 ): Promise<number> {
 	const result = await db
@@ -802,9 +804,10 @@ export async function insertSlippageEntry(
 			subSolver: entry.subSolver.toLowerCase(),
 			proposalId: entry.proposalId,
 			orderUid: entry.orderUid.toLowerCase(),
+			buyToken: entry.buyToken.toLowerCase(),
 			delta: entry.delta,
 			gap: entry.gap,
-			ethAmount: entry.ethAmount,
+			nativeTokenAmount: entry.nativeTokenAmount,
 		})
 		.returning({ id: slippageEntries.id });
 	return result[0]!.id;
@@ -819,11 +822,11 @@ export async function unclearedSlippageSubSolvers(db: Db): Promise<Address[]> {
 	return rows.map((r) => r.subSolver as Address);
 }
 
-/** Returns the outstanding (uncleared) slippage balance for a subsolver in ETH (as bigint). */
+/** Returns the outstanding (uncleared) slippage balance for a subsolver in native token (as bigint). */
 export async function outstandingSlippageBalance(db: Db, subSolver: Address): Promise<bigint> {
 	const rows = await db
 		.select({
-			total: sql<string>`COALESCE(SUM(CAST(${slippageEntries.ethAmount} AS numeric)), 0)`,
+			total: sql<string>`COALESCE(SUM(CAST(${slippageEntries.nativeTokenAmount} AS numeric)), 0)`,
 		})
 		.from(slippageEntries)
 		.where(
@@ -855,9 +858,10 @@ export async function unclearedSlippageEntries(
 		subSolver: r.subSolver as Address,
 		proposalId: r.proposalId,
 		orderUid: r.orderUid,
+		buyToken: r.buyToken as Address,
 		delta: r.delta,
 		gap: r.gap,
-		ethAmount: r.ethAmount,
+		nativeTokenAmount: r.nativeTokenAmount,
 		cleared: r.cleared,
 		clearTxHash: r.clearTxHash,
 		createdAt: r.createdAt,

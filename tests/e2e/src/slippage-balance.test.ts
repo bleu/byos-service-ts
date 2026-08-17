@@ -45,7 +45,7 @@ describe("GET /slippage-balance", () => {
 			subSolver: SIGNER_ACCOUNT.address,
 			status: "settled",
 			minBuyAmount: 900n,
-			maxBuyAmount: 1000n,
+			quoteBuyAmount: 1000n,
 			settlementTxHash: `0x${"a1".repeat(32)}`,
 		});
 
@@ -53,9 +53,10 @@ describe("GET /slippage-balance", () => {
 			subSolver: SIGNER_ACCOUNT.address as Address,
 			proposalId: id,
 			orderUid,
+			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			delta: "950",
 			gap: "50",
-			ethAmount: "50000000000000000",
+			nativeTokenAmount: "50000000000000000",
 		});
 
 		const { status, body } = await getSlippageBalance();
@@ -67,7 +68,7 @@ describe("GET /slippage-balance", () => {
 		expect(entry).toBeDefined();
 		expect(entry?.delta).toBe("950");
 		expect(entry?.gap).toBe("50");
-		expect(entry?.ethAmount).toBe("50000000000000000");
+		expect(entry?.nativeTokenAmount).toBe("50000000000000000");
 		expect(entry?.createdAt).toBeDefined();
 	});
 
@@ -79,7 +80,7 @@ describe("GET /slippage-balance", () => {
 			subSolver: otherSolver,
 			status: "settled",
 			minBuyAmount: 900n,
-			maxBuyAmount: 1000n,
+			quoteBuyAmount: 1000n,
 			settlementTxHash: `0x${"a2".repeat(32)}`,
 		});
 
@@ -87,9 +88,10 @@ describe("GET /slippage-balance", () => {
 			subSolver: otherSolver,
 			proposalId: id,
 			orderUid,
+			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			delta: "950",
 			gap: "50",
-			ethAmount: "50000000000000000",
+			nativeTokenAmount: "50000000000000000",
 		});
 
 		// Query as the other solver — should see the entry
@@ -107,7 +109,7 @@ describe("GET /slippage-balance", () => {
 			subSolver: SIGNER_ACCOUNT.address,
 			status: "settled",
 			minBuyAmount: 900n,
-			maxBuyAmount: 1000n,
+			quoteBuyAmount: 1000n,
 			settlementTxHash: `0x${"a3".repeat(32)}`,
 		});
 
@@ -115,9 +117,10 @@ describe("GET /slippage-balance", () => {
 			subSolver: SIGNER_ACCOUNT.address as Address,
 			proposalId: id,
 			orderUid,
+			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			delta: "950",
 			gap: "50",
-			ethAmount: "50000000000000000",
+			nativeTokenAmount: "50000000000000000",
 		});
 
 		// Clear the entry
