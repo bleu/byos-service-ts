@@ -83,7 +83,7 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 		nonce,
 		sellAmount: 10n ** 18n,
 		minBuyAmount: 2n * 10n ** 18n,
-		quotedBuyAmount: 2n * 10n ** 18n,
+		quoteBuyAmount: 2n * 10n ** 18n,
 	});
 	const { id } = await response.json();
 

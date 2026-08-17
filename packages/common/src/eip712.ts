@@ -17,7 +17,7 @@ export const DOMAIN_VERSION = "0.1";
 
 /** Matches the on-chain PROPOSAL_TYPEHASH in ITrampoline.sol. */
 export const PROPOSAL_TYPEHASH: Hex =
-	"0x6aa953c29ba5528a0c201d82bd15e7b08d7cbc704b8156108bbb3ab5fae06da0";
+	"0x3d225121619eb0a7893a735942b7d03f8c171e24e347cd9fd29f74a1397af5b7";
 
 /** Current ReadAuth.version. Bumping invalidates all outstanding read tokens. */
 export const READ_AUTH_VERSION = 1n;

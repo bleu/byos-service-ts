@@ -96,7 +96,7 @@ async function seedActive(
 		orderUid,
 		sellAmount,
 		minBuyAmount,
-		quotedBuyAmount: minBuyAmount,
+		quoteBuyAmount: minBuyAmount,
 		gasUsed,
 		trampoline: "0x0000000000000000000000000000000000000000" as Address,
 	});
@@ -228,7 +228,7 @@ describe("/solve economics", () => {
 			orderUid: u,
 			sellAmount: 1_000_000_000n,
 			minBuyAmount: 1_000_000_000n,
-			quotedBuyAmount: 1_000_000_000n,
+			quoteBuyAmount: 1_000_000_000n,
 			gasUsed: null,
 			trampoline: "0x0000000000000000000000000000000000000000" as Address,
 		});
@@ -309,7 +309,7 @@ describe("/solve economics", () => {
 			status: "executing",
 			sellAmount: 1_000n,
 			minBuyAmount: 950n,
-			quotedBuyAmount: 950n,
+			quoteBuyAmount: 950n,
 		});
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000", "900", "0"));
@@ -326,7 +326,7 @@ describe("/solve economics", () => {
 			orderUid: second,
 			sellAmount: 2_000n,
 			minBuyAmount: 1_900n,
-			quotedBuyAmount: 1_900n,
+			quoteBuyAmount: 1_900n,
 			gasUsed: 200_000n,
 			trampoline: TRAMPOLINE,
 		});
@@ -376,7 +376,7 @@ describe("/solve economics", () => {
 			orderUid: u,
 			sellAmount: 1_000n,
 			minBuyAmount: 950n,
-			quotedBuyAmount: 950n,
+			quoteBuyAmount: 950n,
 			gasUsed: 200_000n,
 			trampoline: TRAMPOLINE,
 			interactions: route,
@@ -397,7 +397,7 @@ describe("/solve economics", () => {
 				orderUidHash: keccak256(u as Hex),
 				sellAmount: 1_000n,
 				minBuyAmount: 950n,
-				quotedBuyAmount: 950n,
+				quoteBuyAmount: 950n,
 				validUntil: 2n ** 40n,
 				nonce: 1n,
 			},
@@ -426,7 +426,7 @@ describe("/solve economics", () => {
 			orderUid: u,
 			sellAmount: 1_000n,
 			minBuyAmount: 950n,
-			quotedBuyAmount: 950n,
+			quoteBuyAmount: 950n,
 			gasUsed: 200_000n,
 			trampoline: null,
 		});
