@@ -17,7 +17,7 @@ export const DOMAIN_VERSION = "0.1";
 
 /** Matches the on-chain PROPOSAL_TYPEHASH in ITrampoline.sol. */
 export const PROPOSAL_TYPEHASH: Hex =
-	"0xfe24195056634c1fad84d18091f35527b31a2d51af61f2a09a3c31cc94a7ddf6";
+	"0x6aa953c29ba5528a0c201d82bd15e7b08d7cbc704b8156108bbb3ab5fae06da0";
 
 /** Current ReadAuth.version. Bumping invalidates all outstanding read tokens. */
 export const READ_AUTH_VERSION = 1n;
@@ -29,7 +29,7 @@ export const proposalDataTypes = {
 		{ name: "orderUidHash", type: "bytes32" },
 		{ name: "sellAmount", type: "uint256" },
 		{ name: "minBuyAmount", type: "uint256" },
-		{ name: "maxBuyAmount", type: "uint256" },
+		{ name: "quotedBuyAmount", type: "uint256" },
 		{ name: "interactionsHash", type: "bytes32" },
 		{ name: "validUntil", type: "uint256" },
 		{ name: "nonce", type: "uint256" },
@@ -93,7 +93,7 @@ export async function recoverProposer(
 			orderUidHash: proposal.orderUidHash,
 			sellAmount: proposal.sellAmount,
 			minBuyAmount: proposal.minBuyAmount,
-			maxBuyAmount: proposal.maxBuyAmount,
+			quotedBuyAmount: proposal.quotedBuyAmount,
 			interactionsHash,
 			validUntil: proposal.validUntil,
 			nonce: proposal.nonce,
@@ -151,7 +151,7 @@ export async function signProposal(
 			orderUidHash: proposal.orderUidHash,
 			sellAmount: proposal.sellAmount,
 			minBuyAmount: proposal.minBuyAmount,
-			maxBuyAmount: proposal.maxBuyAmount,
+			quotedBuyAmount: proposal.quotedBuyAmount,
 			interactionsHash,
 			validUntil: proposal.validUntil,
 			nonce: proposal.nonce,
@@ -210,7 +210,7 @@ export function hashProposalData(
 			orderUidHash: proposal.orderUidHash,
 			sellAmount: proposal.sellAmount,
 			minBuyAmount: proposal.minBuyAmount,
-			maxBuyAmount: proposal.maxBuyAmount,
+			quotedBuyAmount: proposal.quotedBuyAmount,
 			interactionsHash,
 			validUntil: proposal.validUntil,
 			nonce: proposal.nonce,

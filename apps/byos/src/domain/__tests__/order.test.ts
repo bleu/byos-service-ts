@@ -38,7 +38,7 @@ function matchingProposal(overrides?: Partial<Proposal>): Proposal {
 		orderUidHash: `0x${"cc".repeat(32)}`,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		maxBuyAmount: 990_000n,
+		quotedBuyAmount: 990_000n,
 		sellToken: "0xB1F1ee126e9c96231Cc3d3fAD7C08b4cf873b1f1",
 		buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		interactions: [],
@@ -63,10 +63,10 @@ describe("order envelope", () => {
 		expect(result).toBe("UnsupportedOrder");
 	});
 
-	it("rejects minBuyAmount > maxBuyAmount", () => {
+	it("rejects minBuyAmount > quotedBuyAmount", () => {
 		const result = checkEnvelope(
 			sampleRecord(),
-			matchingProposal({ minBuyAmount: 1_000_000n, maxBuyAmount: 900_000n }),
+			matchingProposal({ minBuyAmount: 1_000_000n, quotedBuyAmount: 900_000n }),
 		);
 		expect(result).toBe("AmountMismatch");
 	});
@@ -77,10 +77,10 @@ describe("order envelope", () => {
 			expect(result).toBeNull();
 		});
 
-		it("accepts matching sell amount with aggressive slippage", () => {
+		it("accepts matching sell amount with loose slippage", () => {
 			const result = checkEnvelope(
 				sampleRecord(),
-				matchingProposal({ minBuyAmount: 980_000n, maxBuyAmount: 990_000n }),
+				matchingProposal({ minBuyAmount: 980_000n, quotedBuyAmount: 990_000n }),
 			);
 			expect(result).toBeNull();
 		});
@@ -93,7 +93,7 @@ describe("order envelope", () => {
 		it("rejects minBuyAmount below order limit", () => {
 			const result = checkEnvelope(
 				sampleRecord(),
-				matchingProposal({ minBuyAmount: 979_999n, maxBuyAmount: 990_000n }),
+				matchingProposal({ minBuyAmount: 979_999n, quotedBuyAmount: 990_000n }),
 			);
 			expect(result).toBe("AmountMismatch");
 		});
@@ -104,7 +104,7 @@ describe("order envelope", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 980_000n, maxBuyAmount: 980_000n });
+			const proposal = matchingProposal({ minBuyAmount: 980_000n, quotedBuyAmount: 980_000n });
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
 
@@ -112,15 +112,15 @@ describe("order envelope", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 979_999n, maxBuyAmount: 979_999n });
+			const proposal = matchingProposal({ minBuyAmount: 979_999n, quotedBuyAmount: 979_999n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects minBuyAmount != maxBuyAmount", () => {
+		it("rejects minBuyAmount != quotedBuyAmount", () => {
 			const record = sampleRecord({
 				order: { ...sampleOrder(), kind: OrderKind.BUY },
 			});
-			const proposal = matchingProposal({ minBuyAmount: 970_000n, maxBuyAmount: 980_000n });
+			const proposal = matchingProposal({ minBuyAmount: 970_000n, quotedBuyAmount: 980_000n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 	});
@@ -135,16 +135,16 @@ describe("order envelope", () => {
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 500_000n,
-				maxBuyAmount: 500_000n,
+				quotedBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
 
-		it("accepts partial fill with aggressive slippage", () => {
+		it("accepts partial fill with loose slippage", () => {
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 490_000n,
-				maxBuyAmount: 500_000n,
+				quotedBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
@@ -159,22 +159,22 @@ describe("order envelope", () => {
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects maxBuyAmount below limit price", () => {
+		it("rejects quotedBuyAmount below limit price", () => {
 			// proposal_maxBuy * order_sell < proposal_sell * order_buy → below limit
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 489_999n,
-				maxBuyAmount: 489_999n,
+				quotedBuyAmount: 489_999n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects minBuyAmount below scaled limit price", () => {
-			// maxBuyAmount beats limit but minBuyAmount doesn't
+			// quotedBuyAmount beats limit but minBuyAmount doesn't
 			const proposal = matchingProposal({
 				sellAmount: 500_000n,
 				minBuyAmount: 489_999n,
-				maxBuyAmount: 500_000n,
+				quotedBuyAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
@@ -188,35 +188,35 @@ describe("order envelope", () => {
 		it("accepts partial fill within limit", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 490_000n,
-				maxBuyAmount: 490_000n,
+				quotedBuyAmount: 490_000n,
 				sellAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBeNull();
 		});
 
 		it("rejects zero buy amount", () => {
-			const proposal = matchingProposal({ minBuyAmount: 0n, maxBuyAmount: 0n });
+			const proposal = matchingProposal({ minBuyAmount: 0n, quotedBuyAmount: 0n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects buy amount exceeding order", () => {
-			const proposal = matchingProposal({ minBuyAmount: 980_001n, maxBuyAmount: 980_001n });
+			const proposal = matchingProposal({ minBuyAmount: 980_001n, quotedBuyAmount: 980_001n });
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
 		it("rejects zero sell amount", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 490_000n,
-				maxBuyAmount: 490_000n,
+				quotedBuyAmount: 490_000n,
 				sellAmount: 0n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
 
-		it("rejects minBuyAmount != maxBuyAmount", () => {
+		it("rejects minBuyAmount != quotedBuyAmount", () => {
 			const proposal = matchingProposal({
 				minBuyAmount: 480_000n,
-				maxBuyAmount: 490_000n,
+				quotedBuyAmount: 490_000n,
 				sellAmount: 500_000n,
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");

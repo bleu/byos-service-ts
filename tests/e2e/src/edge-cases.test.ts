@@ -116,7 +116,7 @@ describe("create proposal edge cases", () => {
 				orderUid: "",
 				sellAmount: "1000",
 				minBuyAmount: "900",
-				maxBuyAmount: "900",
+				quotedBuyAmount: "900",
 				interactions: [],
 				validUntil: String(Math.floor(Date.now() / 1000) + 200),
 				nonce: "1",

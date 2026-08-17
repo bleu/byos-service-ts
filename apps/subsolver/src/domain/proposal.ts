@@ -29,7 +29,7 @@ export interface SignedProposal {
 	orderUid: Hex;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
-	maxBuyAmount: bigint;
+	quotedBuyAmount: bigint;
 	interactions: ContractInteraction[];
 	validUntil: bigint;
 	nonce: bigint;
@@ -139,12 +139,12 @@ export async function buildProposal(
 
 	// Sign via EIP-712
 	const orderUidHash = keccak256(order.uid);
-	// Reference subsolver does not use aggressive slippage: min = max
+	// Reference subsolver does not use loose slippage: min = max
 	const proposal: Proposal = {
 		orderUidHash,
 		sellAmount,
 		minBuyAmount: buyAmount,
-		maxBuyAmount: buyAmount,
+		quotedBuyAmount: buyAmount,
 		validUntil: params.validUntil,
 		nonce: params.nonce,
 	};
@@ -155,7 +155,7 @@ export async function buildProposal(
 		orderUid: order.uid,
 		sellAmount,
 		minBuyAmount: buyAmount,
-		maxBuyAmount: buyAmount,
+		quotedBuyAmount: buyAmount,
 		interactions,
 		validUntil: params.validUntil,
 		nonce: params.nonce,

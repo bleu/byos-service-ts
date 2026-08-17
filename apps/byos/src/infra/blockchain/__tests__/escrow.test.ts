@@ -17,7 +17,7 @@ function submittedProposal(): Proposal {
 		orderUidHash: `0x${"cc".repeat(32)}`,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		maxBuyAmount: 990_000n,
+		quotedBuyAmount: 990_000n,
 		sellToken: "0xB1F1ee126e9c96231Cc3d3fAD7C08b4cf873b1f1",
 		buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		interactions: [],

@@ -8,7 +8,7 @@ export interface Proposal {
 	orderUidHash: Hex;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
-	maxBuyAmount: bigint;
+	quotedBuyAmount: bigint;
 	validUntil: bigint;
 	nonce: bigint;
 }

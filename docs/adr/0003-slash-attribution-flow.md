@@ -1,6 +1,6 @@
 # Slashing policy & attribution flow
 
-Status: accepted; revised 2026-08-14 (slippage debit for minBuyAmount/maxBuyAmount)
+Status: accepted; revised 2026-08-14 (slippage debit for minBuyAmount/quotedBuyAmount)
 
 Spec: docs/shared/design-document.md#penalties
       https://bleu.github.io/byos-docs/design-document#penalties
@@ -40,9 +40,9 @@ Hooks are handled by BYOS and the driver, not by sub-solvers (COW-1243). The ord
 
 ### Why a slippage debit for aggressive buy-amount ranges
 
-A sell-order proposal can set `minBuyAmount` below `maxBuyAmount`. The engine uses `maxBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job measures the gap between `maxBuyAmount` and the amount the user received. It converts this gap to ETH at the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
+A sell-order proposal can set `minBuyAmount` below `quotedBuyAmount`. The engine uses `quotedBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job measures the gap between `quotedBuyAmount` and the amount the user received. It converts this gap to ETH at the auction reference price. The job debits the sub-solver's escrow for the ETH-equivalent gap.
 
-This mechanism makes the sub-solver responsible for the slippage it accepted. A wider range gives the sub-solver more chance to win the auction, but a larger delivered-amount shortfall costs the sub-solver proportionally. Buy orders must set `minBuyAmount` equal to `maxBuyAmount`. The engine rejects buy-order proposals where the two values differ.
+This mechanism makes the sub-solver responsible for the slippage it accepted. A wider range gives the sub-solver more chance to win the auction, but a larger delivered-amount shortfall costs the sub-solver proportionally. Buy orders must set `minBuyAmount` equal to `quotedBuyAmount`. The engine rejects buy-order proposals where the two values differ.
 
 ### Non-settlement detection
 

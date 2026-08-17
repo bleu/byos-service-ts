@@ -3,7 +3,7 @@ export const proposalComponents = [
 	{ name: "orderUidHash", type: "bytes32" },
 	{ name: "sellAmount", type: "uint256" },
 	{ name: "minBuyAmount", type: "uint256" },
-	{ name: "maxBuyAmount", type: "uint256" },
+	{ name: "quotedBuyAmount", type: "uint256" },
 	{ name: "validUntil", type: "uint256" },
 	{ name: "nonce", type: "uint256" },
 ] as const;

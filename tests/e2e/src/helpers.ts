@@ -82,7 +82,7 @@ export interface ProposalOverrides {
 	orderUid?: Hex;
 	sellAmount?: bigint;
 	minBuyAmount?: bigint;
-	maxBuyAmount?: bigint;
+	quotedBuyAmount?: bigint;
 	validUntil?: bigint;
 	nonce?: bigint;
 	interactions?: ContractInteraction[];
@@ -92,7 +92,7 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	const orderUid = overrides?.orderUid ?? (`0x${"ab".repeat(56)}` as Hex);
 	const sellAmount = overrides?.sellAmount ?? 1_000_000n;
 	const minBuyAmount = overrides?.minBuyAmount ?? 990_000n;
-	const maxBuyAmount = overrides?.maxBuyAmount ?? 990_000n;
+	const quotedBuyAmount = overrides?.quotedBuyAmount ?? 990_000n;
 	const now = BigInt(Math.floor(Date.now() / 1000));
 	const validUntil = overrides?.validUntil ?? now + 240n;
 	const nonce = overrides?.nonce ?? 1n;
@@ -111,7 +111,7 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 		orderUidHash,
 		sellAmount,
 		minBuyAmount,
-		maxBuyAmount,
+		quotedBuyAmount,
 		validUntil,
 		nonce,
 	};
@@ -121,7 +121,7 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 		orderUid,
 		sellAmount: sellAmount.toString(),
 		minBuyAmount: minBuyAmount.toString(),
-		maxBuyAmount: maxBuyAmount.toString(),
+		quotedBuyAmount: quotedBuyAmount.toString(),
 		interactions: interactions.map((i) => ({
 			target: i.target,
 			value: i.value.toString(),
@@ -156,7 +156,7 @@ export async function seedProposal(
 		orderUidHash: keccak256(orderUid),
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		maxBuyAmount: 990_000n,
+		quotedBuyAmount: 990_000n,
 		sellToken: "0x0000000000000000000000000000000000000000" as Address,
 		buyToken: "0x0000000000000000000000000000000000000000" as Address,
 		interactions: [],

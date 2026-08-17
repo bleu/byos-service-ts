@@ -48,7 +48,7 @@ function submittedProposal(): Proposal {
 		orderUidHash: `0x${"cc".repeat(32)}`,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		maxBuyAmount: 990_000n,
+		quotedBuyAmount: 990_000n,
 		sellToken: "0xB1F1ee126e9c96231Cc3d3fAD7C08b4cf873b1f1",
 		buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		interactions: [],
@@ -152,7 +152,7 @@ describe("SimulationValidator profitability gate", () => {
 		// zero gas price the score is exactly 0, which must NOT exceed the
 		// default minScore of 0 — score must be strictly greater.
 		const proposal = submittedProposal();
-		const record = sampleRecord(sampleOrder({ buyAmount: proposal.maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quotedBuyAmount }));
 
 		const verdict = await validatorWith(record, 0n).validate(proposal);
 
@@ -162,7 +162,7 @@ describe("SimulationValidator profitability gate", () => {
 	it("score exactly at a nonzero minScore rejects", async () => {
 		// Surplus of 10_000 atoms priced 1:1 scores exactly 10_000.
 		const proposal = submittedProposal();
-		const record = sampleRecord(sampleOrder({ buyAmount: proposal.maxBuyAmount - 10_000n }));
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quotedBuyAmount - 10_000n }));
 
 		const verdict = await validatorWith(record, 10_000n).validate(proposal);
 
@@ -171,7 +171,7 @@ describe("SimulationValidator profitability gate", () => {
 
 	it("score above minScore accepts", async () => {
 		const proposal = submittedProposal();
-		const record = sampleRecord(sampleOrder({ buyAmount: proposal.maxBuyAmount - 10_000n }));
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quotedBuyAmount - 10_000n }));
 
 		const verdict = await validatorWith(record, 0n).validate(proposal);
 
@@ -182,7 +182,7 @@ describe("SimulationValidator profitability gate", () => {
 describe("SimulationValidator", () => {
 	it("simulation dispatches full settle with overrides", async () => {
 		const proposal = submittedProposal();
-		const record = sampleRecord(sampleOrder({ buyAmount: proposal.maxBuyAmount - 10_000n }));
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quotedBuyAmount - 10_000n }));
 		const node = fakeNode();
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
@@ -209,7 +209,7 @@ describe("SimulationValidator", () => {
 					orderUidHash: proposal.orderUidHash,
 					sellAmount: proposal.sellAmount,
 					minBuyAmount: proposal.minBuyAmount,
-					maxBuyAmount: proposal.maxBuyAmount,
+					quotedBuyAmount: proposal.quotedBuyAmount,
 					validUntil: proposal.validUntil,
 					nonce: proposal.nonce,
 				},
@@ -246,7 +246,7 @@ describe("SimulationValidator", () => {
 		const proposal = submittedProposal();
 		const order = sampleOrder({
 			kind: OrderKind.BUY,
-			buyAmount: proposal.maxBuyAmount,
+			buyAmount: proposal.quotedBuyAmount,
 			sellAmount: proposal.sellAmount + 100_000n,
 		});
 		const pricedOnly: FetchOrder = {
@@ -266,7 +266,7 @@ describe("SimulationValidator", () => {
 		// 10_000-wei surplus at parity pricing — the score is deeply negative.
 		const gasPrice = 1_000_000_000n;
 		const submitted = submittedProposal();
-		const record = sampleRecord(sampleOrder({ buyAmount: submitted.maxBuyAmount - 10_000n }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submitted.quotedBuyAmount - 10_000n }));
 
 		// The gate would reject these inputs on a first (Submitted) pass…
 		const first = await validatorAt(fakeNode(), fakeOrderbook(record), gasPrice).validate(
@@ -284,7 +284,7 @@ describe("SimulationValidator", () => {
 	});
 
 	it("native price outage defers first verdict", async () => {
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 		const outage: FetchOrder = {
 			order: async () => record,
 			nativePrice: async () => {
@@ -322,7 +322,7 @@ describe("SimulationValidator", () => {
 
 	it("out of envelope order rejects proposal", async () => {
 		const record = {
-			...sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount - 10_000n })),
+			...sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount - 10_000n })),
 			erc20Balances: false,
 		};
 
@@ -338,7 +338,7 @@ describe("SimulationValidator", () => {
 				throw new Error("connection refused");
 			},
 		});
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
 		expect(verdict).toBeNull();
@@ -350,7 +350,7 @@ describe("SimulationValidator", () => {
 				throw { code: 3, message: "execution reverted" };
 			},
 		});
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
 		expect(verdict).toEqual({ kind: "simFailed" });
@@ -362,7 +362,7 @@ describe("SimulationValidator", () => {
 				throw { code: 429, message: "rate limit exceeded" };
 			},
 		});
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
 		expect(verdict).toBeNull();
@@ -371,7 +371,7 @@ describe("SimulationValidator", () => {
 	it("trampoline is resolved once then served from the cache", async () => {
 		const node = fakeNode();
 		const record = sampleRecord(
-			sampleOrder({ buyAmount: submittedProposal().maxBuyAmount - 10_000n }),
+			sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount - 10_000n }),
 		);
 		const validator = validatorAt(node, fakeOrderbook(record));
 		const proposal = { ...submittedProposal(), trampoline: null };
@@ -388,7 +388,7 @@ describe("SimulationValidator", () => {
 				throw new Error("connection refused");
 			},
 		});
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 		const proposal = { ...submittedProposal(), trampoline: null };
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
@@ -401,7 +401,7 @@ describe("SimulationValidator", () => {
 				throw { code: 3, message: "execution reverted" };
 			},
 		});
-		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().maxBuyAmount }));
+		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quotedBuyAmount }));
 		const proposal = { ...submittedProposal(), trampoline: null };
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);

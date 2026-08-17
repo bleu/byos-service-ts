@@ -31,7 +31,7 @@ function fixtureProposal(): Proposal {
 		orderUidHash: keccak256(orderUid),
 		sellAmount: 20_000_002_675_677_095_795n,
 		minBuyAmount: 773_213_156n,
-		maxBuyAmount: 773_213_156n,
+		quotedBuyAmount: 773_213_156n,
 		validUntil: 1_785_174_512n,
 		nonce: 0n,
 	};

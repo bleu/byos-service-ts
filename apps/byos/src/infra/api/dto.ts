@@ -13,7 +13,7 @@ export interface ParsedProposal {
 	orderUidHash: Hex;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
-	maxBuyAmount: bigint;
+	quotedBuyAmount: bigint;
 	interactions: ContractInteraction[];
 	interactionsHash: Hex;
 	validUntil: bigint;
@@ -43,7 +43,7 @@ export function parseCreateProposalRequest(body: CreateProposalRequest): ParsedP
 		orderUidHash,
 		sellAmount: BigInt(body.sellAmount),
 		minBuyAmount: BigInt(body.minBuyAmount),
-		maxBuyAmount: BigInt(body.maxBuyAmount),
+		quotedBuyAmount: BigInt(body.quotedBuyAmount),
 		interactions,
 		interactionsHash,
 		validUntil: BigInt(body.validUntil),
@@ -60,7 +60,7 @@ export function proposalToGetResponse(p: Proposal) {
 		orderUid: p.orderUid,
 		sellAmount: p.sellAmount.toString(),
 		minBuyAmount: p.minBuyAmount.toString(),
-		maxBuyAmount: p.maxBuyAmount.toString(),
+		quotedBuyAmount: p.quotedBuyAmount.toString(),
 		validUntil: p.validUntil.toString(),
 		status: p.status,
 		...(p.rejectionReason ? { rejectionReason: p.rejectionReason } : {}),

@@ -91,7 +91,7 @@ export class SimulationValidator implements ValidateProposal {
 			orderSell: record.order.sellAmount,
 			orderBuy: record.order.buyAmount,
 			proposalSell: proposal.sellAmount,
-			proposalBuy: proposal.maxBuyAmount,
+			proposalBuy: proposal.quotedBuyAmount,
 			isSellOrder,
 			gasCost,
 		};
@@ -154,7 +154,7 @@ export class SimulationValidator implements ValidateProposal {
 				orderUidHash: proposal.orderUidHash,
 				sellAmount: proposal.sellAmount,
 				minBuyAmount: proposal.minBuyAmount,
-				maxBuyAmount: proposal.maxBuyAmount,
+				quotedBuyAmount: proposal.quotedBuyAmount,
 				validUntil: proposal.validUntil,
 				nonce: proposal.nonce,
 			},

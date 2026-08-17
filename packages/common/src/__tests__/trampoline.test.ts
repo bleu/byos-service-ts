@@ -11,7 +11,7 @@ function sampleProposal(): Proposal {
 		orderUidHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
-		maxBuyAmount: 990_000n,
+		quotedBuyAmount: 990_000n,
 		validUntil: 1_700_000_000n,
 		nonce: 1n,
 	};
@@ -96,7 +96,7 @@ describe("trampoline encoding", () => {
 		expect(decodedProposal.orderUidHash).toBe(proposal.orderUidHash);
 		expect(decodedProposal.sellAmount).toBe(proposal.sellAmount);
 		expect(decodedProposal.minBuyAmount).toBe(proposal.minBuyAmount);
-		expect(decodedProposal.maxBuyAmount).toBe(proposal.maxBuyAmount);
+		expect(decodedProposal.quotedBuyAmount).toBe(proposal.quotedBuyAmount);
 		expect(decodedProposal.validUntil).toBe(proposal.validUntil);
 		expect(decodedProposal.nonce).toBe(proposal.nonce);
 		expect(decodedInteractions).toHaveLength(1);

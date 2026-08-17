@@ -35,7 +35,7 @@ export class ByosClient {
 			orderUid: proposal.orderUid,
 			sellAmount: proposal.sellAmount.toString(),
 			minBuyAmount: proposal.minBuyAmount.toString(),
-			maxBuyAmount: proposal.maxBuyAmount.toString(),
+			quotedBuyAmount: proposal.quotedBuyAmount.toString(),
 			interactions: proposal.interactions.map((i) => ({
 				target: i.target,
 				value: i.value.toString(),
