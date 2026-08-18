@@ -149,6 +149,8 @@ describe("rate limit config", () => {
 		// eviction can never orphan reserve accounting.
 		expect(config.BALANCE_EVICTION_SECS).toBe(3600);
 		expect(config.BALANCE_NEGATIVE_TTL_SECS).toBe(600);
-		expect(config.BALANCE_ACTIVE_SET_MAX).toBe(100_000);
+		// The cap is an RPC deadline as much as a memory bound: a tick issues
+		// ceil(cap / batch) requests back to back.
+		expect(config.BALANCE_ACTIVE_SET_MAX).toBe(10_000);
 	});
 });

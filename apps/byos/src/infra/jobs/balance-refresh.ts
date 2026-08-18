@@ -43,6 +43,21 @@ export async function runBalanceRefresh(config: BalanceRefreshConfig): Promise<v
 		return;
 	}
 
+	// Batches go out back to back, so the set size is an RPC bill and a
+	// deadline: past roughly interval / per-request latency * batchSize, the
+	// tick stops fitting inside its own interval. Warn while there is still
+	// headroom rather than once the trim is already evicting live sub-solvers.
+	if (addresses.length * 2 >= maxActive) {
+		logger.warn(
+			{
+				active: addresses.length,
+				cap: maxActive,
+				requests: Math.ceil(addresses.length / batchSize),
+			},
+			"balance refresh set is over half its cap — raise the cap or shorten the interval",
+		);
+	}
+
 	for (let i = 0; i < addresses.length; i += batchSize) {
 		const batch = addresses.slice(i, i + batchSize) as Address[];
 		try {
