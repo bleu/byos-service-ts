@@ -26,7 +26,7 @@ export function serializeAuditKind(kind: AuditKind): AuditKind {
 /** Creates a BullMQ worker that drains audit events to Postgres. */
 export function createAuditWorker(connection: Redis, db: Db, _logger: Logger): Worker {
 	return new Worker(
-		"byos:audit",
+		"audit",
 		async (job) => {
 			const data = job.data as SerializedAuditEvent;
 			const event: AuditEvent = {
@@ -37,6 +37,7 @@ export function createAuditWorker(connection: Redis, db: Db, _logger: Logger): W
 		},
 		{
 			connection,
+			prefix: "byos",
 			concurrency: 5,
 		},
 	);
