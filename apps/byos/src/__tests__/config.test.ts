@@ -51,3 +51,37 @@ describe("parseConfig", () => {
 		);
 	});
 });
+
+describe("rate limit config", () => {
+	it("defaults the tier and window to values sized from poll volume", () => {
+		const config = parseConfig(base);
+
+		expect(config.RATE_LIMIT_WINDOW_SECS).toBe(60);
+		expect(config.RATE_UNIT_WEI).toBe("100000000000000000");
+		expect(config.RATE_PER_UNIT).toBe(300);
+		expect(config.RATE_MIN_PER_WINDOW).toBe(120);
+		expect(config.RATE_MAX_PER_WINDOW).toBe(3000);
+		expect(config.RATE_LIMIT_IP_PER_WINDOW).toBe(6000);
+	});
+
+	it("rejects a zero rate unit, which would divide by zero at startup", () => {
+		expect(() => parseConfig({ ...base, RATE_UNIT_WEI: "0" })).toThrow(/RATE_UNIT_WEI/);
+	});
+
+	it("rejects a minimum rate above the maximum", () => {
+		expect(() =>
+			parseConfig({ ...base, RATE_MIN_PER_WINDOW: "5000", RATE_MAX_PER_WINDOW: "3000" }),
+		).toThrow(/RATE_MIN_PER_WINDOW/);
+	});
+
+	it("defaults the balance refresh loop to bounded, self-evicting values", () => {
+		const config = parseConfig(base);
+
+		expect(config.BALANCE_REFRESH_INTERVAL_SECS).toBe(60);
+		// An hour of idleness, well past MAX_PROPOSAL_LIFETIME_SECS, so
+		// eviction can never orphan reserve accounting.
+		expect(config.BALANCE_EVICTION_SECS).toBe(3600);
+		expect(config.BALANCE_NEGATIVE_TTL_SECS).toBe(600);
+		expect(config.BALANCE_ACTIVE_SET_MAX).toBe(100_000);
+	});
+});
