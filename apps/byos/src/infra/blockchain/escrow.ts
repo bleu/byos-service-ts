@@ -75,6 +75,11 @@ export function createEscrowBalanceReader(
 				functionName: "effectiveBalance",
 				args: [address],
 			})),
+			// One request per call to this function, so BALANCE_REFRESH_BATCH_SIZE
+			// is the real batch. viem otherwise re-chunks by encoded calldata
+			// size (1024 bytes by default), which quietly splits a 50-address
+			// batch into two round trips.
+			batchSize: 0,
 		});
 
 		return results.map((r) => (r.status === "success" ? (r.result as bigint) : null));
