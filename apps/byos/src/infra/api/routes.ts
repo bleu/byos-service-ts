@@ -194,6 +194,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
+		await enforceSignerLimit(config.signerLimit, reader);
+
 		const entries = await store.unclearedBufferEntries(config.db, reader);
 		let outstandingBalance = 0n;
 		for (const entry of entries) {

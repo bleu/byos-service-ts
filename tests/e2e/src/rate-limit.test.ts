@@ -71,23 +71,27 @@ describe("per-signer rate limiting", () => {
 		await expect(second.response.json()).resolves.toMatchObject({ kind: "RateLimited" });
 	});
 
-	it("spends one budget across POST, GET and DELETE", async () => {
+	it("spends one budget across every authenticated route", async () => {
+		// One key per request, whatever the verb or path. A route that skips
+		// enforceSignerLimit is a free polling channel, which is how
+		// /buffer-balance arrived: signature authenticated, budget unmetered.
 		const limiter = budgets();
 		app = await createTestApp({ rateLimiter: limiter });
 
 		const { response } = await signAndSubmitProposal(app.publicApp, { orderUid: uid(3) });
 		const { id } = (await response.json()) as { id: number };
 
-		await app.publicApp.request(`/proposal/${id}`, {
-			headers: { "X-Signature": await readAuthHeader() },
-		});
+		const readAuth = { "X-Signature": await readAuthHeader() };
+		await app.publicApp.request(`/proposal/${id}`, { headers: readAuth });
+		await app.publicApp.request("/proposals/by-sub-solver", { headers: readAuth });
+		await app.publicApp.request("/buffer-balance", { headers: readAuth });
 		await app.publicApp.request(`/proposal/${id}`, {
 			method: "DELETE",
 			headers: { "X-Signature": await cancelSignatureHeader(id) },
 		});
 
 		const expected = `signer:${SIGNER_ACCOUNT.address.toLowerCase()}`;
-		expect(limiter.keysFor("signer")).toEqual([expected, expected, expected]);
+		expect(limiter.keysFor("signer")).toEqual(Array(5).fill(expected));
 	});
 
 	it("sizes the budget from the signer's escrow balance", async () => {

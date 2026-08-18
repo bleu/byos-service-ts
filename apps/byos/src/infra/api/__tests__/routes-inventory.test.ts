@@ -16,6 +16,7 @@ import { createPublicApp, type PublicAppContext } from "../index.js";
  */
 const EXPECTED_ROUTES = [
 	"DELETE /proposal/:id",
+	"GET /buffer-balance",
 	"GET /healthz",
 	"GET /proposal/:id",
 	"GET /proposals/:orderUid",
@@ -31,6 +32,7 @@ function publicRoutes(): string[] {
 		trampolineFactory: "0x00000000000000000000000000000000000fac70" as Address,
 		maxProposalLifetimeSecs: 300,
 		gasPriceRef: { value: 0n },
+		cL: 10n ** 16n,
 		onAuditEvent: () => {},
 		rateLimits: {
 			windowSecs: 60,
