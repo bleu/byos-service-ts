@@ -12,7 +12,7 @@ export interface RetentionWorkerConfig {
 
 export function createRetentionWorker(connection: Redis, config: RetentionWorkerConfig): Worker {
 	return new Worker(
-		"byos:retention",
+		"retention",
 		async () => {
 			try {
 				const deleted = await store.sweepDropped(config.db, config.droppedRetentionSecs);
@@ -25,6 +25,7 @@ export function createRetentionWorker(connection: Redis, config: RetentionWorker
 		},
 		{
 			connection,
+			prefix: "byos",
 			concurrency: 1,
 		},
 	);
