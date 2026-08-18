@@ -28,7 +28,8 @@ export interface RouteParams {
 export interface SignedProposal {
 	orderUid: Hex;
 	sellAmount: bigint;
-	buyAmount: bigint;
+	minBuyAmount: bigint;
+	quoteBuyAmount: bigint;
 	interactions: ContractInteraction[];
 	validUntil: bigint;
 	nonce: bigint;
@@ -138,10 +139,12 @@ export async function buildProposal(
 
 	// Sign via EIP-712
 	const orderUidHash = keccak256(order.uid);
+	// Reference subsolver does not use loose slippage: min = max
 	const proposal: Proposal = {
 		orderUidHash,
 		sellAmount,
-		buyAmount,
+		minBuyAmount: buyAmount,
+		quoteBuyAmount: buyAmount,
 		validUntil: params.validUntil,
 		nonce: params.nonce,
 	};
@@ -151,7 +154,8 @@ export async function buildProposal(
 	return {
 		orderUid: order.uid,
 		sellAmount,
-		buyAmount,
+		minBuyAmount: buyAmount,
+		quoteBuyAmount: buyAmount,
 		interactions,
 		validUntil: params.validUntil,
 		nonce: params.nonce,

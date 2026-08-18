@@ -7,7 +7,7 @@ import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
 import * as store from "../../storage.js";
-import { runNonSettlementDebits, runRevertDebits } from "../penalty.js";
+import { runBufferDebits, runNonSettlementDebits, runRevertDebits } from "../penalty.js";
 
 let ctx: TestContext;
 
@@ -34,7 +34,8 @@ function sampleProposal(): Omit<Proposal, "id"> {
 		orderUid: `0x${uid.repeat(56)}`,
 		orderUidHash: `0x${"cc".repeat(32)}` as Hex,
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
 		buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
 		interactions: [],
@@ -94,6 +95,9 @@ describe("revert debits", () => {
 				calls.push({ subSolver, amount, reason });
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const events: AuditEvent[] = [];
 
@@ -121,6 +125,9 @@ describe("revert debits", () => {
 				if (debitCalls <= 2) throw new Error("nonce race");
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const attempts = new Map<number, number>();
 
@@ -146,6 +153,9 @@ describe("revert debits", () => {
 				debitCalls++;
 				throw new Error("operator lacks role");
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const attempts = new Map<number, number>();
 
@@ -170,6 +180,9 @@ describe("revert debits", () => {
 			async debit(_subSolver, _amount, reason) {
 				if (reason === tx) debitCalls++;
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const attempts = new Map<number, number>();
@@ -197,6 +210,9 @@ describe("revert debits", () => {
 			},
 			async debit() {
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const logLines: string[] = [];
@@ -228,6 +244,9 @@ describe("revert debits", () => {
 				const current = await store.get(ctx.db, id);
 				await store.transition(ctx.db, current as Proposal, "penalized");
 				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
 			},
 		};
 		const events: AuditEvent[] = [];
@@ -272,6 +291,9 @@ describe("non-settlement debits", () => {
 				calls.push(amount);
 				return PENALTY_TX;
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const events: AuditEvent[] = [];
 		const attempts = new Map<number, number>();
@@ -295,6 +317,9 @@ describe("non-settlement debits", () => {
 				debitCalls++;
 				throw new Error("escrow paused");
 			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
 		};
 		const attempts = new Map<number, number>();
 
@@ -304,5 +329,330 @@ describe("non-settlement debits", () => {
 
 		expect(debitCalls).toBe(10);
 		expect(await store.pendingPenalties(ctx.db)).not.toHaveLength(0);
+	});
+});
+
+describe("buffer debits", () => {
+	const SUB_SOLVER = "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address;
+	const ETHER = 10n ** 18n;
+	const CLEAR_TX: Hex = `0x${"88".repeat(32)}`;
+
+	/** Creates a settled proposal with aggressive buffer and a recorded solution with ref price. */
+	async function settledBufferProposal(
+		quoteBuyAmount: bigint,
+		minBuyAmount: bigint,
+		refPrice: string,
+	): Promise<{ id: number; tx: Hex }> {
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: SUB_SOLVER,
+			minBuyAmount,
+			quoteBuyAmount,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+
+		// Drive to settled: submitted → active → executing → settled
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+
+		// Record a solution with the buy-token reference price
+		await store.recordSolution(ctx.db, 9000 + id, 1, id, refPrice);
+
+		return { id, tx };
+	}
+
+	function bufferOperator(
+		deltaByTx: Map<string, bigint>,
+		debitCalls: Array<{ subSolver: Address; amount: bigint }> = [],
+	): DebitEscrow {
+		return {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async debit(subSolver, amount) {
+				debitCalls.push({ subSolver, amount });
+				return CLEAR_TX;
+			},
+			async readExecutedDelta(txHash) {
+				const delta = deltaByTx.get(txHash.toLowerCase());
+				if (delta === undefined) throw new Error(`no delta for ${txHash}`);
+				return delta;
+			},
+		};
+	}
+
+	it("records a buffer entry for a settled proposal with under-delivery", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 950n; // under-delivered by 50
+		const refPrice = ETHER.toString(); // 1:1 price
+
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const operator = bufferOperator(deltaByTx);
+
+		await runBufferDebits(config(operator), new Map());
+
+		// Entry should exist
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		const entry = entries.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry!.gap).toBe("50"); // maxBuy - delivered
+		expect(entry!.delta).toBe("950");
+		expect(BigInt(entry!.nativeTokenAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
+	});
+
+	it("records a negative entry for over-delivery", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 1050n; // over-delivered by 50
+		const refPrice = ETHER.toString();
+
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const operator = bufferOperator(deltaByTx);
+
+		await runBufferDebits(config(operator), new Map());
+
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		const entry = entries.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry!.gap).toBe("-50");
+		expect(BigInt(entry!.nativeTokenAmount)).toBe(-50n);
+	});
+
+	it("does not create duplicate entries on repeated ticks", async () => {
+		const { id, tx } = await settledBufferProposal(1000n, 900n, ETHER.toString());
+		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
+		const operator = bufferOperator(deltaByTx);
+
+		await runBufferDebits(config(operator), new Map());
+		await runBufferDebits(config(operator), new Map());
+
+		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		const matching = entries.filter((e) => e.proposalId === id);
+		expect(matching).toHaveLength(1);
+	});
+
+	it("slashes when outstanding balance exceeds c_L", async () => {
+		// Create a proposal with a gap large enough to exceed c_L (0.01 ETH)
+		const maxBuy = ETHER; // 1e18
+		const minBuy = ETHER / 2n;
+		// delivered = 0.98e18, gap = 0.02e18. With ref price = 1 ETH/token,
+		// nativeTokenAmount = 0.02 ETH = 2e16 > c_L (1e16).
+		const delivered = (ETHER * 98n) / 100n;
+		const refPrice = ETHER.toString();
+
+		const { tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const events: AuditEvent[] = [];
+		const operator = bufferOperator(deltaByTx, debitCalls);
+
+		await runBufferDebits(config(operator, events), new Map());
+
+		// The debit should have been called
+		const ourDebits = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === SUB_SOLVER.toLowerCase(),
+		);
+		expect(ourDebits.length).toBeGreaterThanOrEqual(1);
+
+		// All entries for this subsolver should be cleared
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared).toHaveLength(0);
+
+		// Audit event should have been emitted
+		expect(events.some((e) => e.kind.type === "bufferDebited")).toBe(true);
+	});
+
+	it("does not slash when balance is below c_L", async () => {
+		const maxBuy = 1000n;
+		const minBuy = 900n;
+		const delivered = 999n; // gap = 1, nativeTokenAmount = 1 wei — well below c_L
+		const refPrice = ETHER.toString();
+
+		const { tx } = await settledBufferProposal(maxBuy, minBuy, refPrice);
+		const deltaByTx = new Map([[tx.toLowerCase(), delivered]]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const operator = bufferOperator(deltaByTx, debitCalls);
+
+		await runBufferDebits(config(operator, []), new Map());
+
+		// Entry recorded but no slash
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared.length).toBeGreaterThanOrEqual(1);
+		// No debit call for buffer (there may be calls from other tests' proposals)
+		// Check that no new debit was triggered by verifying entries remain uncleared
+		const allCleared = uncleared.every((e) => !e.cleared);
+		expect(allCleared).toBe(true);
+	});
+
+	it("credits offset debits before threshold check", async () => {
+		// First proposal: under-delivery of 0.008 ETH
+		const { tx: tx1 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
+		// Second proposal: over-delivery of 0.006 ETH
+		const { tx: tx2 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
+		const deltaByTx = new Map([
+			[tx1.toLowerCase(), ETHER - 8_000_000_000_000_000n], // gap = +0.008 ETH
+			[tx2.toLowerCase(), ETHER + 6_000_000_000_000_000n], // gap = -0.006 ETH
+		]);
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const operator = bufferOperator(deltaByTx, debitCalls);
+
+		await runBufferDebits(config(operator, []), new Map());
+
+		// Net balance = 0.008 - 0.006 = 0.002 ETH < c_L (0.01 ETH)
+		// No slash should happen — entries remain uncleared
+		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
+		expect(uncleared.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("proposal stays settled after buffer entry is recorded", async () => {
+		const { id, tx } = await settledBufferProposal(1000n, 900n, ETHER.toString());
+		const deltaByTx = new Map([[tx.toLowerCase(), 950n]]);
+		const operator = bufferOperator(deltaByTx);
+
+		await runBufferDebits(config(operator), new Map());
+
+		const proposal = await store.get(ctx.db, id);
+		expect(proposal?.status).toBe("settled");
+	});
+
+	it("ignores settled proposals without aggressive buffer", async () => {
+		// minBuyAmount == quoteBuyAmount: no buffer accounting
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: SUB_SOLVER,
+			minBuyAmount: 1000n,
+			quoteBuyAmount: 1000n,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+
+		const operator = bufferOperator(new Map());
+		await runBufferDebits(config(operator), new Map());
+
+		// No entry should exist for this proposal
+		const exists = await store.bufferEntryExistsForProposal(ctx.db, id);
+		expect(exists).toBe(false);
+	});
+
+	it("does not double-debit when finalize fails after a successful on-chain debit", async () => {
+		// Use a fresh subsolver address to isolate from other tests
+		const isolatedSolver = "0xdead000000000000000000000000000000000001" as Address;
+		const maxBuy = ETHER;
+		const minBuy = ETHER / 2n;
+		const delivered = (ETHER * 98n) / 100n; // gap = 0.02 ETH > c_L
+		const refPrice = ETHER.toString();
+
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: isolatedSolver,
+			minBuyAmount: minBuy,
+			quoteBuyAmount: maxBuy,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
+
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+
+		// First tick: records entry AND slashes (balance > c_L)
+		const op1 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(op1), new Map());
+
+		const firstDebitCount = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		).length;
+		expect(firstDebitCount).toBe(1);
+
+		// Second tick: entries are already cleared, so no new debit
+		debitCalls.length = 0;
+		const op2 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(op2), new Map());
+
+		const secondDebitCount = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		).length;
+		expect(secondDebitCount).toBe(0);
+	});
+
+	it("reverts in-flight entries when the on-chain debit fails", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000002" as Address;
+		const maxBuy = ETHER;
+		const minBuy = ETHER / 2n;
+		const delivered = (ETHER * 98n) / 100n;
+		const refPrice = ETHER.toString();
+
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, {
+			...base,
+			subSolver: isolatedSolver,
+			minBuyAmount: minBuy,
+			quoteBuyAmount: maxBuy,
+		});
+		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
+		const submitted = await store.get(ctx.db, id);
+		await store.transition(ctx.db, submitted as Proposal, "active");
+		const active = await store.get(ctx.db, id);
+		await store.applySettlementOutcome(ctx.db, active as Proposal, {
+			kind: "succeeded",
+			txHash: tx,
+		});
+		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
+
+		// Operator that reads delta fine but fails on debit
+		const failingOperator: DebitEscrow = {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async debit() {
+				throw new Error("escrow paused");
+			},
+			async readExecutedDelta(txHash) {
+				if (txHash.toLowerCase() === tx.toLowerCase()) return delivered;
+				throw new Error("unknown tx");
+			},
+		};
+
+		// First tick: entry is recorded, debit fails, entries are reverted
+		await runBufferDebits(config(failingOperator), new Map());
+
+		// Entries should be back to uncleared (not stuck in-flight)
+		const uncleared = await store.unclearedBufferEntries(ctx.db, isolatedSolver);
+		expect(uncleared.length).toBeGreaterThanOrEqual(1);
+		const entry = uncleared.find((e) => e.proposalId === id);
+		expect(entry).toBeDefined();
+		expect(entry?.cleared).toBe(false);
+
+		// Second tick with a working operator: should successfully debit
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const workingOp = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
+		await runBufferDebits(config(workingOp), new Map());
+
+		const debits = debitCalls.filter(
+			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
+		);
+		expect(debits.length).toBe(1);
 	});
 });

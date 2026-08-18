@@ -115,7 +115,8 @@ describe("create proposal edge cases", () => {
 			body: JSON.stringify({
 				orderUid: "",
 				sellAmount: "1000",
-				buyAmount: "900",
+				minBuyAmount: "900",
+				quoteBuyAmount: "900",
 				interactions: [],
 				validUntil: String(Math.floor(Date.now() / 1000) + 200),
 				nonce: "1",

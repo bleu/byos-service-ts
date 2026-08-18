@@ -15,6 +15,20 @@
 			"when": 1786395979718,
 			"tag": "0001_stiff_the_hand",
 			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "7",
+			"when": 1786889600000,
+			"tag": "0002_min_quote_buy_amount",
+			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "7",
+			"when": 1786896000000,
+			"tag": "0003_buffer_entries",
+			"breakpoints": true
 		}
 	]
 }

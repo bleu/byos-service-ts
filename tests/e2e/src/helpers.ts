@@ -37,9 +37,9 @@ export const OTHER_SIGNER_KEY =
 export const SIGNER_ACCOUNT = privateKeyToAccount(SIGNER_KEY);
 export const OTHER_SIGNER_ACCOUNT = privateKeyToAccount(OTHER_SIGNER_KEY);
 
-// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 function makeSignFn(
 	account: ReturnType<typeof privateKeyToAccount>,
+	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 ): (params: any) => Promise<Hex> {
 	const client = createWalletClient({ account, chain: foundry, transport: http() });
 	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
@@ -95,6 +95,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		chainId: CHAIN_ID,
 		trampolineFactory: TRAMPOLINE_FACTORY,
 		maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
+		cL: 10_000_000_000_000_000n, // 0.01 ETH — mainnet c_L
 		gasPriceRef,
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
 		rateLimiter: overrides.rateLimiter,
@@ -113,7 +114,8 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 export interface ProposalOverrides {
 	orderUid?: Hex;
 	sellAmount?: bigint;
-	buyAmount?: bigint;
+	minBuyAmount?: bigint;
+	quoteBuyAmount?: bigint;
 	validUntil?: bigint;
 	nonce?: bigint;
 	interactions?: ContractInteraction[];
@@ -122,7 +124,8 @@ export interface ProposalOverrides {
 export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverrides) {
 	const orderUid = overrides?.orderUid ?? (`0x${"ab".repeat(56)}` as Hex);
 	const sellAmount = overrides?.sellAmount ?? 1_000_000n;
-	const buyAmount = overrides?.buyAmount ?? 990_000n;
+	const minBuyAmount = overrides?.minBuyAmount ?? 990_000n;
+	const quoteBuyAmount = overrides?.quoteBuyAmount ?? 990_000n;
 	const now = BigInt(Math.floor(Date.now() / 1000));
 	const validUntil = overrides?.validUntil ?? now + 240n;
 	const nonce = overrides?.nonce ?? 1n;
@@ -137,13 +140,21 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	const orderUidHash = keccak256(orderUid);
 	const _interactionsHash = computeInteractionsHash(interactions);
 
-	const proposal = { orderUidHash, sellAmount, buyAmount, validUntil, nonce };
+	const proposal = {
+		orderUidHash,
+		sellAmount,
+		minBuyAmount,
+		quoteBuyAmount,
+		validUntil,
+		nonce,
+	};
 	const signature = await signProposal(SIGN_FN, DOMAIN, proposal, interactions);
 
 	const body = {
 		orderUid,
 		sellAmount: sellAmount.toString(),
-		buyAmount: buyAmount.toString(),
+		minBuyAmount: minBuyAmount.toString(),
+		quoteBuyAmount: quoteBuyAmount.toString(),
 		interactions: interactions.map((i) => ({
 			target: i.target,
 			value: i.value.toString(),
@@ -177,7 +188,8 @@ export async function seedProposal(
 		subSolver: "0x0101010101010101010101010101010101010101" as Address,
 		orderUidHash: keccak256(orderUid),
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		sellToken: "0x0000000000000000000000000000000000000000" as Address,
 		buyToken: "0x0000000000000000000000000000000000000000" as Address,
 		interactions: [],

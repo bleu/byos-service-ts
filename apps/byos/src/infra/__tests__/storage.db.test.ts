@@ -24,7 +24,8 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		orderUid: `0x${"ab".repeat(56)}`,
 		orderUidHash: `0x${"cc".repeat(32)}` as Hex,
 		sellAmount: 1_000_000n,
-		buyAmount: 990_000n,
+		minBuyAmount: 990_000n,
+		quoteBuyAmount: 990_000n,
 		sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
 		buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
 		interactions: [
@@ -297,7 +298,7 @@ describe("proposal store", () => {
 
 	it("records and retrieves solutions", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
-		await store.recordSolution(ctx.db, 100, 1, id);
+		await store.recordSolution(ctx.db, 100, 1, id, "0");
 
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
@@ -473,8 +474,8 @@ describe("retention sweep", () => {
 	it("cascades solutions rows of dropped proposals only", async () => {
 		const dropped = await insertAged("cancelled", 1);
 		const settled = await insertAged("settled", 2);
-		await store.recordSolution(sweep.db, 1, 1, dropped);
-		await store.recordSolution(sweep.db, 2, 1, settled);
+		await store.recordSolution(sweep.db, 1, 1, dropped, "0");
+		await store.recordSolution(sweep.db, 2, 1, settled, "0");
 
 		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(1);
 

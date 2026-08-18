@@ -1,6 +1,6 @@
 # Slashing policy & attribution flow
 
-Status: accepted
+Status: accepted; revised 2026-08-14 (buffer debit for minBuyAmount/quoteBuyAmount)
 
 Spec: docs/shared/design-document.md#penalties
       https://bleu.github.io/byos-docs/design-document#penalties
@@ -37,6 +37,16 @@ Passing gatekeeping does not absolve the sub-solver of liability if CoW later de
 ### Hooks and sub-solver responsibility
 
 Hooks are handled by BYOS and the driver, not by sub-solvers (COW-1243). The orderbook pre-encodes hooks as `HooksTrampoline.execute()` calls; BYOS includes them in simulation for accurate gas estimates, and the driver appends them to the settlement. Sub-solvers submit routing proposals without hook interactions. Some hooks change token balances available for the route; sub-solvers must account for their effects when computing routes, but do not encode or submit them.
+
+### Why a buffer debit for aggressive buy-amount ranges
+
+A sell-order proposal can set `minBuyAmount` below `quoteBuyAmount`. The engine uses `quoteBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job reads the delivered amount from the `Executed` event and records a signed ledger entry: positive when the sub-solver under-delivered, negative when it over-delivered. Credits offset debits naturally.
+
+The penalty job slashes the sub-solver's escrow only when the outstanding balance exceeds `c_L`. It debits the full accumulated balance in one transaction and marks all entries as cleared. This batching reduces on-chain costs and lets small shortfalls net out against over-deliveries before any charge lands.
+
+Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
+
+Over-delivery (delivering more than `quoteBuyAmount`) produces a negative ledger entry that offsets future shortfalls. These credits reduce the outstanding balance but are never paid out — they exist solely to avoid penalizing a sub-solver whose net delivery is on target.
 
 ### Non-settlement detection
 

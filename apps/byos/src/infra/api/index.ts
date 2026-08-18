@@ -28,6 +28,7 @@ export interface AppContext {
 	chainId: number;
 	trampolineFactory: Address;
 	maxProposalLifetimeSecs: number;
+	cL: bigint;
 	gasPriceRef: GasPriceRef;
 	solveBearerToken?: string;
 	onAuditEvent: (event: AuditEvent) => void;
@@ -78,6 +79,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		chainId: ctx.chainId,
 		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
+		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
 		signerLimit: {
 			limiter,

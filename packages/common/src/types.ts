@@ -7,7 +7,8 @@ import type { Address, Hex } from "viem";
 export interface Proposal {
 	orderUidHash: Hex;
 	sellAmount: bigint;
-	buyAmount: bigint;
+	minBuyAmount: bigint;
+	quoteBuyAmount: bigint;
 	validUntil: bigint;
 	nonce: bigint;
 }

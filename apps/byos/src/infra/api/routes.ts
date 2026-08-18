@@ -23,6 +23,7 @@ export interface RoutesConfig {
 	chainId: number;
 	trampolineFactory: Address;
 	maxProposalLifetimeSecs: number;
+	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	signerLimit: SignerLimitConfig;
 }
@@ -70,7 +71,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 				{
 					orderUidHash: parsed.orderUidHash,
 					sellAmount: parsed.sellAmount,
-					buyAmount: parsed.buyAmount,
+					minBuyAmount: parsed.minBuyAmount,
+					quoteBuyAmount: parsed.quoteBuyAmount,
 					validUntil: parsed.validUntil,
 					nonce: parsed.nonce,
 				},
@@ -99,7 +101,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
 			sellAmount: parsed.sellAmount,
-			buyAmount: parsed.buyAmount,
+			minBuyAmount: parsed.minBuyAmount,
+			quoteBuyAmount: parsed.quoteBuyAmount,
 			sellToken: "0x0000000000000000000000000000000000000000" as Address, // Set by validator
 			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			interactions: parsed.interactions,
@@ -179,6 +182,37 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		const proposals = await store.listByOrderUidForOwner(config.db, orderUid, reader);
 		return c.json(proposalToListResponse(proposals));
+	});
+
+	// GET /buffer-balance — Off-chain buffer accounting (owner-scoped)
+	app.get("/buffer-balance", async (c) => {
+		const sig = extractSignature(c);
+		let reader: Address;
+		try {
+			reader = await recoverReader(sig, domain);
+		} catch {
+			throw new AppError(Kind.SignatureRecoveryFailed);
+		}
+
+		const entries = await store.unclearedBufferEntries(config.db, reader);
+		let outstandingBalance = 0n;
+		for (const entry of entries) {
+			outstandingBalance += BigInt(entry.nativeTokenAmount);
+		}
+
+		return c.json({
+			outstandingBalance: outstandingBalance.toString(),
+			threshold: config.cL.toString(),
+			entries: entries.map((e) => ({
+				proposalId: e.proposalId,
+				orderUid: e.orderUid,
+				buyToken: e.buyToken,
+				delta: e.delta,
+				gap: e.gap,
+				nativeTokenAmount: e.nativeTokenAmount,
+				createdAt: e.createdAt.toISOString(),
+			})),
+		});
 	});
 
 	// DELETE /proposal/:id — Cancel proposal

@@ -12,7 +12,8 @@ export interface Proposal {
 	orderUid: string;
 	orderUidHash: Hex;
 	sellAmount: bigint;
-	buyAmount: bigint;
+	minBuyAmount: bigint;
+	quoteBuyAmount: bigint;
 	sellToken: Address;
 	buyToken: Address;
 	interactions: ContractInteraction[];

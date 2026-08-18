@@ -39,6 +39,13 @@ export type AuditKind =
 			penaltyTxHash: Hex;
 	  }
 	| {
+			type: "bufferDebited";
+			subSolver: Address;
+			amount: bigint;
+			clearTxHash: Hex;
+			entryCount: number;
+	  }
+	| {
 			type: "driverNotified";
 			proposalId: number;
 			subSolver: Address;
@@ -64,6 +71,8 @@ export function eventType(kind: AuditKind): string {
 			return "penalized";
 		case "nonSettlementDebited":
 			return "non_settlement_debited";
+		case "bufferDebited":
+			return "buffer_debited";
 		case "driverNotified":
 			return "driver_notified";
 		case "statusChanged": {
@@ -94,7 +103,8 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 				orderUid: kind.proposal.orderUid,
 				orderUidHash: kind.proposal.orderUidHash,
 				sellAmount: kind.proposal.sellAmount.toString(),
-				buyAmount: kind.proposal.buyAmount.toString(),
+				minBuyAmount: kind.proposal.minBuyAmount.toString(),
+				quoteBuyAmount: kind.proposal.quoteBuyAmount.toString(),
 				interactions: kind.proposal.interactions.map((i) => ({
 					target: i.target,
 					value: i.value.toString(),
@@ -126,6 +136,12 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 			return {
 				amount: kind.amount.toString(),
 				penaltyTxHash: kind.penaltyTxHash,
+			};
+		case "bufferDebited":
+			return {
+				amount: kind.amount.toString(),
+				clearTxHash: kind.clearTxHash,
+				entryCount: kind.entryCount,
 			};
 		case "driverNotified":
 			return {
