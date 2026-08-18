@@ -12,7 +12,9 @@ const STATUS_MAP: Record<string, number> = {
 	[Kind.InsufficientEscrow]: 403,
 	[Kind.ProposalNotFound]: 404,
 	[Kind.ProposalNotCancellable]: 409,
+	[Kind.RateLimited]: 429,
 	[Kind.Internal]: 500,
+	[Kind.ServiceUnavailable]: 503,
 };
 
 /** Default descriptions per kind, as served by the Rust error type. */
@@ -25,23 +27,32 @@ const DEFAULT_DESCRIPTIONS: Record<string, string> = {
 	[Kind.ProposalNotFound]: "Proposal not found",
 	[Kind.ProposalNotCancellable]: "Proposal is executing or already in a terminal state",
 	[Kind.BadRequest]: "Malformed request",
+	[Kind.RateLimited]: "Rate limit exceeded",
 	[Kind.Internal]: "Internal error",
+	[Kind.ServiceUnavailable]: "Service temporarily unavailable",
 };
 
 export class AppError extends Error {
 	readonly kind: string;
 	readonly statusCode: number;
+	/** Seconds to wait before retrying, served as Retry-After. Set on the
+	 * shed-load kinds (429, 503); absent everywhere else. */
+	readonly retryAfterSecs?: number;
 
-	constructor(kind: string, description?: string) {
+	constructor(kind: string, description?: string, retryAfterSecs?: number) {
 		super(description ?? DEFAULT_DESCRIPTIONS[kind] ?? kind);
 		this.kind = kind;
 		this.statusCode = STATUS_MAP[kind] ?? 500;
+		this.retryAfterSecs = retryAfterSecs;
 	}
 }
 
 /** Hono error handler: converts AppError → JSON { kind, description }. */
 export function errorHandler(err: Error, c: Context): Response {
 	if (err instanceof AppError) {
+		if (err.retryAfterSecs !== undefined) {
+			c.header("Retry-After", String(err.retryAfterSecs));
+		}
 		return c.json({ kind: err.kind, description: err.message }, err.statusCode as 400);
 	}
 	return c.json({ kind: Kind.Internal, description: "Internal error" }, 500);
