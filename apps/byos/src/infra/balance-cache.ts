@@ -78,7 +78,12 @@ export function createRedisBalanceStore(
 				const key = address.toLowerCase();
 				if (balance >= floorWei) {
 					tx.hset(balancesKey, key, balance.toString());
-					tx.zadd(activeKey, Date.now(), key);
+					// NX: promote a demoted address back into the refresh set,
+					// but never touch an existing score. The score is last-seen
+					// on the API (ADR-0015), not last-refreshed — overwriting it
+					// here would push every funded address past the idle cutoff
+					// on every tick, so eviction could never fire.
+					tx.zadd(activeKey, "NX", Date.now(), key);
 					tx.del(lowKey(key));
 				} else {
 					tx.set(lowKey(key), balance.toString(), "EX", options.negativeTtlSecs);

@@ -96,6 +96,31 @@ describe("redis balance store", () => {
 		}
 	});
 
+	it("does not let a refresh reset the last-seen clock", async () => {
+		// The score is last-seen on the API, not last-refreshed. A funded
+		// address is re-filed every tick, so if record() overwrote the score
+		// the idle cutoff could never be reached and nothing would ever age
+		// out of the refresh set.
+		const store = freshStore();
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+		try {
+			const t0 = 1_700_000_000_000;
+			vi.setSystemTime(t0);
+			await store.lookup(FUNDED);
+
+			// Two hours of refresh ticks with no further API traffic.
+			for (let minute = 1; minute <= 120; minute++) {
+				vi.setSystemTime(t0 + minute * 60 * 1000);
+				await store.record([{ address: FUNDED, balance: 10n ** 18n }], FLOOR);
+			}
+
+			expect(await store.evict(3600, 100_000)).toBe(1);
+			expect(await store.activeAddresses(10)).toEqual([]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("keeps a recently-seen address through an eviction sweep", async () => {
 		const store = freshStore();
 		await store.lookup(FUNDED);

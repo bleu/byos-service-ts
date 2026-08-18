@@ -56,7 +56,7 @@ export async function runBalanceRefresh(config: BalanceRefreshConfig): Promise<v
 			await store.record(entries, floorWei);
 		} catch (err) {
 			// Leave the batch as it was: a stale balance is a tier that is
-			// one tick old, while dropping it would demote a funded solver.
+			// one tick old, while dropping it would demote a funded sub-solver.
 			logger.warn({ err, size: batch.length }, "balance refresh batch failed");
 		}
 	}
