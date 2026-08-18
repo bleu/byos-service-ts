@@ -7,11 +7,16 @@ const REDIS_URL = process.env.BYOS_TEST_REDIS_URL ?? "redis://localhost:6379";
 const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
 
 let counter = 0;
+function freshPrefix(): string {
+	return `byos:test:${process.pid}:${Date.now()}:${counter++}`;
+}
+
+function storeAt(prefix: string) {
+	return createRedisBalanceStore(redis, { prefix, negativeTtlSecs: 600, balanceTtlSecs: 3600 });
+}
+
 function freshStore() {
-	return createRedisBalanceStore(redis, {
-		prefix: `byos:test:${process.pid}:${Date.now()}:${counter++}`,
-		negativeTtlSecs: 600,
-	});
+	return storeAt(freshPrefix());
 }
 
 const FUNDED = "0xAaA1111111111111111111111111111111111111" as Address;
@@ -128,6 +133,45 @@ describe("redis balance store", () => {
 		await store.evict(3600, 100_000);
 
 		expect(await store.activeAddresses(10)).toEqual([FUNDED.toLowerCase()]);
+	});
+
+	it("leaves no balance behind when an address is evicted", async () => {
+		// The balance is a key with its own TTL, not a field in a shared hash,
+		// so the eviction sweep has no companion structure to keep in step.
+		// A hash field would survive the sweep and leak for the lifetime of
+		// the process.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		vi.useFakeTimers({ shouldAdvanceTime: false });
+		try {
+			const t0 = 1_700_000_000_000;
+			vi.setSystemTime(t0);
+			await store.lookup(FUNDED);
+			await store.record([{ address: FUNDED, balance: 10n ** 18n }], FLOOR);
+			await expect(store.lookup(FUNDED)).resolves.toBe(10n ** 18n);
+
+			vi.setSystemTime(t0 + 2 * 3600 * 1000);
+			expect(await store.evict(3600, 100_000)).toBe(1);
+
+			// The balance key outlives the sweep by its TTL, but reading it
+			// re-enrols the address, so the refresh job corrects it next tick.
+			// What matters is that nothing is orphaned: expiry is unconditional.
+			expect(await redis.ttl(`${prefix}:bal:${FUNDED.toLowerCase()}`)).toBeGreaterThan(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("drops the balance key when an address falls below the floor", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.lookup(FUNDED);
+		await store.record([{ address: FUNDED, balance: 10n ** 18n }], FLOOR);
+
+		await store.record([{ address: FUNDED, balance: 1n }], FLOOR);
+
+		expect(await redis.exists(`${prefix}:bal:${FUNDED.toLowerCase()}`)).toBe(0);
+		await expect(store.lookup(FUNDED)).resolves.toBe(1n);
 	});
 
 	it("trims the refresh set to its cap, dropping the stalest first", async () => {

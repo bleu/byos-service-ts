@@ -6,7 +6,7 @@ import type { Logger } from "pino";
 import type { Address, Hex } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { Config } from "./config.js";
+import { type Config, rateLimitsFromConfig } from "./config.js";
 import { createDb, type Db } from "./db/index.js";
 import type { AuditEvent } from "./domain/audit.js";
 import { type BalanceCache, unknownBalances } from "./domain/balance-cache.js";
@@ -113,20 +113,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// Rate limiting. The limiter always runs — it needs Redis, which is
 	// already a hard dependency, not RPC.
 	const rateLimiter = createRedisRateLimiter(requestRedis);
-	const rateLimits = {
-		windowSecs: config.RATE_LIMIT_WINDOW_SECS,
-		ipPerWindow: config.RATE_LIMIT_IP_PER_WINDOW,
-		tier: {
-			rateUnitWei: BigInt(config.RATE_UNIT_WEI),
-			ratePerUnit: config.RATE_PER_UNIT,
-			minRate: config.RATE_MIN_PER_WINDOW,
-			maxRate: config.RATE_MAX_PER_WINDOW,
-		},
-		// The collateral floor, not the validator's gas-coupled threshold: the
-		// synchronous gate must sit at or below whatever the validator
-		// enforces so it can never reject a proposal the validator accepts.
-		floorWei: minCollateralWei,
-	};
+	// The collateral floor, not the validator's gas-coupled threshold: the
+	// synchronous gate must sit at or below whatever the validator enforces so
+	// it can never reject a proposal the validator accepts.
+	const rateLimits = rateLimitsFromConfig(config, minCollateralWei);
 
 	// Blockchain (optional — depends on RPC_URL)
 	let validator: ValidateProposal = acceptAll;
@@ -180,6 +170,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		// Request-path balance cache and the job that keeps it fresh.
 		const balanceStore = createRedisBalanceStore(requestRedis, {
 			negativeTtlSecs: config.BALANCE_NEGATIVE_TTL_SECS,
+			balanceTtlSecs: config.BALANCE_EVICTION_SECS,
 		});
 		balances = balanceStore;
 		balanceRefresh = {

@@ -7,6 +7,19 @@ export interface RedisBalanceStoreOptions {
 	prefix?: string;
 	/** How long a below-floor address stays in the negative set. */
 	negativeTtlSecs: number;
+	/**
+	 * How long a cached balance may be served without a refresh.
+	 *
+	 * Every balance is a key with this TTL rather than a field in one hash, so
+	 * eviction from the refresh set needs no companion cleanup and cannot leak:
+	 * a balance nobody refreshes expires on its own. Set it to the eviction age
+	 * — while an address is in the refresh set the tick rewrites the key every
+	 * interval, so the TTL only starts running once it stops being refreshed.
+	 *
+	 * A stale balance is bounded far tighter than this in practice: reading one
+	 * re-enrols the address, so the next tick corrects it.
+	 */
+	balanceTtlSecs: number;
 }
 
 /**
@@ -41,7 +54,7 @@ export function createRedisBalanceStore(
 ): BalanceStore {
 	const prefix = options.prefix ?? DEFAULT_PREFIX;
 	const activeKey = `${prefix}:active`;
-	const balancesKey = `${prefix}:balances`;
+	const balanceKey = (address: string) => `${prefix}:bal:${address}`;
 	const lowKey = (address: string) => `${prefix}:low:${address}`;
 
 	return {
@@ -51,7 +64,7 @@ export function createRedisBalanceStore(
 			// One round trip on the attack path: a known-underfunded address
 			// answers from the negative set without ever touching the active
 			// set, so fresh keypairs cannot grow the refresh population.
-			const results = await redis.multi().get(lowKey(key)).hget(balancesKey, key).exec();
+			const results = await redis.multi().get(lowKey(key)).get(balanceKey(key)).exec();
 			if (!results) throw new Error("redis balance lookup transaction aborted");
 			for (const [err] of results) {
 				if (err) throw err;
@@ -77,7 +90,7 @@ export function createRedisBalanceStore(
 			for (const { address, balance } of entries) {
 				const key = address.toLowerCase();
 				if (balance >= floorWei) {
-					tx.hset(balancesKey, key, balance.toString());
+					tx.set(balanceKey(key), balance.toString(), "EX", options.balanceTtlSecs);
 					// NX: promote a demoted address back into the refresh set,
 					// but never touch an existing score. The score is last-seen
 					// on the API (ADR-0015), not last-refreshed — overwriting it
@@ -88,7 +101,7 @@ export function createRedisBalanceStore(
 				} else {
 					tx.set(lowKey(key), balance.toString(), "EX", options.negativeTtlSecs);
 					tx.zrem(activeKey, key);
-					tx.hdel(balancesKey, key);
+					tx.del(balanceKey(key));
 				}
 			}
 
@@ -104,6 +117,10 @@ export function createRedisBalanceStore(
 		 * attacker courtesy. Age eviction alone leaves a window one refresh
 		 * interval wide in which fresh keypairs accumulate unbounded, because
 		 * nothing has fetched their balances yet to demote them.
+		 *
+		 * Only the refresh set is swept here. Cached balances carry their own
+		 * TTL, so there is no second structure to keep in step and no orphan to
+		 * leak — which also keeps this atomic rather than read-then-delete.
 		 */
 		async evict(idleSecs: number, maxSize: number): Promise<number> {
 			const cutoff = Date.now() - idleSecs * 1000;

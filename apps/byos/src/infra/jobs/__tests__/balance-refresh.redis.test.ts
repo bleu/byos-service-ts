@@ -14,6 +14,7 @@ function freshStore() {
 	return createRedisBalanceStore(redis, {
 		prefix: `byos:test:${process.pid}:${Date.now()}:${counter++}`,
 		negativeTtlSecs: 600,
+		balanceTtlSecs: 3600,
 	});
 }
 
@@ -126,5 +127,31 @@ describe("balance refresh tick", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("warns while there is still headroom, not once the trim is evicting", async () => {
+		const store = freshStore();
+		const warn: string[] = [];
+		const logger = {
+			info: () => {},
+			warn: (_o: unknown, msg: string) => warn.push(msg),
+			error: () => {},
+		};
+
+		for (const address of [FUNDED, BROKE]) await store.lookup(address);
+
+		await runBalanceRefresh({
+			store,
+			fetchBalances: async (addrs) => addrs.map(() => 10n ** 18n),
+			floorWei: 10n ** 16n,
+			evictionSecs: 3600,
+			// Two addresses against a cap of three is over half.
+			maxActive: 3,
+			batchSize: 50,
+			// biome-ignore lint/suspicious/noExplicitAny: test double for pino
+			logger: logger as any,
+		});
+
+		expect(warn.some((m) => m.includes("over half its cap"))).toBe(true);
 	});
 });
