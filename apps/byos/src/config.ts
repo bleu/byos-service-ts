@@ -1,3 +1,4 @@
+import { isSupportedEvmChain } from "@byos/common";
 import { z } from "zod";
 
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
@@ -6,7 +7,10 @@ export const configSchema = z.object({
 	// Required
 	DATABASE_URL: z.string(),
 	REDIS_URL: z.string().default("redis://localhost:6379"),
-	CHAIN_ID: z.coerce.number(),
+	CHAIN_ID: z.coerce
+		.number()
+		.int()
+		.refine(isSupportedEvmChain, "Must be an EVM chain supported by CoW Protocol"),
 	TRAMPOLINE_FACTORY: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
 
 	// Listeners
@@ -27,7 +31,9 @@ export const configSchema = z.object({
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
-	MIN_COLLATERAL: z.string().optional(),
+	/** Overrides the chain's default minimum collateral. Omit to take the
+	 * per-chain value from `minCollateralFor`. */
+	MIN_COLLATERAL: z.string().regex(/^\d+$/, "Must be a decimal wei amount").optional(),
 	DEFAULT_GAS_PRICE: z.string().optional(),
 
 	// Timing
@@ -41,9 +47,14 @@ export const configSchema = z.object({
 	// Rate limiting (ADR-0015). All are operational tuning parameters —
 	// the defaults are sized from the reference client's poll volume, not
 	// from measured traffic. See COW-1265 before going public.
-	RATE_LIMIT_WINDOW_SECS: z.coerce.number().positive().default(60),
+	//
+	// Every count and duration here is an integer. Not cosmetic: these reach
+	// BigInt() in the tier function and EXPIRE/SET EX/ZREMRANGEBYRANK in
+	// Redis, all of which reject a fractional value at runtime rather than
+	// at startup.
+	RATE_LIMIT_WINDOW_SECS: z.coerce.number().int().positive().default(60),
 	/** Loose in-app backstop behind the Cloudflare edge limit. */
-	RATE_LIMIT_IP_PER_WINDOW: z.coerce.number().positive().default(6000),
+	RATE_LIMIT_IP_PER_WINDOW: z.coerce.number().int().positive().default(6000),
 	/** Escrow wei that buys one unit of throughput. Never derived from
 	 * MIN_COLLATERAL, which may legitimately be "0". */
 	RATE_UNIT_WEI: z
@@ -51,16 +62,16 @@ export const configSchema = z.object({
 		.regex(/^\d+$/, "Must be a decimal wei amount")
 		.refine((v) => BigInt(v) > 0n, "Must be greater than zero")
 		.default("100000000000000000"),
-	RATE_PER_UNIT: z.coerce.number().positive().default(300),
-	RATE_MIN_PER_WINDOW: z.coerce.number().positive().default(120),
-	RATE_MAX_PER_WINDOW: z.coerce.number().positive().default(3000),
+	RATE_PER_UNIT: z.coerce.number().int().positive().default(300),
+	RATE_MIN_PER_WINDOW: z.coerce.number().int().positive().default(120),
+	RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3000),
 
 	// Request-path escrow balance cache
-	BALANCE_REFRESH_INTERVAL_SECS: z.coerce.number().positive().default(60),
-	BALANCE_EVICTION_SECS: z.coerce.number().positive().default(3600),
-	BALANCE_NEGATIVE_TTL_SECS: z.coerce.number().positive().default(600),
-	BALANCE_ACTIVE_SET_MAX: z.coerce.number().positive().default(100_000),
-	BALANCE_REFRESH_BATCH_SIZE: z.coerce.number().positive().default(50),
+	BALANCE_REFRESH_INTERVAL_SECS: z.coerce.number().int().positive().default(60),
+	BALANCE_EVICTION_SECS: z.coerce.number().int().positive().default(3600),
+	BALANCE_NEGATIVE_TTL_SECS: z.coerce.number().int().positive().default(600),
+	BALANCE_ACTIVE_SET_MAX: z.coerce.number().int().positive().default(100_000),
+	BALANCE_REFRESH_BATCH_SIZE: z.coerce.number().int().positive().default(50),
 
 	// Operator (Track A penalty loop)
 	OPERATOR_PRIVATE_KEY: z.string().optional(),
@@ -75,14 +86,15 @@ export const configSchema = z.object({
 
 /**
  * Mirrors the Rust CLI's requires_all: a half-configured chain connection
- * must fail startup, not boot with an undefined escrow address or a
- * collateral floor of zero.
+ * must fail startup, not boot with an undefined escrow address.
+ *
+ * MIN_COLLATERAL is not listed: it defaults to the chain's value, so an absent
+ * one is a deliberate choice rather than a half-configuration.
  */
 const RPC_COMPANIONS = [
 	"ORDERBOOK_URL",
 	"ESCROW_ADDRESS",
 	"SETTLEMENT_ADDRESS",
-	"MIN_COLLATERAL",
 	"DEFAULT_GAS_PRICE",
 ] as const;
 

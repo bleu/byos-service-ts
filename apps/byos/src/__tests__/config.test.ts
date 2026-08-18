@@ -26,6 +26,73 @@ describe("parseConfig", () => {
 		expect(config.MIN_COLLATERAL).toBe("10000000000000000");
 	});
 
+	it("accepts every EVM chain CoW settles on", () => {
+		for (const id of [1, 100, 137, 8453, 42161, 11155111]) {
+			expect(parseConfig({ ...base, CHAIN_ID: String(id) }).CHAIN_ID).toBe(id);
+		}
+	});
+
+	it("rejects a chain CoW does not settle on", () => {
+		// The chain drives viem's Multicall3 lookup for the batched escrow
+		// reads, so an id we cannot describe must fail at startup rather than
+		// leave the balance cache silently empty.
+		expect(() => parseConfig({ ...base, CHAIN_ID: "999999" })).toThrow(/CHAIN_ID/);
+	});
+
+	it("rejects Solana, which BYOS cannot settle on", () => {
+		expect(() => parseConfig({ ...base, CHAIN_ID: "1000000001" })).toThrow(/CHAIN_ID/);
+	});
+
+	it("rejects a fractional count or duration", () => {
+		// These are not cosmetic bounds. The three rate constants reach
+		// BigInt() in the tier function, and the window, negative TTL and
+		// active-set cap reach EXPIRE, SET EX and ZREMRANGEBYRANK — each
+		// throws on a fractional value at request time, not at startup.
+		const knobs = [
+			"RATE_LIMIT_WINDOW_SECS",
+			"RATE_LIMIT_IP_PER_WINDOW",
+			"RATE_PER_UNIT",
+			"RATE_MIN_PER_WINDOW",
+			"RATE_MAX_PER_WINDOW",
+			"BALANCE_REFRESH_INTERVAL_SECS",
+			"BALANCE_EVICTION_SECS",
+			"BALANCE_NEGATIVE_TTL_SECS",
+			"BALANCE_ACTIVE_SET_MAX",
+			"BALANCE_REFRESH_BATCH_SIZE",
+		];
+
+		for (const knob of knobs) {
+			expect(() => parseConfig({ ...base, [knob]: "1.5" }), knob).toThrow(knob);
+		}
+	});
+
+	it("accepts a fixed rate, where the floor equals the ceiling", () => {
+		const config = parseConfig({
+			...base,
+			RATE_MIN_PER_WINDOW: "500",
+			RATE_MAX_PER_WINDOW: "500",
+		});
+
+		expect(config.RATE_MIN_PER_WINDOW).toBe(500);
+	});
+
+	it("rejects a floor above the ceiling", () => {
+		expect(() =>
+			parseConfig({ ...base, RATE_MIN_PER_WINDOW: "501", RATE_MAX_PER_WINDOW: "500" }),
+		).toThrow(/RATE_MIN_PER_WINDOW/);
+	});
+
+	it("treats MIN_COLLATERAL as optional, since the chain supplies a default", () => {
+		const { MIN_COLLATERAL: _omitted, ...withoutFloor } = chain;
+		expect(parseConfig({ ...base, ...withoutFloor }).MIN_COLLATERAL).toBeUndefined();
+	});
+
+	it("rejects a MIN_COLLATERAL that is not a decimal wei amount", () => {
+		expect(() => parseConfig({ ...base, ...chain, MIN_COLLATERAL: "0.5" })).toThrow(
+			/MIN_COLLATERAL/,
+		);
+	});
+
 	it("rejects RPC_URL without its companion settings", () => {
 		expect(() => parseConfig({ ...base, RPC_URL: chain.RPC_URL })).toThrow(
 			/ORDERBOOK_URL.*required when RPC_URL is set/s,
@@ -33,9 +100,9 @@ describe("parseConfig", () => {
 	});
 
 	it("rejects RPC_URL when a single companion is missing", () => {
-		const { MIN_COLLATERAL: _dropped, ...partial } = chain;
+		const { ESCROW_ADDRESS: _dropped, ...partial } = chain;
 		expect(() => parseConfig({ ...base, ...partial })).toThrow(
-			/MIN_COLLATERAL: required when RPC_URL is set/,
+			/ESCROW_ADDRESS: required when RPC_URL is set/,
 		);
 	});
 

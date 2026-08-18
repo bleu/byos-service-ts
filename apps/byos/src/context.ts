@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { evmChainFor, minCollateralFor } from "@byos/common";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
@@ -24,6 +25,7 @@ import type { BalanceRefreshConfig } from "./infra/jobs/balance-refresh.js";
 import {
 	createQueues,
 	createRedisConnection,
+	createRequestPathRedisConnection,
 	type Queues,
 	setupJobSchedulers,
 } from "./infra/jobs/index.js";
@@ -34,6 +36,12 @@ export interface AppContext {
 	db: Db;
 	dbClient: ReturnType<typeof createDb>["client"];
 	redis: Redis;
+	/** Request-path connection: bounded commands, no offline queue. */
+	requestRedis: Redis;
+	/** Resolved minimum escrow collateral: the chain's default, or the
+	 * MIN_COLLATERAL override. Feeds the validator threshold, the penalty
+	 * parameter c_l, and the request-path escrow floor gate. */
+	minCollateralWei: bigint;
 	queues: Queues;
 	config: Config;
 	gasPriceRef: GasPriceRef;
@@ -55,8 +63,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	await migrate(db, { migrationsFolder });
 	logger.info("database connected and migrated");
 
-	// Redis
+	// Redis. Two connections on purpose — see
+	// createRequestPathRedisConnection for why the options differ.
 	const redis = createRedisConnection(config.REDIS_URL);
+	const requestRedis = createRequestPathRedisConnection(config.REDIS_URL);
 	logger.info("redis connected");
 
 	// Queues
@@ -83,9 +93,26 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		enqueue();
 	};
 
+	// One resolution of the collateral floor, shared by everything that needs
+	// it, so the validator, the penalty loop and the floor gate cannot drift.
+	const chain = evmChainFor(config.CHAIN_ID);
+	const minCollateralWei =
+		config.MIN_COLLATERAL !== undefined
+			? BigInt(config.MIN_COLLATERAL)
+			: minCollateralFor(config.CHAIN_ID);
+
+	if (minCollateralWei === 0n) {
+		// The negative set is what bounds the refresh population by capital
+		// rather than by attacker effort; with a zero floor nothing is ever
+		// demoted into it and only BALANCE_ACTIVE_SET_MAX remains (ADR-0015).
+		logger.warn(
+			"MIN_COLLATERAL is 0 — escrow floor gate disabled and the balance refresh set is bounded by size alone",
+		);
+	}
+
 	// Rate limiting. The limiter always runs — it needs Redis, which is
 	// already a hard dependency, not RPC.
-	const rateLimiter = createRedisRateLimiter(redis);
+	const rateLimiter = createRedisRateLimiter(requestRedis);
 	const rateLimits = {
 		windowSecs: config.RATE_LIMIT_WINDOW_SECS,
 		ipPerWindow: config.RATE_LIMIT_IP_PER_WINDOW,
@@ -95,10 +122,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 			minRate: config.RATE_MIN_PER_WINDOW,
 			maxRate: config.RATE_MAX_PER_WINDOW,
 		},
-		// MIN_COLLATERAL, not the validator's gas-coupled threshold: the
+		// The collateral floor, not the validator's gas-coupled threshold: the
 		// synchronous gate must sit at or below whatever the validator
 		// enforces so it can never reject a proposal the validator accepts.
-		floorWei: config.MIN_COLLATERAL ? BigInt(config.MIN_COLLATERAL) : 0n,
+		floorWei: minCollateralWei,
 	};
 
 	// Blockchain (optional — depends on RPC_URL)
@@ -109,7 +136,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 
 	if (config.RPC_URL) {
 		const transport = http(config.RPC_URL);
-		const publicClient = createPublicClient({ transport });
+		// The chain is what lets viem resolve Multicall3 for the batched
+		// balance reads; without it every multicall throws before it reaches
+		// the RPC.
+		const publicClient = createPublicClient({ chain, transport });
 
 		// Fail-fast RPC check
 		try {
@@ -122,13 +152,12 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		// The config schema requires these alongside RPC_URL, so the casts
 		// cannot see undefined — same guarantee clap's requires_all gives Rust.
 		const escrowAddress = config.ESCROW_ADDRESS as Address;
-		const minCollateral = BigInt(config.MIN_COLLATERAL as string);
 
 		// Escrow validator
 		const escrowValidator = new EscrowValidator(
 			publicClient,
 			escrowAddress,
-			minCollateral,
+			minCollateralWei,
 			gasPriceRef,
 		);
 
@@ -149,7 +178,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		validator = new ProposalValidator(escrowValidator, simulationValidator);
 
 		// Request-path balance cache and the job that keeps it fresh.
-		const balanceStore = createRedisBalanceStore(redis, {
+		const balanceStore = createRedisBalanceStore(requestRedis, {
 			negativeTtlSecs: config.BALANCE_NEGATIVE_TTL_SECS,
 		});
 		balances = balanceStore;
@@ -166,7 +195,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		// Operator (optional — depends on OPERATOR_PRIVATE_KEY)
 		if (config.OPERATOR_PRIVATE_KEY) {
 			const account = privateKeyToAccount(config.OPERATOR_PRIVATE_KEY as Hex);
-			const walletClient = createWalletClient({ account, transport });
+			const walletClient = createWalletClient({ account, chain, transport });
 			operator = new EscrowOperator(walletClient, publicClient, escrowAddress);
 			logger.info("escrow operator configured");
 		} else {
@@ -189,6 +218,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		db,
 		dbClient,
 		redis,
+		requestRedis,
+		minCollateralWei,
 		queues,
 		config,
 		gasPriceRef,

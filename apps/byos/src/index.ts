@@ -100,8 +100,7 @@ async function main() {
 		? createPenaltyWorker(ctx.redis, {
 				db: ctx.db,
 				operator: ctx.operator,
-				// operator implies RPC_URL, which the schema couples to MIN_COLLATERAL
-				cL: BigInt(config.MIN_COLLATERAL as string),
+				cL: ctx.minCollateralWei,
 				onAuditEvent: ctx.onAuditEvent,
 				logger: logger.child({ worker: "penalty" }),
 			})
@@ -163,7 +162,7 @@ async function main() {
 		]);
 
 		// Close Redis
-		await ctx.redis.quit();
+		await Promise.all([ctx.redis.quit(), ctx.requestRedis.quit()]);
 		logger.info("redis disconnected");
 
 		// Close DB
