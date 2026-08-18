@@ -1,10 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-	cancelSignatureHeader,
-	createTestApp,
-	readAuthHeader,
-	type TestApp,
-} from "./helpers.js";
+import { cancelSignatureHeader, createTestApp, readAuthHeader, type TestApp } from "./helpers.js";
 
 let app: TestApp;
 
