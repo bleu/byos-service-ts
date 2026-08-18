@@ -23,18 +23,6 @@ export interface RateLimitSettings {
 	floorWei: bigint;
 }
 
-export const DEFAULT_RATE_LIMITS: RateLimitSettings = {
-	windowSecs: 60,
-	ipPerWindow: 6000,
-	tier: {
-		rateUnitWei: 10n ** 17n,
-		ratePerUnit: 300,
-		minRate: 120,
-		maxRate: 3000,
-	},
-	floorWei: 0n,
-};
-
 export interface AppContext {
 	db: Db;
 	chainId: number;
@@ -44,21 +32,33 @@ export interface AppContext {
 	solveBearerToken?: string;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
+}
+
+/**
+ * What the public listener needs on top of the shared context. The internal
+ * listener is driver-facing and never rate limited, so it does not carry these.
+ */
+export interface PublicAppContext extends AppContext {
 	/** Defaults to the allowAll stub, so tests need no Redis. */
 	rateLimiter?: RateLimiter;
 	/** Defaults to the unknownBalances stub, admitting everyone at the
 	 * lowest tier. */
 	balances?: BalanceCache;
-	rateLimits?: RateLimitSettings;
+	/**
+	 * Required rather than defaulted. The Zod schema in config.ts owns these
+	 * numbers, and a second copy lived here until it drifted from the schema on
+	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
+	 */
+	rateLimits: RateLimitSettings;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
-export function createPublicApp(ctx: AppContext): Hono {
+export function createPublicApp(ctx: PublicAppContext): Hono {
 	const app = new Hono();
 	app.onError(errorHandler);
 
 	const limiter = ctx.rateLimiter ?? allowAll;
-	const limits = ctx.rateLimits ?? DEFAULT_RATE_LIMITS;
+	const limits = ctx.rateLimits;
 
 	// Layer 1b only. The primary per-IP limit lives at the Cloudflare edge,
 	// and never touches the internal listener, which is latency-critical.

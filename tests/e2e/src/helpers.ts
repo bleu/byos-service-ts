@@ -1,12 +1,9 @@
+import { parseConfig, rateLimitsFromConfig } from "@byos/byos/src/config.js";
 import type { AuditEvent } from "@byos/byos/src/domain/audit.js";
 import type { BalanceCache } from "@byos/byos/src/domain/balance-cache.js";
 import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import type { RateLimiter } from "@byos/byos/src/domain/rate-limit.js";
-import {
-	createInternalApp,
-	createPublicApp,
-	DEFAULT_RATE_LIMITS,
-} from "@byos/byos/src/infra/api/index.js";
+import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
 import type { ContractInteraction } from "@byos/common";
@@ -75,6 +72,19 @@ export interface TestAppOverrides {
 	floorWei?: bigint;
 }
 
+/** Production defaults straight from the config schema, so the e2e assertions
+ * on tier numbers cannot drift from what the service actually ships. */
+function testRateLimits(overrides: TestAppOverrides) {
+	const config = parseConfig({
+		DATABASE_URL: "postgres://unused/e2e",
+		CHAIN_ID: String(CHAIN_ID),
+		TRAMPOLINE_FACTORY,
+	});
+
+	const limits = rateLimitsFromConfig(config, overrides.floorWei ?? 10n ** 16n);
+	return overrides.ipLimit === undefined ? limits : { ...limits, ipPerWindow: overrides.ipLimit };
+}
+
 export async function createTestApp(overrides: TestAppOverrides = {}): Promise<TestApp> {
 	const ctx = await createTestDb();
 	const gasPriceRef = { value: 10_000_000_000n }; // 10 gwei default
@@ -89,11 +99,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
 		rateLimiter: overrides.rateLimiter,
 		balances: overrides.balances,
-		rateLimits: {
-			...DEFAULT_RATE_LIMITS,
-			ipPerWindow: overrides.ipLimit ?? DEFAULT_RATE_LIMITS.ipPerWindow,
-			floorWei: overrides.floorWei ?? 10n ** 16n,
-		},
+		rateLimits: testRateLimits(overrides),
 	};
 
 	const publicApp = createPublicApp(appCtx);

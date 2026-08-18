@@ -1,5 +1,6 @@
 import { isSupportedEvmChain } from "@byos/common";
 import { z } from "zod";
+import type { RateLimitSettings } from "./infra/api/index.js";
 
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
 
@@ -70,7 +71,14 @@ export const configSchema = z.object({
 	BALANCE_REFRESH_INTERVAL_SECS: z.coerce.number().int().positive().default(60),
 	BALANCE_EVICTION_SECS: z.coerce.number().int().positive().default(3600),
 	BALANCE_NEGATIVE_TTL_SECS: z.coerce.number().int().positive().default(600),
-	BALANCE_ACTIVE_SET_MAX: z.coerce.number().int().positive().default(100_000),
+	/**
+	 * Cap on the refresh set. Load-bearing on RPC cost, not just memory: a tick
+	 * makes `ceil(cap / BALANCE_REFRESH_BATCH_SIZE)` multicalls back to back, so
+	 * at 10000/50 that is 200 requests per tick. Raising it past roughly
+	 * `BALANCE_REFRESH_INTERVAL_SECS / per-request latency * batch size` means
+	 * the tick cannot finish inside its own interval.
+	 */
+	BALANCE_ACTIVE_SET_MAX: z.coerce.number().int().positive().default(10_000),
 	BALANCE_REFRESH_BATCH_SIZE: z.coerce.number().int().positive().default(50),
 
 	// Operator (Track A penalty loop)
@@ -147,5 +155,28 @@ export function safeConfigForLogging(config: Config): Record<string, unknown> {
 		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
 		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
 		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
+	};
+}
+
+/**
+ * Rate limit settings from config. The schema above owns every number, so the
+ * app and the tests read them from one place rather than each keeping a copy —
+ * a second copy in `infra/api/index.ts` drifted from this one within a single
+ * PR, on `floorWei`.
+ *
+ * `floorWei` is not a config field: it is the resolved collateral floor, which
+ * comes from the chain unless MIN_COLLATERAL overrides it.
+ */
+export function rateLimitsFromConfig(config: Config, floorWei: bigint): RateLimitSettings {
+	return {
+		windowSecs: config.RATE_LIMIT_WINDOW_SECS,
+		ipPerWindow: config.RATE_LIMIT_IP_PER_WINDOW,
+		tier: {
+			rateUnitWei: BigInt(config.RATE_UNIT_WEI),
+			ratePerUnit: config.RATE_PER_UNIT,
+			minRate: config.RATE_MIN_PER_WINDOW,
+			maxRate: config.RATE_MAX_PER_WINDOW,
+		},
+		floorWei,
 	};
 }
