@@ -80,13 +80,14 @@ paths:
     get:
       operationId: healthz
       summary: Health check.
-      description: Liveness probe. Always `200` with an empty body.
+      description: >-
+        Liveness probe. Always `200` with an empty body. Exempt from the
+        per-IP backstop: a probe that can be shed would take the service out
+        of rotation under exactly the load the limiter exists to absorb.
       security: []
       responses:
         "200":
           description: Service is up.
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
   /proposals:
     post:
@@ -177,8 +178,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "403":
-          $ref: "#/components/responses/EscrowFloor"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -220,8 +219,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "403":
-          $ref: "#/components/responses/EscrowFloor"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -250,8 +247,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "403":
-          $ref: "#/components/responses/EscrowFloor"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -288,8 +283,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "403":
-          $ref: "#/components/responses/EscrowFloor"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -321,6 +314,11 @@ components:
         address BYOS has not seen yet is admitted at the lowest rate tier
         instead, and the authoritative escrow check stays in the background
         validator.
+
+        Applies to `POST /proposals` only. `effectiveBalance` reads as zero
+        from the moment a sub-solver requests a withdrawal, so gating reads
+        and cancellations too would leave it unable to cancel, or even see,
+        the proposals it still has live.
       content:
         application/json:
           schema:
