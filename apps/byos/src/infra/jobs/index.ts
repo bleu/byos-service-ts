@@ -5,6 +5,28 @@ export function createRedisConnection(url: string): Redis {
 	return new Redis(url, { maxRetriesPerRequest: null });
 }
 
+/**
+ * Connection for the request path — the rate limiter and the balance cache.
+ *
+ * Deliberately not the BullMQ connection above. BullMQ needs
+ * `maxRetriesPerRequest: null` for its blocking commands, and that setting
+ * disables ioredis' retry-count-driven flush of the offline queue: a command
+ * issued while the socket is down then waits for a reconnect instead of
+ * failing. On the request path that turns a Redis outage into a hung
+ * request rather than the 503 ADR-0015 specifies, so here the offline queue
+ * is off and every command is bounded.
+ */
+export function createRequestPathRedisConnection(url: string): Redis {
+	return new Redis(url, {
+		enableOfflineQueue: false,
+		commandTimeout: REQUEST_PATH_COMMAND_TIMEOUT_MS,
+	});
+}
+
+/** Bound on a single request-path Redis command. Well above a healthy
+ * round trip, well below anything a caller would wait for. */
+const REQUEST_PATH_COMMAND_TIMEOUT_MS = 250;
+
 export interface Queues {
 	validation: Queue;
 	validateProposal: Queue;

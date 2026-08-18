@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { createRequestPathRedisConnection } from "../jobs/index.js";
 import { createRedisRateLimiter } from "../rate-limit.js";
 
 const REDIS_URL = process.env.BYOS_TEST_REDIS_URL ?? "redis://localhost:6379";
@@ -87,17 +88,41 @@ describe("redis rate limiter", () => {
 		// An unreachable store is not a rate-limit verdict. Swallowing it
 		// into allowed:true opens the gate during an outage; into
 		// allowed:false it reports 429 for what is a 503.
-		const broken = new Redis(1, "127.0.0.1", {
-			maxRetriesPerRequest: 0,
-			retryStrategy: () => null,
-			lazyConnect: true,
-			enableOfflineQueue: false,
-		});
+		//
+		// Built with the real production factory, not a hand-tuned client:
+		// the BullMQ connection's options queue the command and wait for a
+		// reconnect instead of failing, so a test that configures its own
+		// client proves nothing about the deployed limiter.
+		const broken = createRequestPathRedisConnection("redis://127.0.0.1:1");
 		broken.on("error", () => {});
 		const limiter = createRedisRateLimiter(broken, { prefix: freshPrefix() });
 
-		await expect(limiter.checkLimit("signer:0xabc", 10, 60)).rejects.toThrow();
+		try {
+			await expect(limiter.checkLimit("signer:0xabc", 10, 60)).rejects.toThrow();
+		} finally {
+			broken.disconnect();
+		}
+	});
 
-		broken.disconnect();
+	it("does not hang on an unreachable Redis, so callers can answer 503", async () => {
+		// The failure has to be prompt as well as thrown: checkBudget turns a
+		// rejection into 503, but a pending promise is a hung request that no
+		// response timeout bounds.
+		const broken = createRequestPathRedisConnection("redis://127.0.0.1:1");
+		broken.on("error", () => {});
+		const limiter = createRedisRateLimiter(broken, { prefix: freshPrefix() });
+
+		try {
+			const settled = await Promise.race([
+				limiter.checkLimit("signer:0xabc", 10, 60).then(
+					() => "resolved",
+					() => "rejected",
+				),
+				new Promise((r) => setTimeout(() => r("pending"), 2000)),
+			]);
+			expect(settled).toBe("rejected");
+		} finally {
+			broken.disconnect();
+		}
 	});
 });
