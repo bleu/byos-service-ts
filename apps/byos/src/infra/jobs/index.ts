@@ -11,6 +11,7 @@ export interface Queues {
 	retention: Queue;
 	penalty: Queue;
 	audit: Queue;
+	balanceRefresh: Queue;
 }
 
 export function createQueues(connection: Redis): Queues {
@@ -20,6 +21,7 @@ export function createQueues(connection: Redis): Queues {
 		retention: new Queue("byos:retention", { connection }),
 		penalty: new Queue("byos:penalty", { connection }),
 		audit: new Queue("byos:audit", { connection }),
+		balanceRefresh: new Queue("byos:balance-refresh", { connection }),
 	};
 }
 
@@ -27,6 +29,7 @@ export interface JobSchedulerConfig {
 	validationIntervalSecs: number;
 	retentionSweepIntervalSecs: number;
 	penaltyIntervalSecs: number;
+	balanceRefreshIntervalSecs: number;
 }
 
 export async function setupJobSchedulers(
@@ -43,5 +46,9 @@ export async function setupJobSchedulers(
 
 	await queues.penalty.upsertJobScheduler("penalty-tick", {
 		every: config.penaltyIntervalSecs * 1000,
+	});
+
+	await queues.balanceRefresh.upsertJobScheduler("balance-refresh-tick", {
+		every: config.balanceRefreshIntervalSecs * 1000,
 	});
 }
