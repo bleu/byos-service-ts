@@ -3,12 +3,37 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import type { BalanceCache } from "../../domain/balance-cache.js";
+import { unknownBalances } from "../../domain/balance-cache.js";
+import type { RateLimiter, TierParams } from "../../domain/rate-limit.js";
+import { allowAll } from "../../domain/rate-limit.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import { errorHandler } from "./error.js";
-import { bearerAuth } from "./middleware.js";
+import { bearerAuth, ipRateLimit } from "./middleware.js";
 import { createNotifyRoute } from "./notify.js";
 import { createPublicRoutes } from "./routes.js";
 import { createSolveRoute } from "./solve.js";
+
+/** Rate-limit knobs, all operational tuning parameters (ADR-0015). */
+export interface RateLimitSettings {
+	windowSecs: number;
+	ipPerWindow: number;
+	tier: TierParams;
+	/** Escrow floor below which a known signer is rejected synchronously. */
+	floorWei: bigint;
+}
+
+export const DEFAULT_RATE_LIMITS: RateLimitSettings = {
+	windowSecs: 60,
+	ipPerWindow: 6000,
+	tier: {
+		rateUnitWei: 10n ** 17n,
+		ratePerUnit: 300,
+		minRate: 120,
+		maxRate: 3000,
+	},
+	floorWei: 0n,
+};
 
 export interface AppContext {
 	db: Db;
@@ -19,6 +44,12 @@ export interface AppContext {
 	solveBearerToken?: string;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
+	/** Defaults to the allowAll stub, so tests need no Redis. */
+	rateLimiter?: RateLimiter;
+	/** Defaults to the unknownBalances stub, admitting everyone at the
+	 * lowest tier. */
+	balances?: BalanceCache;
+	rateLimits?: RateLimitSettings;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
@@ -26,12 +57,35 @@ export function createPublicApp(ctx: AppContext): Hono {
 	const app = new Hono();
 	app.onError(errorHandler);
 
+	const limiter = ctx.rateLimiter ?? allowAll;
+	const limits = ctx.rateLimits ?? DEFAULT_RATE_LIMITS;
+
+	// Layer 1b only. The primary per-IP limit lives at the Cloudflare edge,
+	// and never touches the internal listener, which is latency-critical.
+	app.use(
+		"*",
+		ipRateLimit({
+			limiter,
+			limit: limits.ipPerWindow,
+			windowSecs: limits.windowSecs,
+			logger: ctx.logger,
+		}),
+	);
+
 	const routes = createPublicRoutes({
 		db: ctx.db,
 		chainId: ctx.chainId,
 		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		onAuditEvent: ctx.onAuditEvent,
+		signerLimit: {
+			limiter,
+			balances: ctx.balances ?? unknownBalances,
+			tier: limits.tier,
+			windowSecs: limits.windowSecs,
+			floorWei: limits.floorWei,
+			logger: ctx.logger,
+		},
 	});
 
 	app.route("/", routes);
