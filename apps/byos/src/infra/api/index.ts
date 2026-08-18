@@ -68,6 +68,7 @@ export function createPublicApp(ctx: AppContext): Hono {
 			limiter,
 			limit: limits.ipPerWindow,
 			windowSecs: limits.windowSecs,
+			exemptPaths: ["/healthz"],
 			logger: ctx.logger,
 		}),
 	);

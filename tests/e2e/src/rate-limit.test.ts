@@ -7,6 +7,7 @@ import {
 	createTestApp,
 	readAuthHeader,
 	SIGNER_ACCOUNT,
+	seedProposal,
 	signAndSubmitProposal,
 	type TestApp,
 } from "./helpers.js";
@@ -118,6 +119,28 @@ describe("per-signer rate limiting", () => {
 
 		expect(response.status).toBe(403);
 		await expect(response.json()).resolves.toMatchObject({ kind: "InsufficientEscrow" });
+	});
+
+	it("still lets an underfunded sub-solver read and cancel what it has live", async () => {
+		// effectiveBalance reads zero from the moment requestWithdrawal() is
+		// called, so a floor gate on every verb would strand a winding-down
+		// sub-solver: unable to cancel its live proposals, and blind to them.
+		app = await createTestApp({ balances: balancesOf(1n) });
+		const id = await seedProposal(app.ctx.db, {
+			orderUid: uid(8),
+			subSolver: SIGNER_ACCOUNT.address,
+		});
+
+		const read = await app.publicApp.request(`/proposal/${id}`, {
+			headers: { "X-Signature": await readAuthHeader() },
+		});
+		expect(read.status).toBe(200);
+
+		const cancelled = await app.publicApp.request(`/proposal/${id}`, {
+			method: "DELETE",
+			headers: { "X-Signature": await cancelSignatureHeader(id) },
+		});
+		expect(cancelled.status).toBe(204);
 	});
 
 	it("answers 503, not 429, when the limiter's store is down", async () => {

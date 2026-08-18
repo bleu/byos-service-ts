@@ -80,7 +80,9 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
-		await enforceSignerLimit(config.signerLimit, subSolver);
+		// The floor gate is a write-side control: a sub-solver whose withdrawal
+		// is pending must still be able to read and cancel what it has live.
+		await enforceSignerLimit(config.signerLimit, subSolver, { enforceEscrowFloor: true });
 
 		// Validate expiry
 		const now = BigInt(Math.floor(Date.now() / 1000));
