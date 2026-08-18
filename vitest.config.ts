@@ -32,6 +32,15 @@ export default defineConfig({
 					testTimeout: 60_000,
 				},
 			},
+			{
+				test: {
+					name: "resilience",
+					root: "tests/resilience",
+					include: ["**/*.test.ts"],
+					testTimeout: 30_000,
+					hookTimeout: 30_000,
+				},
+			},
 		],
 	},
 });
