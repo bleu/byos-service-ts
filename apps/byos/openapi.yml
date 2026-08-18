@@ -85,6 +85,8 @@ paths:
       responses:
         "200":
           description: Service is up.
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /proposals:
     post:
@@ -130,6 +132,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/EscrowFloor"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /proposal/{id}:
     parameters:
@@ -169,6 +177,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/EscrowFloor"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
     delete:
       operationId: cancelProposal
       summary: Cancel a live proposal.
@@ -205,6 +220,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/EscrowFloor"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /proposals/by-sub-solver:
     get:
@@ -229,6 +250,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/EscrowFloor"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /proposals/{orderUid}:
     get:
@@ -261,6 +288,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/EscrowFloor"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
 components:
   securitySchemes:
@@ -279,6 +312,48 @@ components:
       description: |
         EIP-712 signature over the `CancelProposal` struct for the proposal
         id being cancelled, hex-encoded (65 bytes).
+
+  responses:
+    EscrowFloor:
+      description: |
+        The signer's cached escrow balance is known to be below the minimum
+        collateral (`InsufficientEscrow`). Read from cache, never RPC — an
+        address BYOS has not seen yet is admitted at the lowest rate tier
+        instead, and the authoritative escrow check stays in the background
+        validator.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: |
+        Per-IP or per-signer rate limit exceeded (`RateLimited`). The
+        per-signer budget is shared across `GET`, `POST` and `DELETE`, and
+        is scaled by the sub-solver's escrow balance.
+      headers:
+        Retry-After:
+          description: Seconds until the budget window rolls.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: |
+        A backing store the request path depends on is unreachable
+        (`ServiceUnavailable`). Distinct from `429`: this is infrastructure,
+        not load. The service fails closed rather than accepting proposals
+        it cannot validate or audit.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   parameters:
     ProposalIdPath:
@@ -560,7 +635,9 @@ components:
             - ProposalNotFound
             - ProposalNotCancellable
             - BadRequest
+            - RateLimited
             - Internal
+            - ServiceUnavailable
         description:
           type: string
           example: "Proposal validUntil is in the past"
