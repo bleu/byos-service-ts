@@ -4,8 +4,8 @@ import type { Address, Hex } from "viem";
 export const CONFIG = {
 	rpcUrl: process.env.RPC_URL ?? "http://localhost:8545",
 	orderbookUrl: process.env.ORDERBOOK_URL ?? "http://localhost:8080",
-	byosPublicUrl: process.env.BYOS_PUBLIC_URL ?? "http://localhost:9585",
-	byosInternalUrl: process.env.BYOS_INTERNAL_URL ?? "http://localhost:9586",
+	byosPublicUrl: process.env.BYOS_PUBLIC_URL ?? "http://localhost:19585",
+	byosInternalUrl: process.env.BYOS_INTERNAL_URL ?? "http://localhost:19586",
 	chainId: Number(process.env.CHAIN_ID ?? "1"),
 };
 
