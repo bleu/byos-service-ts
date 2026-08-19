@@ -21,7 +21,7 @@ services:
 
   byos-ts:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:postgres@byos-db:5432/byos
@@ -62,7 +62,7 @@ services:
 
   driver:
     volumes:
-      - ./config/e2e:/config/e2e:ro
+      - ../config/e2e:/config/e2e:ro
     command: --config /config/e2e/driver.toml
 
   autopilot:
