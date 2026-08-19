@@ -1,7 +1,3 @@
-include:
-  - path: offline-mode/docker-compose.yml
-    env_file: offline-mode/.env
-
 services:
   # --- BYOS-specific infrastructure ---
 
