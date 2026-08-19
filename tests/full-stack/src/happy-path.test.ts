@@ -18,6 +18,7 @@ import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
 import {
 	approveVaultRelayer,
 	depositToEscrow,
+	ensureTrampolineDeployed,
 	fundToken,
 	type GpvOrder,
 	getAmountsOut,
@@ -175,14 +176,16 @@ describe("happy path", () => {
 		expect(orderUid).toBeDefined();
 		expect(orderUid.length).toBeGreaterThan(10);
 
-		// 4. Deposit to Escrow for the sub-solver (required for validator acceptance)
-		// The threshold is ~gasEstimate * gasPrice + minCollateral. 1 ETH is plenty.
+		// 4. Setup sub-solver: deposit to Escrow + deploy Trampoline
+		// The escrow threshold is ~gasEstimate * gasPrice + minCollateral. 1 ETH is plenty.
 		await depositToEscrow(
 			subSolverWallet,
 			publicClient,
 			ACCOUNTS.subSolver.address,
 			1_000_000_000_000_000_000n, // 1 ETH
 		);
+		// The trampoline must exist for settlement simulation to succeed.
+		await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
 
 		// 5. Build proposal interactions (Uniswap V2 swap)
 		const interactions = buildUniswapInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
