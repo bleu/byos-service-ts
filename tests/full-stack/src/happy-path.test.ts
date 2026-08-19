@@ -139,7 +139,19 @@ describe("happy path", () => {
 		const buyToken = CONTRACTS.weth;
 		const sellAmount = 1_000_000_000n; // 1000 USDC (6 decimals)
 
-		// 1. Fund trader with USDC and approve VaultRelayer
+		// 1. Setup sub-solver: deposit to Escrow + deploy Trampoline
+		// Must happen BEFORE proposal submission — the validator processes
+		// proposals within 12s and marks them simFailed if escrow or trampoline
+		// are missing.
+		await depositToEscrow(
+			subSolverWallet,
+			publicClient,
+			ACCOUNTS.subSolver.address,
+			1_000_000_000_000_000_000n, // 1 ETH
+		);
+		await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
+
+		// 2. Fund trader with USDC and approve VaultRelayer
 		await fundToken(
 			deployerWallet,
 			publicClient,
@@ -149,13 +161,13 @@ describe("happy path", () => {
 		);
 		await approveVaultRelayer(traderWallet, publicClient, sellToken);
 
-		// 2. Get Uniswap V2 quote
+		// 3. Get Uniswap V2 quote
 		const amounts = await getAmountsOut(publicClient, sellAmount, [sellToken, buyToken]);
 		const expectedBuyAmount = amounts[1];
 		// 5% slippage tolerance
 		const minBuyAmount = (expectedBuyAmount * 95n) / 100n;
 
-		// 3. Sign and submit GPv2 order to the orderbook
+		// 4. Sign and submit GPv2 order to the orderbook
 		const validTo = Math.floor(Date.now() / 1000) + 600; // 10 min
 		const order: GpvOrder = {
 			sellToken,
@@ -176,21 +188,10 @@ describe("happy path", () => {
 		expect(orderUid).toBeDefined();
 		expect(orderUid.length).toBeGreaterThan(10);
 
-		// 4. Setup sub-solver: deposit to Escrow + deploy Trampoline
-		// The escrow threshold is ~gasEstimate * gasPrice + minCollateral. 1 ETH is plenty.
-		await depositToEscrow(
-			subSolverWallet,
-			publicClient,
-			ACCOUNTS.subSolver.address,
-			1_000_000_000_000_000_000n, // 1 ETH
-		);
-		// The trampoline must exist for settlement simulation to succeed.
-		await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
-
-		// 5. Build proposal interactions (Uniswap V2 swap)
+		// 6. Build proposal interactions (Uniswap V2 swap)
 		const interactions = buildUniswapInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
 
-		// 6. Submit BYOS proposal
+		// 7. Submit BYOS proposal
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
