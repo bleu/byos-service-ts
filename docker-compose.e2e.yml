@@ -40,8 +40,8 @@ services:
       LOG_LEVEL: debug
       JSON_LOGS: "true"
     ports:
-      - "9585:9585"
-      - "9586:9586"
+      - "19585:9585"
+      - "19586:9586"
     depends_on:
       byos-db:
         condition: service_healthy
