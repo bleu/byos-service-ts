@@ -32,6 +32,15 @@ export default defineConfig({
 					testTimeout: 60_000,
 				},
 			},
+			{
+				test: {
+					name: "full-stack",
+					root: "tests/full-stack",
+					include: ["**/*.test.ts"],
+					testTimeout: 120_000,
+					hookTimeout: 60_000,
+				},
+			},
 		],
 	},
 });
