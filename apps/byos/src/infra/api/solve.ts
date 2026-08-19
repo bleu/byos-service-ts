@@ -215,6 +215,7 @@ function buildSolution(
 	);
 
 	const interactions: SolutionInteraction[] = [transfer, execute].map((i) => ({
+		kind: "custom" as const,
 		target: i.target,
 		value: i.value.toString(),
 		callData: i.callData,
@@ -225,7 +226,8 @@ function buildSolution(
 	}));
 
 	const trade: Fulfillment = {
-		orderUid: order.uid,
+		kind: "fulfillment",
+		order: order.uid,
 		executedAmount: cut.executedAmount.toString(),
 		fee: cut.amount.toString(),
 	};
