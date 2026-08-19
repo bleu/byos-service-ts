@@ -37,6 +37,7 @@ E2E_SERVICES=(
   orderbook
   autopilot
   driver
+  baseline
   byos-db
   byos-redis
   byos-ts
