@@ -64,7 +64,7 @@ describe("trampoline encoding", () => {
 		// Verify selector matches keccak256 of the function signature
 		const expectedSelector = keccak256(
 			toHex(
-				"execute((bytes32,uint256,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],address,bytes)",
+				"execute((bytes32,uint256,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],address,address,bytes)",
 			),
 		).slice(0, 10);
 		expect(execute.callData.slice(0, 10)).toBe(expectedSelector);
@@ -90,7 +90,8 @@ describe("trampoline encoding", () => {
 		});
 
 		expect(decoded.functionName).toBe("execute");
-		const [decodedProposal, decodedInteractions, decodedBuyToken, decodedSig] = decoded.args;
+		const [decodedProposal, decodedInteractions, decodedSellToken, decodedBuyToken, decodedSig] =
+			decoded.args;
 
 		expect(decodedProposal.orderUidHash).toBe(proposal.orderUidHash);
 		expect(decodedProposal.sellAmount).toBe(proposal.sellAmount);
@@ -102,9 +103,9 @@ describe("trampoline encoding", () => {
 		expect(decodedInteractions[0]?.target.toLowerCase()).toBe(
 			interactions[0]?.target.toLowerCase(),
 		);
+		expect(decodedSellToken.toLowerCase()).toBe(sellToken.toLowerCase());
 		expect(decodedBuyToken.toLowerCase()).toBe(buyToken.toLowerCase());
-		expect(decodedSig).toBeDefined();
-		expect(decodedSig!.toLowerCase()).toBe(sig.toLowerCase());
+		expect(decodedSig.toLowerCase()).toBe(sig.toLowerCase());
 	});
 
 	it("encodes with empty interactions", () => {

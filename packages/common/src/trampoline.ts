@@ -14,7 +14,7 @@ export interface SettlementInteraction {
  * proposal in a Trampoline `execute` call.
  *
  * 1. `sellToken.transfer(trampoline, sellAmount)` — push trade capital
- * 2. `trampoline.execute(proposal, interactions, buyToken, signature)` — run the route
+ * 2. `trampoline.execute(proposal, interactions, sellToken, buyToken, signature)` — run the route
  */
 export function encodeTrampolineInteractions(
 	trampoline: Address,
@@ -53,6 +53,7 @@ export function encodeTrampolineInteractions(
 				value: i.value,
 				callData: i.callData,
 			})),
+			sellToken,
 			buyToken,
 			signature,
 		],
