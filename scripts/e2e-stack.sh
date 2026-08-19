@@ -19,7 +19,41 @@ if [ ! -f "$REPO_ROOT/offline-mode/.env" ]; then
   cp "$REPO_ROOT/offline-mode/.env.example" "$REPO_ROOT/offline-mode/.env"
 fi
 
-docker compose \
-  -f "$REPO_ROOT/offline-mode/docker-compose.yml" \
-  -f "$REPO_ROOT/docker-compose.e2e.yml" \
-  "$@"
+# Initialize the services submodule if needed (required for Rust builds + Flyway migrations).
+if [ ! -f "$REPO_ROOT/offline-mode/modules/services/Cargo.toml" ]; then
+  echo "Initializing offline-mode/modules/services submodule..."
+  git -C "$REPO_ROOT/offline-mode" submodule update --init modules/services
+fi
+
+# Only the services needed for e2e tests. Excludes frontend, explorer,
+# grafana, prometheus, tempo, adminer, watch-tower which need additional
+# submodules or are not relevant.
+E2E_SERVICES=(
+  chain-deployer
+  chain
+  db
+  db-migrations
+  coingecko-mock
+  orderbook
+  autopilot
+  driver
+  baseline
+  byos-db
+  byos-redis
+  byos-ts
+)
+
+compose() {
+  docker compose \
+    -f "$REPO_ROOT/offline-mode/docker-compose.yml" \
+    -f "$REPO_ROOT/docker-compose.e2e.yml" \
+    "$@"
+}
+
+# If the command is "up", append the service list so we only build/start what's needed.
+# For other commands (down, logs, ps, etc.), pass through as-is.
+if [ "${1:-}" = "up" ]; then
+  compose "$@" "${E2E_SERVICES[@]}"
+else
+  compose "$@"
+fi
