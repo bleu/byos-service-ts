@@ -68,4 +68,4 @@ services:
 
   autopilot:
     environment:
-      DRIVERS: "baseline|http://driver/baseline|0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,byos-ts|http://driver/byos-ts|0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+      DRIVERS: "byos-ts|http://driver/byos-ts|0x90F79bf6EB2c4f870365E785982E1f101E93b906"
