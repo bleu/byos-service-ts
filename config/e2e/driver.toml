@@ -1,0 +1,46 @@
+app-data-fetching-enabled = true
+orderbook-url = "http://orderbook"
+tx-gas-limit = "45000000"
+
+[[solver]]
+name = "baseline"
+endpoint = "http://baseline"
+absolute-slippage = "40000000000000000"
+relative-slippage = "0.1"
+# Anvil account #0 (baseline solver)
+account = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[[solver]]
+name = "byos-ts"
+endpoint = "http://byos-ts:9586"
+absolute-slippage = "40000000000000000"
+relative-slippage = "0.1"
+# Anvil account #3 (BYOS solver)
+account = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+
+[submission]
+gas-price-cap = "1000000000000"
+
+[[submission.mempool]]
+mempool = "public"
+url = "http://chain:8545"
+
+[contracts]
+gp-v2-settlement = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+balances = "0x3e8C6De9510e7ECad902D005DE3Ab52f35cF4f1b"
+signatures = "0x8262d639c38470F38d2eff15926F7071c28057Af"
+
+[liquidity]
+base-tokens = [
+    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", # WETH
+    "0x6B175474E89094C44Da98b954EedeAC495271d0F", # DAI
+    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", # USDC
+    "0xdAC17F958D2ee523a2206206994597C13D831ec7", # USDT
+    "0x6810e776880C02933D47DB1b9fc05908e5386b96", # GNO
+]
+
+[[liquidity.uniswap-v2]]
+router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+pool-code = "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f"
+missing-pool-cache-time = "1h"
