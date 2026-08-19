@@ -154,6 +154,33 @@ export async function tokenBalance(
 	});
 }
 
+/** Deposit ETH to the Escrow contract for a sub-solver. */
+export async function depositToEscrow(
+	walletClient: WalletClient,
+	publicClient: PublicClient,
+	subSolver: Address,
+	amount: bigint,
+): Promise<void> {
+	const hash = await walletClient.sendTransaction({
+		to: CONTRACTS.escrow,
+		data: encodeFunctionData({
+			abi: [
+				{
+					type: "function",
+					name: "deposit",
+					inputs: [{ name: "_subSolver", type: "address" }],
+					outputs: [],
+					stateMutability: "payable",
+				},
+			],
+			functionName: "deposit",
+			args: [subSolver],
+		}),
+		value: amount,
+	});
+	await publicClient.waitForTransactionReceipt({ hash });
+}
+
 /** Get Uniswap V2 router quote for a swap path. */
 export async function getAmountsOut(
 	client: PublicClient,

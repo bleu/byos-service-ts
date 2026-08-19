@@ -9,15 +9,15 @@
  */
 import type { ContractInteraction } from "@byos/common";
 import type { Address, Hex } from "viem";
-import { createPublicClient, createWalletClient, encodeFunctionData, http, pad } from "viem";
+import { createPublicClient, createWalletClient, defineChain, encodeFunctionData, http, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { foundry } from "viem/chains";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
 import { revertSnapshot, takeSnapshot } from "./helpers/chain.js";
 import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
 import {
 	approveVaultRelayer,
+	depositToEscrow,
 	fundToken,
 	type GpvOrder,
 	getAmountsOut,
@@ -26,24 +26,33 @@ import {
 	waitForOrderExecution,
 } from "./helpers/orderbook.js";
 
+// --- Chain definition (Anvil running with chain ID 1) ---
+
+const anvilMainnet = defineChain({
+	id: CONFIG.chainId,
+	name: "Anvil Mainnet",
+	nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+	rpcUrls: { default: { http: [CONFIG.rpcUrl] } },
+});
+
 // --- Clients ---
 
 const publicClient = createPublicClient({
-	chain: foundry,
+	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
 const traderAccount = privateKeyToAccount(ACCOUNTS.trader.key);
 const traderWallet = createWalletClient({
 	account: traderAccount,
-	chain: foundry,
+	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
 const subSolverAccount = privateKeyToAccount(ACCOUNTS.subSolver.key);
 const subSolverWallet = createWalletClient({
 	account: subSolverAccount,
-	chain: foundry,
+	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
@@ -51,7 +60,7 @@ const subSolverWallet = createWalletClient({
 const deployerAccount = privateKeyToAccount(ACCOUNTS.baselineSolver.key);
 const deployerWallet = createWalletClient({
 	account: deployerAccount,
-	chain: foundry,
+	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
@@ -166,10 +175,19 @@ describe("happy path", () => {
 		expect(orderUid).toBeDefined();
 		expect(orderUid.length).toBeGreaterThan(10);
 
-		// 4. Build proposal interactions (Uniswap V2 swap)
+		// 4. Deposit to Escrow for the sub-solver (required for validator acceptance)
+		// The threshold is ~gasEstimate * gasPrice + minCollateral. 1 ETH is plenty.
+		await depositToEscrow(
+			subSolverWallet,
+			publicClient,
+			ACCOUNTS.subSolver.address,
+			1_000_000_000_000_000_000n, // 1 ETH
+		);
+
+		// 5. Build proposal interactions (Uniswap V2 swap)
 		const interactions = buildUniswapInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
 
-		// 5. Submit BYOS proposal
+		// 6. Submit BYOS proposal
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
@@ -180,15 +198,15 @@ describe("happy path", () => {
 		});
 		expect(proposalId).toBeGreaterThan(0);
 
-		// 6. Wait for the order to be fulfilled via the autopilot → driver → settlement cycle
+		// 7. Wait for the order to be fulfilled via the autopilot → driver → settlement cycle
 		const result = await waitForOrderExecution(orderUid, publicClient);
 		expect(result.status).toBe("fulfilled");
 
-		// 7. Verify trader received WETH
+		// 8. Verify trader received WETH
 		const wethBalance = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
 		expect(wethBalance).toBeGreaterThan(0n);
 
-		// 8. Verify proposal reached settled status
+		// 9. Verify proposal reached settled status
 		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
 			"settled",
 			"settleFailed",
