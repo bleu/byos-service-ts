@@ -21,6 +21,7 @@ export const TrampolineAbi = [
 		inputs: [
 			{ name: "_proposal", type: "tuple", components: proposalComponents },
 			{ name: "_interactions", type: "tuple[]", components: interactionComponents },
+			{ name: "_sellToken", type: "address" },
 			{ name: "_buyToken", type: "address" },
 			{ name: "_signature", type: "bytes" },
 		],
