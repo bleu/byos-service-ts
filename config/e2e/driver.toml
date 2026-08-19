@@ -3,14 +3,6 @@ orderbook-url = "http://orderbook"
 tx-gas-limit = "45000000"
 
 [[solver]]
-name = "baseline"
-endpoint = "http://baseline"
-absolute-slippage = "40000000000000000"
-relative-slippage = "0.1"
-# Anvil account #0 (baseline solver)
-account = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-
-[[solver]]
 name = "byos-ts"
 endpoint = "http://byos-ts:9586"
 absolute-slippage = "40000000000000000"
