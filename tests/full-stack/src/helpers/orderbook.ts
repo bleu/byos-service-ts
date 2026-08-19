@@ -154,6 +154,47 @@ export async function tokenBalance(
 	});
 }
 
+/** Deploy the sub-solver's Trampoline via TrampolineFactory.ensureDeployed(). */
+export async function ensureTrampolineDeployed(
+	walletClient: WalletClient,
+	publicClient: PublicClient,
+	subSolver: Address,
+): Promise<Address> {
+	const hash = await walletClient.sendTransaction({
+		to: CONTRACTS.trampolineFactory,
+		data: encodeFunctionData({
+			abi: [
+				{
+					type: "function",
+					name: "ensureDeployed",
+					inputs: [{ name: "_subSolver", type: "address" }],
+					outputs: [{ name: "_instance", type: "address" }],
+					stateMutability: "nonpayable",
+				},
+			],
+			functionName: "ensureDeployed",
+			args: [subSolver],
+		}),
+	});
+	await publicClient.waitForTransactionReceipt({ hash });
+
+	// Read the deployed address
+	return publicClient.readContract({
+		address: CONTRACTS.trampolineFactory,
+		abi: [
+			{
+				type: "function",
+				name: "addressOf",
+				inputs: [{ name: "_subSolver", type: "address" }],
+				outputs: [{ name: "_trampoline", type: "address" }],
+				stateMutability: "view",
+			},
+		],
+		functionName: "addressOf",
+		args: [subSolver],
+	});
+}
+
 /** Deposit ETH to the Escrow contract for a sub-solver. */
 export async function depositToEscrow(
 	walletClient: WalletClient,
