@@ -30,8 +30,8 @@ import {
 	depositToEscrow,
 	ensureTrampolineDeployed,
 	fundToken,
-	getAmountsOut,
 	type GpvOrder,
+	getAmountsOut,
 	signAndSubmitOrder,
 } from "./helpers/orderbook.js";
 
@@ -372,5 +372,4 @@ describe("solve edge cases", () => {
 		);
 		expect(["simFailed", "rejected"]).toContain(proposal.status);
 	});
-
 });

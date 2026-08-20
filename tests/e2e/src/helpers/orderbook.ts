@@ -5,7 +5,7 @@
  * Ported from offline-mode/test/utils/order-helpers.ts (ethers → viem).
  */
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import { encodeFunctionData, erc20Abi, maxUint256 } from "viem";
+import { encodeFunctionData, erc20Abi, keccak256, maxUint256 } from "viem";
 import { mineBlock } from "./chain.js";
 import { CONFIG, CONTRACTS, GPV2_DOMAIN, GPV2_ORDER_TYPES } from "./config.js";
 
@@ -248,27 +248,137 @@ export async function getAmountsIn(
 }
 
 /**
- * Poll the orderbook for any trade on the order. For partial fills where
- * the order stays "open", this checks the trades endpoint instead of status.
+ * Poll the orderbook for trades on an order. For partial fills where the order
+ * stays "open", this checks the trades endpoint instead of order status.
  * Mines blocks to trigger autopilot auction cycles.
+ *
+ * @param minCount - wait until at least this many trades exist (default 1)
  */
 export async function waitForTrade(
 	orderUid: string,
 	client: PublicClient,
 	maxWaitMs = 120_000,
+	minCount = 1,
 ): Promise<{ trades: unknown[] }> {
 	const start = Date.now();
 	while (Date.now() - start < maxWaitMs) {
 		const resp = await fetch(`${CONFIG.orderbookUrl}/api/v1/trades?orderUid=${orderUid}`);
 		if (resp.ok) {
 			const trades = (await resp.json()) as unknown[];
-			if (trades.length > 0) return { trades };
+			if (trades.length >= minCount) return { trades };
 		}
 
 		await mineBlock(client);
 		await new Promise((r) => setTimeout(r, 2000));
 	}
-	throw new Error(`No trades for order ${orderUid} within ${maxWaitMs}ms`);
+	throw new Error(`Fewer than ${minCount} trades for order ${orderUid} within ${maxWaitMs}ms`);
+}
+
+/**
+ * Sign an ERC-2612 permit for a token (EIP-2612).
+ * Returns the encoded `permit(owner, spender, value, deadline, v, r, s)` calldata.
+ *
+ * Assumes the token uses the standard EIP-712 domain:
+ *   { name, version, chainId, verifyingContract }
+ * and the Permit type with fields: owner, spender, value, nonce, deadline.
+ */
+export async function signEip2612Permit(
+	walletClient: WalletClient,
+	publicClient: PublicClient,
+	tokenAddress: Address,
+	tokenName: string,
+	tokenVersion: string,
+	spender: Address,
+	value: bigint,
+	deadline: bigint,
+): Promise<Hex> {
+	const owner = walletClient.account!.address;
+
+	const nonce = await publicClient.readContract({
+		address: tokenAddress,
+		abi: [
+			{
+				type: "function",
+				name: "nonces",
+				inputs: [{ name: "owner", type: "address" }],
+				outputs: [{ type: "uint256" }],
+				stateMutability: "view",
+			},
+		],
+		functionName: "nonces",
+		args: [owner],
+	});
+
+	const signature = await walletClient.signTypedData({
+		domain: {
+			name: tokenName,
+			version: tokenVersion,
+			chainId: BigInt(CONFIG.chainId),
+			verifyingContract: tokenAddress,
+		},
+		types: {
+			Permit: [
+				{ name: "owner", type: "address" },
+				{ name: "spender", type: "address" },
+				{ name: "value", type: "uint256" },
+				{ name: "nonce", type: "uint256" },
+				{ name: "deadline", type: "uint256" },
+			],
+		},
+		primaryType: "Permit",
+		message: { owner, spender, value, nonce, deadline },
+	});
+
+	// Parse v, r, s from 65-byte signature
+	const r = `0x${signature.slice(2, 66)}` as Hex;
+	const s = `0x${signature.slice(66, 130)}` as Hex;
+	const v = Number.parseInt(signature.slice(130, 132), 16);
+
+	return encodeFunctionData({
+		abi: [
+			{
+				type: "function",
+				name: "permit",
+				inputs: [
+					{ name: "owner", type: "address" },
+					{ name: "spender", type: "address" },
+					{ name: "value", type: "uint256" },
+					{ name: "deadline", type: "uint256" },
+					{ name: "v", type: "uint8" },
+					{ name: "r", type: "bytes32" },
+					{ name: "s", type: "bytes32" },
+				],
+				outputs: [],
+				stateMutability: "nonpayable",
+			},
+		],
+		functionName: "permit",
+		args: [owner, spender, value, deadline, v, r, s],
+	});
+}
+
+/**
+ * Compute the CoW Protocol appData hash for a JSON document.
+ * The hash is keccak256 of the UTF-8 bytes of the JSON string.
+ */
+export function appDataHash(json: string): Hex {
+	return keccak256(new TextEncoder().encode(json) as Uint8Array);
+}
+
+/**
+ * Register a full appData document with the CoW Protocol orderbook.
+ * Must be called before submitting an order with the corresponding appData hash.
+ */
+export async function registerAppData(hash: Hex, fullAppData: string): Promise<void> {
+	const resp = await fetch(`${CONFIG.orderbookUrl}/api/v1/app_data/${hash}`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ fullAppData }),
+	});
+	if (!resp.ok) {
+		const text = await resp.text();
+		throw new Error(`AppData registration failed (${resp.status}): ${text}`);
+	}
 }
 
 /** Get Uniswap V2 router quote for a swap path. */
