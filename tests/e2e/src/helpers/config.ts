@@ -61,6 +61,26 @@ export const ACCOUNTS = {
 		address: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc" as Address,
 		key: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba" as Hex,
 	},
+	/** Anvil account #6 — secondary sub-solver for order-types tests */
+	subSolver2: {
+		address: "0x976EA74026E726554dB657fA54763abd0C3a0aa9" as Address,
+		key: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e" as Hex,
+	},
+	/** Anvil account #7 — secondary trader for order-types tests */
+	trader2: {
+		address: "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955" as Address,
+		key: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356" as Hex,
+	},
+	/** Anvil account #8 — tertiary sub-solver for edge-case tests */
+	subSolver3: {
+		address: "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f" as Address,
+		key: "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97" as Hex,
+	},
+	/** Anvil account #9 — tertiary trader for edge-case tests */
+	trader3: {
+		address: "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720" as Address,
+		key: "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6" as Hex,
+	},
 };
 
 /** GPv2 EIP-712 domain for order signing. */

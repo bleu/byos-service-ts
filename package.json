@@ -15,7 +15,7 @@
 		"test:redis": "vitest run --project redis",
 		"test:integration": "vitest run --project integration",
 		"test:onchain": "vitest run --project onchain",
-		"test:e2e": "vitest run --project e2e",
+		"test:e2e": "vitest run --project e2e --no-file-parallelism",
 		"test:watch": "vitest",
 		"e2e:up": "./scripts/e2e-stack.sh up -d --build --wait",
 		"e2e:down": "./scripts/e2e-stack.sh down -v",

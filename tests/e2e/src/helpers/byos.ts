@@ -100,6 +100,32 @@ export async function getProposal(
 }
 
 /**
+ * POST directly to the internal /solve endpoint.
+ */
+export async function postSolve(auction: unknown): Promise<{ status: number; body: unknown }> {
+	const resp = await fetch(`${CONFIG.byosInternalUrl}/solve`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(auction),
+	});
+	const body = await resp.json();
+	return { status: resp.status, body };
+}
+
+/**
+ * POST directly to the internal /notify endpoint.
+ */
+export async function postNotify(notification: unknown): Promise<{ status: number; body: unknown }> {
+	const resp = await fetch(`${CONFIG.byosInternalUrl}/notify`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(notification),
+	});
+	const body = await resp.json();
+	return { status: resp.status, body };
+}
+
+/**
  * Poll BYOS for proposal status until it matches one of the target statuses.
  */
 export async function waitForProposalStatus(

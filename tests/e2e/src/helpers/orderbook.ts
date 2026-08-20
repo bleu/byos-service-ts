@@ -222,6 +222,55 @@ export async function depositToEscrow(
 	await publicClient.waitForTransactionReceipt({ hash });
 }
 
+/** Get Uniswap V2 router reverse quote (how much input for a desired output). */
+export async function getAmountsIn(
+	client: PublicClient,
+	amountOut: bigint,
+	path: Address[],
+): Promise<readonly bigint[]> {
+	return client.readContract({
+		address: CONTRACTS.uniswapV2Router,
+		abi: [
+			{
+				type: "function",
+				name: "getAmountsIn",
+				inputs: [
+					{ type: "uint256", name: "amountOut" },
+					{ type: "address[]", name: "path" },
+				],
+				outputs: [{ type: "uint256[]", name: "amounts" }],
+				stateMutability: "view",
+			},
+		],
+		functionName: "getAmountsIn",
+		args: [amountOut, path],
+	});
+}
+
+/**
+ * Poll the orderbook for any trade on the order. For partial fills where
+ * the order stays "open", this checks the trades endpoint instead of status.
+ * Mines blocks to trigger autopilot auction cycles.
+ */
+export async function waitForTrade(
+	orderUid: string,
+	client: PublicClient,
+	maxWaitMs = 120_000,
+): Promise<{ trades: unknown[] }> {
+	const start = Date.now();
+	while (Date.now() - start < maxWaitMs) {
+		const resp = await fetch(`${CONFIG.orderbookUrl}/api/v1/trades?orderUid=${orderUid}`);
+		if (resp.ok) {
+			const trades = (await resp.json()) as unknown[];
+			if (trades.length > 0) return { trades };
+		}
+
+		await mineBlock(client);
+		await new Promise((r) => setTimeout(r, 2000));
+	}
+	throw new Error(`No trades for order ${orderUid} within ${maxWaitMs}ms`);
+}
+
 /** Get Uniswap V2 router quote for a swap path. */
 export async function getAmountsOut(
 	client: PublicClient,
