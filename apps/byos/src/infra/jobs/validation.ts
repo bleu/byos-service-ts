@@ -32,12 +32,13 @@ export interface ProposalValidationConfig {
 
 export function createValidationWorker(connection: Redis, config: ValidationTickConfig): Worker {
 	return new Worker(
-		"byos:validation",
+		"validation",
 		async () => {
 			await runValidationTick(config);
 		},
 		{
 			connection,
+			prefix: "byos",
 			concurrency: 1,
 		},
 	);
@@ -49,12 +50,13 @@ export function createProposalValidationWorker(
 	config: ProposalValidationConfig,
 ): Worker {
 	return new Worker(
-		"byos:validate-proposal",
+		"validate-proposal",
 		async (job) => {
 			await runProposalValidation(config, (job.data as { proposalId: number }).proposalId);
 		},
 		{
 			connection,
+			prefix: "byos",
 			concurrency: VALIDATION_CONCURRENCY,
 		},
 	);

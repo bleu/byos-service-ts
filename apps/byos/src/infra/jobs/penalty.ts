@@ -38,7 +38,7 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 	const bufferAttempts = new Map<number, number>();
 
 	return new Worker(
-		"byos:penalty",
+		"penalty",
 		async () => {
 			await runRevertDebits(config, revertAttempts);
 			await runNonSettlementDebits(config, nonSettlementAttempts);
@@ -46,6 +46,7 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 		},
 		{
 			connection,
+			prefix: "byos",
 			concurrency: 1,
 		},
 	);
