@@ -81,8 +81,9 @@ export function createBalanceRefreshWorker(
 	connection: Redis,
 	config: BalanceRefreshConfig,
 ): Worker {
-	return new Worker("byos:balance-refresh", async () => await runBalanceRefresh(config), {
+	return new Worker("balance-refresh", async () => await runBalanceRefresh(config), {
 		connection,
+		prefix: "byos",
 		concurrency: 1,
 	});
 }
