@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.0.0
         version: 2.5.7
+      dotenv:
+        specifier: ^16.0.0
+        version: 16.6.1
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(postcss@8.5.25)(typescript@5.9.3)
