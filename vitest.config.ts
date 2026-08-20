@@ -25,8 +25,8 @@ export default defineConfig({
 			},
 			{
 				test: {
-					name: "e2e",
-					root: "tests/e2e",
+					name: "integration",
+					root: "tests/integration",
 					include: ["**/*.test.ts"],
 				},
 			},
@@ -40,8 +40,8 @@ export default defineConfig({
 			},
 			{
 				test: {
-					name: "full-stack",
-					root: "tests/full-stack",
+					name: "e2e",
+					root: "tests/e2e",
 					include: ["**/*.test.ts"],
 					testTimeout: 120_000,
 					hookTimeout: 60_000,

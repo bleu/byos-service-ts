@@ -19,7 +19,8 @@ CONTEXT.md              Domain language and architecture map — read first
 apps/byos/              The BYOS service (proposal API, solver engine, workers)
 apps/subsolver/         Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
-tests/e2e/              End-to-end tests
+tests/integration/      API integration tests (in-process, mocked blockchain)
+tests/e2e/              End-to-end tests (Anvil + full CoW stack)
 docs/adr/               Architecture decision records
 docs/shared/            Shared BYOS specification (submodule → bleu/byos-docs)
 apps/byos/openapi.yml   Proposal API spec
@@ -109,10 +110,11 @@ Five tiers, one command each. Everything but the unit tier needs `docker compose
 | Unit | beside the source, in `__tests__/` | `pnpm test` | nothing |
 | DB | `apps/byos/src/**/*.db.test.ts` | `pnpm test:db` | Postgres |
 | Redis | `apps/byos/src/**/*.redis.test.ts` | `pnpm test:redis` | Redis |
-| Service-level / e2e | `tests/e2e/` | `pnpm test:e2e` | Postgres |
+| Integration | `tests/integration/` | `pnpm test:integration` | Postgres |
 | On-chain | `tests/onchain/` | `pnpm test:onchain` | anvil on PATH, `RUN_ONCHAIN_TESTS=1` |
+| E2E | `tests/e2e/` | `pnpm test:e2e` | `pnpm e2e:up` (full Docker stack) |
 
-The Redis tier shares one Redis, so each test namespaces its keys and sweeps them afterwards. The e2e tier builds both Hono apps in-process — it does not need a running service. Every DB-backed test gets its own database; `apps/byos/test/setup.ts` creates it and sweeps stale ones. The on-chain tier self-skips without `RUN_ONCHAIN_TESTS=1`, which is why CI does not run it.
+The Redis tier shares one Redis, so each test namespaces its keys and sweeps them afterwards. The integration tier builds both Hono apps in-process — it does not need a running service. Every DB-backed test gets its own database; `apps/byos/test/setup.ts` creates it and sweeps stale ones. The on-chain tier self-skips without `RUN_ONCHAIN_TESTS=1`, which is why CI does not run it. The e2e tier requires the full CoW Protocol stack running in Docker (`pnpm e2e:up`).
 
 ### Wire format
 

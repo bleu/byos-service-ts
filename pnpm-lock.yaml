@@ -122,6 +122,24 @@ importers:
 
   tests/e2e:
     devDependencies:
+      '@byos/common':
+        specifier: workspace:*
+        version: link:../../packages/common
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      viem:
+        specifier: ^2.0.0
+        version: 2.55.11(typescript@5.9.3)(zod@3.25.76)
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)
+
+  tests/integration:
+    devDependencies:
       '@byos/byos':
         specifier: workspace:*
         version: link:../../apps/byos
@@ -140,24 +158,6 @@ importers:
       postgres:
         specifier: ^3.4.0
         version: 3.4.9
-      typescript:
-        specifier: ^5.8.0
-        version: 5.9.3
-      viem:
-        specifier: ^2.0.0
-        version: 2.55.11(typescript@5.9.3)(zod@3.25.76)
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.1)
-
-  tests/full-stack:
-    devDependencies:
-      '@byos/common':
-        specifier: workspace:*
-        version: link:../../packages/common
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.20.1
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

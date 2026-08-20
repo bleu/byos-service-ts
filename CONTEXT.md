@@ -11,7 +11,8 @@ Domain vocabulary and the normative specification are in `docs/shared/` (a Git s
 | `apps/byos` | The BYOS service: proposal API, solver engine, background workers (validation, retention, penalty, audit) |
 | `apps/subsolver` | Reference sub-solver client and e2e-test counterpart |
 | `packages/common` | Shared contract ABIs, EIP-712 encoding, DTOs, trampoline encoding |
-| `tests/e2e` | End-to-end tests (in-process, no running service needed) |
+| `tests/integration` | API integration tests (in-process, no running service needed) |
+| `tests/e2e` | End-to-end tests (Anvil + full CoW Protocol stack in Docker) |
 
 Process topology: **one process, two listeners** — a public port for `/proposals` and a firewalled internal port for `/solve` and `/notify`, sharing the Postgres proposal store.
 
