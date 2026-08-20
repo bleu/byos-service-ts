@@ -4,12 +4,8 @@
 	"private": true,
 	"type": "module",
 	"devDependencies": {
-		"@byos/byos": "workspace:*",
 		"@byos/common": "workspace:*",
 		"@types/node": "^22.0.0",
-		"drizzle-orm": "^0.40.0",
-		"hono": "^4.0.0",
-		"postgres": "^3.4.0",
 		"typescript": "^5.8.0",
 		"viem": "^2.0.0",
 		"vitest": "^3.0.0"

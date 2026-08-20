@@ -31,7 +31,7 @@ All three are pnpm workspace members via `pnpm-workspace.yaml`.
 
 Root `package.json` scripts orchestrate workspace-wide operations:
 - `pnpm build` — builds all packages (tsc) then apps (tsup) in dependency order
-- `pnpm test` — Vitest with workspace projects (unit, db, e2e)
+- `pnpm test` — Vitest with workspace projects (unit, db, integration, e2e)
 - `pnpm lint` — Biome check
 - `pnpm typecheck` — `tsc -b` across all project references
 

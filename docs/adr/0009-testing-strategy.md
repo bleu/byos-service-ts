@@ -8,7 +8,7 @@ The service needs multi-tier test coverage: fast unit tests, database-backed int
 
 ## Decision
 
-**Vitest** with three workspace projects: `unit`, `db`, `e2e`.
+**Vitest** with workspace projects: `unit`, `db`, `integration`, `e2e`.
 
 ### Test tiers
 
@@ -16,7 +16,8 @@ The service needs multi-tier test coverage: fast unit tests, database-backed int
 |------|---------------|--------------|----------|---------|
 | Unit | `unit` | `*.test.ts` (excludes `*.db.test.ts`) | Nothing | `pnpm test` |
 | DB | `db` | `*.db.test.ts` | Postgres | `pnpm test:db` |
-| E2E | `e2e` | `tests/e2e/src/*.test.ts` | Postgres | `pnpm test` (included in default) |
+| Integration | `integration` | `tests/integration/src/*.test.ts` | Postgres | `pnpm test:integration` |
+| E2E | `e2e` | `tests/e2e/src/*.test.ts` | Full Docker stack (`pnpm e2e:up`) | `pnpm test:e2e` |
 
 ### Database isolation
 
@@ -25,9 +26,9 @@ Each DB test gets a **unique Postgres database** (`byos_test_{pid}_{timestamp}_{
 - Tests can run in parallel safely
 - Stale databases older than 3 hours are swept automatically
 
-### E2E test approach
+### Integration test approach
 
-E2e tests use **Hono's `app.request()` test client** with a real Postgres database but no HTTP server binding. The service is tested in-process:
+Integration tests use **Hono's `app.request()` test client** with a real Postgres database but no HTTP server binding. The service is tested in-process:
 - `createTestApp()` builds an AppContext with AcceptAll validator
 - Proposals are submitted, polled, and cancelled through the Hono apps
 - DB state is seeded directly for /solve and /notify tests
@@ -44,5 +45,6 @@ This avoids the overhead of starting/stopping HTTP servers and manages port conf
 
 The `test.yml` workflow runs all three tiers:
 1. `pnpm build` (compilation check)
-2. `pnpm test` (unit + e2e, Postgres available via service container)
+2. `pnpm test` (unit tests)
 3. `pnpm test:db` (DB-tier tests)
+4. `pnpm test:integration` (API integration tests, Postgres via service container)
