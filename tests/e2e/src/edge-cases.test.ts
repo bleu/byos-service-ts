@@ -120,7 +120,7 @@ describe("create proposal edge cases", () => {
 				interactions: [],
 				validUntil: String(Math.floor(Date.now() / 1000) + 200),
 				nonce: "1",
-				signature: "0x" + "ab".repeat(65),
+				signature: `0x${"ab".repeat(65)}`,
 			}),
 		});
 		expect(resp.status).toBe(400);

@@ -109,7 +109,7 @@ describe("proposal lifecycle", () => {
 
 	it("unknown orderUid returns empty list", async () => {
 		const sig = await readAuthHeader();
-		const resp = await app.publicApp.request("/proposals/0x" + "ff".repeat(56), {
+		const resp = await app.publicApp.request(`/proposals/0x${"ff".repeat(56)}`, {
 			headers: { "X-Signature": sig },
 		});
 		expect(resp.status).toBe(200);

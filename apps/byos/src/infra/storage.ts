@@ -810,7 +810,7 @@ export async function insertBufferEntry(
 			nativeTokenAmount: entry.nativeTokenAmount,
 		})
 		.returning({ id: bufferEntries.id });
-	return result[0]!.id;
+	return result[0]?.id;
 }
 
 /** Returns all subsolver addresses that have uncleared buffer entries. */
