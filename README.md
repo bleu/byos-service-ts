@@ -12,6 +12,7 @@ See [`docs/shared/`](docs/shared/) for the normative BYOS specification, domain 
 | `apps/subsolver` | Reference sub-solver (Uniswap V2 routing, orderbook polling) | Complete |
 | `packages/common` | Shared types: EIP-712, ABIs, DTOs, settlement encoding | Complete |
 | `tests/e2e` | API integration tests (proposal lifecycle, /solve, /notify) | Complete |
+| `tests/full-stack` | Full-stack e2e tests (order → proposal → settlement on Anvil) | Complete |
 | `docs/adr` | Architecture decision records (14 ADRs) | Complete |
 | `docs/reference` | CoW Protocol background (slashing, auctions, CIPs) | Complete |
 
@@ -66,6 +67,32 @@ The service starts two HTTP listeners:
 | `pnpm format` | Format code with Biome |
 | `pnpm lint:openapi` | Validate OpenAPI spec |
 | `pnpm dev` | Start Postgres + run byos in watch mode |
+| `pnpm e2e:up` | Start the full e2e stack (Anvil + CoW services + BYOS) |
+| `pnpm e2e:down` | Tear down the e2e stack and remove volumes |
+| `pnpm test:full-stack` | Run full-stack e2e tests (requires `e2e:up` first) |
+
+### Full-stack e2e tests
+
+The full-stack tests exercise the complete round-trip: GPv2 order submission, BYOS proposal, autopilot auction, driver settlement, and on-chain execution against a local Anvil fork with the full CoW Protocol stack running in Docker.
+
+```bash
+# Start the stack (builds Docker images, deploys contracts, waits for healthy)
+pnpm e2e:up
+
+# Run the tests
+pnpm test:full-stack
+
+# Tear down when done (removes containers + volumes)
+pnpm e2e:down
+```
+
+To reset the stack (e.g. after contract changes):
+
+```bash
+pnpm e2e:down && pnpm e2e:up
+```
+
+The e2e stack is defined in [`docker-compose.e2e.yml`](docker-compose.e2e.yml) (BYOS-specific services) layered on top of the [`offline-mode`](https://github.com/bleu/cow-offline-mode) submodule (Anvil chain, orderbook, autopilot, driver). Contract addresses are baked into the Anvil state via [`offline-mode/scripts/byos/deploy-byos-contracts.sh`](offline-mode/scripts/byos/deploy-byos-contracts.sh).
 
 ## Technology stack
 
