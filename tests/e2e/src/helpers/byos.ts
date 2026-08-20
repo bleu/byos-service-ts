@@ -115,7 +115,9 @@ export async function postSolve(auction: unknown): Promise<{ status: number; bod
 /**
  * POST directly to the internal /notify endpoint.
  */
-export async function postNotify(notification: unknown): Promise<{ status: number; body: unknown }> {
+export async function postNotify(
+	notification: unknown,
+): Promise<{ status: number; body: unknown }> {
 	const resp = await fetch(`${CONFIG.byosInternalUrl}/notify`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

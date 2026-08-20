@@ -26,9 +26,9 @@ import {
 	depositToEscrow,
 	ensureTrampolineDeployed,
 	fundToken,
+	type GpvOrder,
 	getAmountsIn,
 	getAmountsOut,
-	type GpvOrder,
 	signAndSubmitOrder,
 	tokenBalance,
 	waitForTrade,
@@ -246,7 +246,12 @@ describe("order types", () => {
 		const usdcBefore = await tokenBalance(publicClient, sellToken, ACCOUNTS.trader.address);
 
 		// 5. Build interactions for 50% fill and submit proposal
-		const interactions = buildSellInteractions(sellToken, buyToken, proposalSellAmount, minBuyAmount);
+		const interactions = buildSellInteractions(
+			sellToken,
+			buyToken,
+			proposalSellAmount,
+			minBuyAmount,
+		);
 
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
