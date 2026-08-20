@@ -3,12 +3,25 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import type { BalanceCache } from "../../domain/balance-cache.js";
+import { unknownBalances } from "../../domain/balance-cache.js";
+import type { RateLimiter, TierParams } from "../../domain/rate-limit.js";
+import { allowAll } from "../../domain/rate-limit.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import { errorHandler } from "./error.js";
-import { bearerAuth } from "./middleware.js";
+import { bearerAuth, ipRateLimit } from "./middleware.js";
 import { createNotifyRoute } from "./notify.js";
 import { createPublicRoutes } from "./routes.js";
 import { createSolveRoute } from "./solve.js";
+
+/** Rate-limit knobs, all operational tuning parameters (ADR-0015). */
+export interface RateLimitSettings {
+	windowSecs: number;
+	ipPerWindow: number;
+	tier: TierParams;
+	/** Escrow floor below which a known signer is rejected synchronously. */
+	floorWei: bigint;
+}
 
 export interface AppContext {
 	db: Db;
@@ -22,10 +35,44 @@ export interface AppContext {
 	logger?: Logger;
 }
 
+/**
+ * What the public listener needs on top of the shared context. The internal
+ * listener is driver-facing and never rate limited, so it does not carry these.
+ */
+export interface PublicAppContext extends AppContext {
+	/** Defaults to the allowAll stub, so tests need no Redis. */
+	rateLimiter?: RateLimiter;
+	/** Defaults to the unknownBalances stub, admitting everyone at the
+	 * lowest tier. */
+	balances?: BalanceCache;
+	/**
+	 * Required rather than defaulted. The Zod schema in config.ts owns these
+	 * numbers, and a second copy lived here until it drifted from the schema on
+	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
+	 */
+	rateLimits: RateLimitSettings;
+}
+
 /** Creates the public Hono app (sub-solver facing, port 9585). */
-export function createPublicApp(ctx: AppContext): Hono {
+export function createPublicApp(ctx: PublicAppContext): Hono {
 	const app = new Hono();
 	app.onError(errorHandler);
+
+	const limiter = ctx.rateLimiter ?? allowAll;
+	const limits = ctx.rateLimits;
+
+	// Layer 1b only. The primary per-IP limit lives at the Cloudflare edge,
+	// and never touches the internal listener, which is latency-critical.
+	app.use(
+		"*",
+		ipRateLimit({
+			limiter,
+			limit: limits.ipPerWindow,
+			windowSecs: limits.windowSecs,
+			exemptPaths: ["/healthz"],
+			logger: ctx.logger,
+		}),
+	);
 
 	const routes = createPublicRoutes({
 		db: ctx.db,
@@ -34,6 +81,14 @@ export function createPublicApp(ctx: AppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
+		signerLimit: {
+			limiter,
+			balances: ctx.balances ?? unknownBalances,
+			tier: limits.tier,
+			windowSecs: limits.windowSecs,
+			floorWei: limits.floorWei,
+			logger: ctx.logger,
+		},
 	});
 
 	app.route("/", routes);

@@ -8,13 +8,19 @@ export default defineConfig({
 				test: {
 					name: "unit",
 					include: ["apps/*/src/**/*.test.ts", "packages/*/src/**/*.test.ts"],
-					exclude: ["**/*.db.test.ts"],
+					exclude: ["**/*.db.test.ts", "**/*.redis.test.ts"],
 				},
 			},
 			{
 				test: {
 					name: "db",
 					include: ["apps/*/src/**/*.db.test.ts"],
+				},
+			},
+			{
+				test: {
+					name: "redis",
+					include: ["apps/*/src/**/*.redis.test.ts"],
 				},
 			},
 			{

@@ -7,6 +7,7 @@ import { parseConfig } from "./config.js";
 import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
+import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import {
@@ -43,6 +44,10 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
+		logger,
+		rateLimiter: ctx.rateLimiter,
+		balances: ctx.balances,
+		rateLimits: ctx.rateLimits,
 	});
 
 	const internalApp = createInternalApp({
@@ -93,12 +98,16 @@ async function main() {
 		logger: logger.child({ worker: "retention" }),
 	});
 
+	// Only with RPC — there is nothing to refresh balances from otherwise.
+	const balanceRefreshWorker = ctx.balanceRefresh
+		? createBalanceRefreshWorker(ctx.redis, ctx.balanceRefresh)
+		: null;
+
 	const penaltyWorker = ctx.operator
 		? createPenaltyWorker(ctx.redis, {
 				db: ctx.db,
 				operator: ctx.operator,
-				// operator implies RPC_URL, which the schema couples to MIN_COLLATERAL
-				cL: BigInt(config.MIN_COLLATERAL as string),
+				cL: ctx.minCollateralWei,
 				onAuditEvent: ctx.onAuditEvent,
 				logger: logger.child({ worker: "penalty" }),
 			})
@@ -109,6 +118,7 @@ async function main() {
 		validationWorker,
 		proposalValidationWorker,
 		retentionWorker,
+		balanceRefreshWorker,
 		penaltyWorker,
 	].filter(Boolean) as import("bullmq").Worker[];
 
@@ -155,10 +165,11 @@ async function main() {
 			ctx.queues.retention.close(),
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
+			ctx.queues.balanceRefresh.close(),
 		]);
 
 		// Close Redis
-		await ctx.redis.quit();
+		await Promise.all([ctx.redis.quit(), ctx.requestRedis.quit()]);
 		logger.info("redis disconnected");
 
 		// Close DB

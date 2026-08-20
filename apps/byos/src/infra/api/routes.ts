@@ -16,7 +16,7 @@ import {
 	proposalToListResponse,
 } from "./dto.js";
 import { AppError, Kind } from "./error.js";
-import { extractSignature } from "./middleware.js";
+import { enforceSignerLimit, extractSignature, type SignerLimitConfig } from "./middleware.js";
 
 export interface RoutesConfig {
 	db: Db;
@@ -25,6 +25,7 @@ export interface RoutesConfig {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
+	signerLimit: SignerLimitConfig;
 }
 
 export function createPublicRoutes(config: RoutesConfig) {
@@ -81,6 +82,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
+		// The floor gate is a write-side control: a sub-solver whose withdrawal
+		// is pending must still be able to read and cancel what it has live.
+		await enforceSignerLimit(config.signerLimit, subSolver, { enforceEscrowFloor: true });
+
 		// Validate expiry
 		const now = BigInt(Math.floor(Date.now() / 1000));
 		if (parsed.validUntil <= now) {
@@ -135,6 +140,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
+		await enforceSignerLimit(config.signerLimit, reader);
+
 		const result = await store.getForOwner(config.db, id, reader);
 		if ("kind" in result) {
 			// notFound or notOwner → 404 (no existence oracle, ADR-0011)
@@ -154,6 +161,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
+		await enforceSignerLimit(config.signerLimit, reader);
+
 		const proposals = await store.listBySubSolver(config.db, reader);
 		return c.json(proposalToListResponse(proposals));
 	});
@@ -169,6 +178,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
 
+		await enforceSignerLimit(config.signerLimit, reader);
+
 		const proposals = await store.listByOrderUidForOwner(config.db, orderUid, reader);
 		return c.json(proposalToListResponse(proposals));
 	});
@@ -182,6 +193,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 		} catch {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
+
+		await enforceSignerLimit(config.signerLimit, reader);
 
 		const entries = await store.unclearedBufferEntries(config.db, reader);
 		let outstandingBalance = 0n;
@@ -220,6 +233,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 		} catch {
 			throw new AppError(Kind.SignatureRecoveryFailed);
 		}
+
+		await enforceSignerLimit(config.signerLimit, canceller);
 
 		const result = await store.cancel(config.db, id, canceller);
 		if ("kind" in result) {

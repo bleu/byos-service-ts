@@ -8,6 +8,8 @@ export const Kind = {
 	ProposalNotFound: "ProposalNotFound",
 	ProposalNotCancellable: "ProposalNotCancellable",
 	BadRequest: "BadRequest",
+	RateLimited: "RateLimited",
+	ServiceUnavailable: "ServiceUnavailable",
 	Internal: "Internal",
 } as const;
 

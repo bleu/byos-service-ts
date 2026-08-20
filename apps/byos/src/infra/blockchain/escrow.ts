@@ -55,3 +55,33 @@ export class EscrowValidator implements ValidateProposal {
 		}
 	}
 }
+
+/**
+ * Batched `effectiveBalance` read for the request-path balance cache.
+ *
+ * A per-address failure comes back as `null`, not `0n`: the refresh job
+ * files what it is told, and a zero would demote a funded sub-solver to the
+ * negative set on nothing worse than a dropped RPC call.
+ */
+export function createEscrowBalanceReader(
+	publicClient: PublicClient,
+	escrowAddress: Address,
+): (addresses: Address[]) => Promise<(bigint | null)[]> {
+	return async (addresses) => {
+		const results = await publicClient.multicall({
+			contracts: addresses.map((address) => ({
+				address: escrowAddress,
+				abi: EscrowAbi,
+				functionName: "effectiveBalance",
+				args: [address],
+			})),
+			// One request per call to this function, so BALANCE_REFRESH_BATCH_SIZE
+			// is the real batch. viem otherwise re-chunks by encoded calldata
+			// size (1024 bytes by default), which quietly splits a 50-address
+			// batch into two round trips.
+			batchSize: 0,
+		});
+
+		return results.map((r) => (r.status === "success" ? (r.result as bigint) : null));
+	};
+}

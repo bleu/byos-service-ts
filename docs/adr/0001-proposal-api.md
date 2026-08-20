@@ -81,3 +81,4 @@ Contract-side alternatives (BYOS-unilateral execution, amounts-only signing with
 - **The signing schema is an external dependency.** The `ProposalData` struct, typehash, and domain are fixed by the contracts repo; signature code in this repo must be tested against contract-provided vectors, not a local re-derivation.
 - **Audit trail becomes an operational dependency for dispute resolution.** If the audit log is lost or corrupted, BYOS cannot prove attribution for Track B claims and must absorb the cost.
 - **Rate limiting by escrow balance creates a pay-to-play throughput gradient.** Accepted — consistent with the collateral-gated permission model.
+- **Escrow balance is consulted inline, from cache, for the rate tier and floor gate** ([ADR-0015](0015-rate-limiting.md)). No RPC enters the request path: an unknown address is admitted at the lowest tier, and the authoritative read stays in the background validator.
