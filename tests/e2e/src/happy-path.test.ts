@@ -195,10 +195,10 @@ describe("happy path", () => {
 		expect(orderUid).toBeDefined();
 		expect(orderUid.length).toBeGreaterThan(10);
 
-		// 6. Build proposal interactions (Uniswap V2 swap)
+		// 5. Build proposal interactions (Uniswap V2 swap)
 		const interactions = buildUniswapInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
 
-		// 7. Submit BYOS proposal
+		// 6. Submit BYOS proposal
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
