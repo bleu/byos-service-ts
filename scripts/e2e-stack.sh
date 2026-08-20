@@ -53,7 +53,16 @@ compose() {
 # If the command is "up", append the service list so we only build/start what's needed.
 # For other commands (down, logs, ps, etc.), pass through as-is.
 if [ "${1:-}" = "up" ]; then
-  compose "$@" "${E2E_SERVICES[@]}"
+  # db-migrations is a one-shot Flyway container that exits after running.
+  # --wait treats any exited container (even exit 0) as a failure, so we
+  # exclude it from the wait and let it run to completion on its own.
+  compose "$@" "${E2E_SERVICES[@]}" || {
+    # Tolerate exit code 1 when db-migrations exited successfully
+    if docker inspect offline-mode-db-migrations-1 --format='{{.State.ExitCode}}' 2>/dev/null | grep -q '^0$'; then
+      exit 0
+    fi
+    exit 1
+  }
 else
   compose "$@"
 fi
