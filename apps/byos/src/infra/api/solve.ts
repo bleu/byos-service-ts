@@ -232,6 +232,21 @@ function buildSolution(
 		fee: cut.amount.toString(),
 	};
 
+	const toSolutionInteraction = (i: {
+		target: string;
+		value: string;
+		callData: string;
+	}): SolutionInteraction => ({
+		kind: "custom",
+		target: i.target,
+		value: i.value,
+		callData: i.callData,
+		internalize: false,
+		allowances: [],
+		inputs: [],
+		outputs: [],
+	});
+
 	return {
 		id,
 		prices: {
@@ -239,9 +254,9 @@ function buildSolution(
 			[order.buyToken]: proposal.sellAmount.toString(),
 		},
 		trades: [trade],
-		pre_interactions: [],
+		pre_interactions: order.preInteractions.map(toSolutionInteraction),
 		interactions,
-		post_interactions: [],
+		post_interactions: order.postInteractions.map(toSolutionInteraction),
 		gas: Number(effectiveGas(gasUsed)),
 	};
 }
