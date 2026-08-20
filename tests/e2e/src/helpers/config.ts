@@ -9,18 +9,28 @@ export const CONFIG = {
 	chainId: Number(process.env.CHAIN_ID ?? "1"),
 };
 
-/** Deterministic contract addresses from the baked anvil state (COW-1237). */
+/**
+ * Contract addresses from the baked Anvil state.
+ *
+ * ESCROW_ADDRESS and TRAMPOLINE_FACTORY are written to .env.e2e by
+ * e2e-stack.sh and can change when the Escrow artifact or constructor
+ * args change. The other addresses are fixed CoW Protocol deployments.
+ */
 export const CONTRACTS = {
 	gpv2Settlement: "0x9008D19f58AAbD9eD0D60971565AA8510560ab41" as Address,
 	gpv2Authenticator: "0x2c4c28DDBdAc9C5E7055b4C863b72eA0149D8aFE" as Address,
 	vaultRelayer: "0xC92E8bdf79f0507f65a392b0ab4667716BFE0110" as Address,
-	escrow: "0x37a6b94644c08bcC3DEEd3Dde54F0DB14A169F81" as Address,
-	trampolineFactory: "0xA12CcDA98C88C23413dA99BeA1E5c684839F02a5" as Address,
+	escrow: (process.env.ESCROW_ADDRESS ?? missing("ESCROW_ADDRESS")) as Address,
+	trampolineFactory: (process.env.TRAMPOLINE_FACTORY ?? missing("TRAMPOLINE_FACTORY")) as Address,
 	weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as Address,
 	usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address,
 	dai: "0x6B175474E89094C44Da98b954EedeAC495271d0F" as Address,
 	uniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D" as Address,
 };
+
+function missing(name: string): never {
+	throw new Error(`${name} not set. Run "pnpm e2e:up" to generate .env.e2e.`);
+}
 
 /**
  * Account map from the e2e plan doc. Addresses and keys are from Anvil's
