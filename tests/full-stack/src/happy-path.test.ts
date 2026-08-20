@@ -9,7 +9,14 @@
  */
 import type { ContractInteraction } from "@byos/common";
 import type { Address, Hex } from "viem";
-import { createPublicClient, createWalletClient, defineChain, encodeFunctionData, http, pad } from "viem";
+import {
+	createPublicClient,
+	createWalletClient,
+	defineChain,
+	encodeFunctionData,
+	http,
+	pad,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";

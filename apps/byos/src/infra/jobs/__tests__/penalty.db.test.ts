@@ -403,9 +403,9 @@ describe("buffer debits", () => {
 		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
-		expect(entry!.gap).toBe("50"); // maxBuy - delivered
-		expect(entry!.delta).toBe("950");
-		expect(BigInt(entry!.nativeTokenAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
+		expect(entry?.gap).toBe("50"); // maxBuy - delivered
+		expect(entry?.delta).toBe("950");
+		expect(BigInt(entry?.nativeTokenAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
 	});
 
 	it("records a negative entry for over-delivery", async () => {
@@ -423,8 +423,8 @@ describe("buffer debits", () => {
 		const entries = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
-		expect(entry!.gap).toBe("-50");
-		expect(BigInt(entry!.nativeTokenAmount)).toBe(-50n);
+		expect(entry?.gap).toBe("-50");
+		expect(BigInt(entry?.nativeTokenAmount)).toBe(-50n);
 	});
 
 	it("does not create duplicate entries on repeated ticks", async () => {

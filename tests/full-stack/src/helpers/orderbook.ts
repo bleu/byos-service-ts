@@ -57,7 +57,7 @@ export async function signAndSubmitOrder(
 		partiallyFillable: order.partiallyFillable,
 		sellTokenBalance: order.sellTokenBalance,
 		buyTokenBalance: order.buyTokenBalance,
-		from: walletClient.account!.address,
+		from: walletClient.account?.address,
 		signature,
 		signingScheme: "eip712",
 	};
