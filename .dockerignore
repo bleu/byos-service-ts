@@ -1,0 +1,11 @@
+.git
+offline-mode
+tests
+docs
+config
+scripts
+*.md
+.env*
+.gitmodules
+biome.json
+vitest.config.ts

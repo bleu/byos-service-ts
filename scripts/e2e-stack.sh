@@ -48,8 +48,11 @@ E2E_SERVICES=(
   byos-ts
 )
 
+PROJECT_NAME="byos-e2e"
+
 compose() {
   docker compose \
+    -p "$PROJECT_NAME" \
     -f "$REPO_ROOT/offline-mode/docker-compose.yml" \
     -f "$REPO_ROOT/docker-compose.e2e.yml" \
     "$@"
@@ -94,7 +97,7 @@ if [ "${1:-}" = "up" ]; then
   # --wait treats any exited container (even exit 0) as a failure, so we
   # tolerate that specific case.
   compose "$@" "${E2E_SERVICES[@]}" || {
-    if docker inspect offline-mode-db-migrations-1 --format='{{.State.ExitCode}}' 2>/dev/null | grep -q '^0$'; then
+    if docker inspect "${PROJECT_NAME}-db-migrations-1" --format='{{.State.ExitCode}}' 2>/dev/null | grep -q '^0$'; then
       exit 0
     fi
     exit 1
