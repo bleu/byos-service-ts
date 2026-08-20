@@ -78,8 +78,11 @@ export async function signAndSubmitOrder(
 }
 
 /**
- * Poll the orderbook for order status until fulfilled, expired, or timeout.
+ * Poll the orderbook order status until fulfilled, expired, or timeout.
  * Mines blocks to trigger autopilot auction cycles.
+ *
+ * Use this when you care about the order-level status ("fulfilled").
+ * Use waitForTrade when you need to count individual trade events (e.g. partial fills).
  */
 export async function waitForOrderExecution(
 	orderUid: string,
@@ -253,6 +256,13 @@ export async function getAmountsIn(
  * Mines blocks to trigger autopilot auction cycles.
  *
  * @param minCount - wait until at least this many trades exist (default 1)
+ */
+/**
+ * Poll the orderbook trades endpoint until at least minCount trades exist.
+ * Mines blocks to trigger autopilot auction cycles.
+ *
+ * Use this for partial fills where a single order produces multiple trades.
+ * Use waitForOrderExecution when a single fulfilled status is enough.
  */
 export async function waitForTrade(
 	orderUid: string,

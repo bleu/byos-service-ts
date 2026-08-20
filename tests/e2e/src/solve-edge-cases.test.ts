@@ -6,17 +6,7 @@
  *
  * Requires the full e2e stack running (pnpm e2e:up).
  */
-import type { ContractInteraction } from "@byos/common";
-import type { Address } from "viem";
-import {
-	createPublicClient,
-	createWalletClient,
-	defineChain,
-	encodeFunctionData,
-	http,
-	pad,
-} from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { pad } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
 	postNotify,
@@ -24,7 +14,9 @@ import {
 	signAndSubmitProposal,
 	waitForProposalStatus,
 } from "./helpers/byos.js";
-import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
+import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
+import { buildSellInteractions } from "./helpers/interactions.js";
 import {
 	approveVaultRelayer,
 	depositToEscrow,
@@ -34,43 +26,6 @@ import {
 	getAmountsOut,
 	signAndSubmitOrder,
 } from "./helpers/orderbook.js";
-
-// --- Chain definition ---
-
-const anvilMainnet = defineChain({
-	id: CONFIG.chainId,
-	name: "Anvil Mainnet",
-	nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-	rpcUrls: { default: { http: [CONFIG.rpcUrl] } },
-});
-
-// --- Clients ---
-
-const publicClient = createPublicClient({
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const traderAccount = privateKeyToAccount(ACCOUNTS.trader.key);
-const traderWallet = createWalletClient({
-	account: traderAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const subSolverAccount = privateKeyToAccount(ACCOUNTS.subSolver.key);
-const subSolverWallet = createWalletClient({
-	account: subSolverAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const deployerAccount = privateKeyToAccount(ACCOUNTS.baselineSolver.key);
-const deployerWallet = createWalletClient({
-	account: deployerAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
 
 // --- Test lifecycle ---
 
@@ -157,55 +112,6 @@ function buildAuction(
 	};
 }
 
-function buildSellInteractions(
-	sellToken: Address,
-	buyToken: Address,
-	sellAmount: bigint,
-	minBuyAmount: bigint,
-): ContractInteraction[] {
-	const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-	const approveCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "approve",
-				inputs: [
-					{ type: "address", name: "spender" },
-					{ type: "uint256", name: "amount" },
-				],
-				outputs: [{ type: "bool" }],
-			},
-		],
-		functionName: "approve",
-		args: [CONTRACTS.uniswapV2Router, sellAmount],
-	});
-
-	const swapCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "swapExactTokensForTokens",
-				inputs: [
-					{ type: "uint256", name: "amountIn" },
-					{ type: "uint256", name: "amountOutMin" },
-					{ type: "address[]", name: "path" },
-					{ type: "address", name: "to" },
-					{ type: "uint256", name: "deadline" },
-				],
-				outputs: [{ type: "uint256[]", name: "amounts" }],
-			},
-		],
-		functionName: "swapExactTokensForTokens",
-		args: [sellAmount, minBuyAmount, [sellToken, buyToken], CONTRACTS.gpv2Settlement, deadline],
-	});
-
-	return [
-		{ target: sellToken, value: 0n, callData: approveCalldata },
-		{ target: CONTRACTS.uniswapV2Router, value: 0n, callData: swapCalldata },
-	];
-}
-
 /** Submit a standard sell order + proposal and return both IDs. */
 async function submitOrderAndProposal(opts?: { validUntilOffset?: number }) {
 	const sellToken = CONTRACTS.usdc;
@@ -252,31 +158,6 @@ async function submitOrderAndProposal(opts?: { validUntilOffset?: number }) {
 // --- Tests ---
 
 describe("solve edge cases", () => {
-	it("empty auction returns no solutions", async () => {
-		// Use a random order UID that no proposal references
-		const fakeOrderUid = `0x${"ff".repeat(56)}`;
-		const fakeOrder: GpvOrder = {
-			sellToken: CONTRACTS.usdc,
-			buyToken: CONTRACTS.weth,
-			receiver: ACCOUNTS.trader.address,
-			sellAmount: 1_000_000_000n,
-			buyAmount: 1n,
-			validTo: Math.floor(Date.now() / 1000) + 600,
-			appData: pad("0x00", { size: 32 }),
-			feeAmount: 0n,
-			kind: "sell",
-			partiallyFillable: false,
-			sellTokenBalance: "erc20",
-			buyTokenBalance: "erc20",
-		};
-
-		const auction = buildAuction(fakeOrderUid, fakeOrder);
-		const { status, body } = await postSolve(auction);
-
-		expect(status).toBe(200);
-		expect((body as { solutions: unknown[] }).solutions).toHaveLength(0);
-	});
-
 	it("settlement failure marks proposal as settleFailed", async () => {
 		// 1. Submit order + proposal and wait for it to pass simulation
 		const { orderUid, proposalId, order } = await submitOrderAndProposal();

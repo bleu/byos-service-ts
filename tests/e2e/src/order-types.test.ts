@@ -7,20 +7,12 @@
  *
  * Requires the full e2e stack running (pnpm e2e:up).
  */
-import type { ContractInteraction } from "@byos/common";
-import type { Address } from "viem";
-import {
-	createPublicClient,
-	createWalletClient,
-	defineChain,
-	encodeFunctionData,
-	http,
-	pad,
-} from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { pad } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
-import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
+import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
+import { buildBuyInteractions, buildSellInteractions } from "./helpers/interactions.js";
 import {
 	approveVaultRelayer,
 	depositToEscrow,
@@ -33,43 +25,6 @@ import {
 	tokenBalance,
 	waitForTrade,
 } from "./helpers/orderbook.js";
-
-// --- Chain definition ---
-
-const anvilMainnet = defineChain({
-	id: CONFIG.chainId,
-	name: "Anvil Mainnet",
-	nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-	rpcUrls: { default: { http: [CONFIG.rpcUrl] } },
-});
-
-// --- Clients ---
-
-const publicClient = createPublicClient({
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const traderAccount = privateKeyToAccount(ACCOUNTS.trader.key);
-const traderWallet = createWalletClient({
-	account: traderAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const subSolverAccount = privateKeyToAccount(ACCOUNTS.subSolver.key);
-const subSolverWallet = createWalletClient({
-	account: subSolverAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const deployerAccount = privateKeyToAccount(ACCOUNTS.baselineSolver.key);
-const deployerWallet = createWalletClient({
-	account: deployerAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
 
 // --- Test lifecycle ---
 
@@ -104,106 +59,6 @@ beforeAll(async () => {
 
 // No snapshot revert — chain state persists across test files so the
 // BYOS balance cache stays warm for subsequent files using the same sub-solver.
-
-// --- Helpers ---
-
-function buildSellInteractions(
-	sellToken: Address,
-	buyToken: Address,
-	sellAmount: bigint,
-	minBuyAmount: bigint,
-): ContractInteraction[] {
-	const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-	const approveCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "approve",
-				inputs: [
-					{ type: "address", name: "spender" },
-					{ type: "uint256", name: "amount" },
-				],
-				outputs: [{ type: "bool" }],
-			},
-		],
-		functionName: "approve",
-		args: [CONTRACTS.uniswapV2Router, sellAmount],
-	});
-
-	const swapCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "swapExactTokensForTokens",
-				inputs: [
-					{ type: "uint256", name: "amountIn" },
-					{ type: "uint256", name: "amountOutMin" },
-					{ type: "address[]", name: "path" },
-					{ type: "address", name: "to" },
-					{ type: "uint256", name: "deadline" },
-				],
-				outputs: [{ type: "uint256[]", name: "amounts" }],
-			},
-		],
-		functionName: "swapExactTokensForTokens",
-		args: [sellAmount, minBuyAmount, [sellToken, buyToken], CONTRACTS.gpv2Settlement, deadline],
-	});
-
-	return [
-		{ target: sellToken, value: 0n, callData: approveCalldata },
-		{ target: CONTRACTS.uniswapV2Router, value: 0n, callData: swapCalldata },
-	];
-}
-
-function buildBuyInteractions(
-	sellToken: Address,
-	buyToken: Address,
-	buyAmount: bigint,
-	maxSellAmount: bigint,
-): ContractInteraction[] {
-	const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-	const approveCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "approve",
-				inputs: [
-					{ type: "address", name: "spender" },
-					{ type: "uint256", name: "amount" },
-				],
-				outputs: [{ type: "bool" }],
-			},
-		],
-		functionName: "approve",
-		args: [CONTRACTS.uniswapV2Router, maxSellAmount],
-	});
-
-	const swapCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "swapTokensForExactTokens",
-				inputs: [
-					{ type: "uint256", name: "amountOut" },
-					{ type: "uint256", name: "amountInMax" },
-					{ type: "address[]", name: "path" },
-					{ type: "address", name: "to" },
-					{ type: "uint256", name: "deadline" },
-				],
-				outputs: [{ type: "uint256[]", name: "amounts" }],
-			},
-		],
-		functionName: "swapTokensForExactTokens",
-		args: [buyAmount, maxSellAmount, [sellToken, buyToken], CONTRACTS.gpv2Settlement, deadline],
-	});
-
-	return [
-		{ target: sellToken, value: 0n, callData: approveCalldata },
-		{ target: CONTRACTS.uniswapV2Router, value: 0n, callData: swapCalldata },
-	];
-}
 
 // --- Tests ---
 

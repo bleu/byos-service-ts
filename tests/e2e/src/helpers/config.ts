@@ -26,6 +26,7 @@ export const CONTRACTS = {
 	usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address,
 	dai: "0x6B175474E89094C44Da98b954EedeAC495271d0F" as Address,
 	uniswapV2Router: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D" as Address,
+	// Pre-deployed on mainnet (not baked by e2e-stack.sh, unlike escrow/trampolineFactory)
 	hooksTrampoline: "0x60Bf78233f48eC42eE3F101b9a05eC7878728006" as Address,
 };
 

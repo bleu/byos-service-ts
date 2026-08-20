@@ -7,21 +7,14 @@
  *
  * Requires the full e2e stack running (./scripts/e2e-stack.sh up -d --build --wait).
  */
-import type { ContractInteraction } from "@byos/common";
-import type { Address, Hex } from "viem";
-import {
-	createPublicClient,
-	createWalletClient,
-	defineChain,
-	encodeFunctionData,
-	http,
-	pad,
-} from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import type { Hex } from "viem";
+import { pad } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
 import { revertSnapshot, takeSnapshot } from "./helpers/chain.js";
-import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
+import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
+import { buildSellInteractions } from "./helpers/interactions.js";
 import {
 	approveVaultRelayer,
 	depositToEscrow,
@@ -34,44 +27,6 @@ import {
 	waitForOrderExecution,
 } from "./helpers/orderbook.js";
 
-// --- Chain definition (Anvil running with chain ID 1) ---
-
-const anvilMainnet = defineChain({
-	id: CONFIG.chainId,
-	name: "Anvil Mainnet",
-	nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-	rpcUrls: { default: { http: [CONFIG.rpcUrl] } },
-});
-
-// --- Clients ---
-
-const publicClient = createPublicClient({
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const traderAccount = privateKeyToAccount(ACCOUNTS.trader.key);
-const traderWallet = createWalletClient({
-	account: traderAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-const subSolverAccount = privateKeyToAccount(ACCOUNTS.subSolver.key);
-const subSolverWallet = createWalletClient({
-	account: subSolverAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
-// Account #0 is the deployer with pre-funded token balances
-const deployerAccount = privateKeyToAccount(ACCOUNTS.baselineSolver.key);
-const deployerWallet = createWalletClient({
-	account: deployerAccount,
-	chain: anvilMainnet,
-	transport: http(CONFIG.rpcUrl),
-});
-
 // --- Test lifecycle ---
 
 let snapshotId: Hex;
@@ -83,60 +38,6 @@ beforeAll(async () => {
 afterAll(async () => {
 	await revertSnapshot(publicClient, snapshotId);
 });
-
-// --- Helpers ---
-
-/** Build Uniswap V2 swap interactions for the proposal. */
-function buildUniswapInteractions(
-	sellToken: Address,
-	buyToken: Address,
-	sellAmount: bigint,
-	minBuyAmount: bigint,
-): ContractInteraction[] {
-	const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-	// 1. Approve the Uniswap router to spend sellToken
-	const approveCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "approve",
-				inputs: [
-					{ type: "address", name: "spender" },
-					{ type: "uint256", name: "amount" },
-				],
-				outputs: [{ type: "bool" }],
-			},
-		],
-		functionName: "approve",
-		args: [CONTRACTS.uniswapV2Router, sellAmount],
-	});
-
-	// 2. Swap via the router
-	const swapCalldata = encodeFunctionData({
-		abi: [
-			{
-				type: "function",
-				name: "swapExactTokensForTokens",
-				inputs: [
-					{ type: "uint256", name: "amountIn" },
-					{ type: "uint256", name: "amountOutMin" },
-					{ type: "address[]", name: "path" },
-					{ type: "address", name: "to" },
-					{ type: "uint256", name: "deadline" },
-				],
-				outputs: [{ type: "uint256[]", name: "amounts" }],
-			},
-		],
-		functionName: "swapExactTokensForTokens",
-		args: [sellAmount, minBuyAmount, [sellToken, buyToken], CONTRACTS.gpv2Settlement, deadline],
-	});
-
-	return [
-		{ target: sellToken, value: 0n, callData: approveCalldata },
-		{ target: CONTRACTS.uniswapV2Router, value: 0n, callData: swapCalldata },
-	];
-}
 
 // --- Tests ---
 
@@ -195,10 +96,9 @@ describe("happy path", () => {
 		expect(orderUid).toBeDefined();
 		expect(orderUid.length).toBeGreaterThan(10);
 
-		// 5. Build proposal interactions (Uniswap V2 swap)
-		const interactions = buildUniswapInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
+		// 5. Submit BYOS proposal (Uniswap V2 sell swap)
+		const interactions = buildSellInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
 
-		// 6. Submit BYOS proposal
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
@@ -209,15 +109,15 @@ describe("happy path", () => {
 		});
 		expect(proposalId).toBeGreaterThan(0);
 
-		// 7. Wait for the order to be fulfilled via the autopilot → driver → settlement cycle
+		// 6. Wait for the order to be fulfilled via the autopilot → driver → settlement cycle
 		const result = await waitForOrderExecution(orderUid, publicClient);
 		expect(result.status).toBe("fulfilled");
 
-		// 8. Verify trader received WETH
+		// 7. Verify trader received WETH
 		const wethBalance = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
 		expect(wethBalance).toBeGreaterThan(0n);
 
-		// 9. Verify proposal reached settled status
+		// 8. Verify proposal reached settled status
 		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
 			"settled",
 			"settleFailed",
