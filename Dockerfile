@@ -22,13 +22,15 @@ RUN corepack enable pnpm
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
 # pnpm's hoisted node_modules (includes .pnpm store)
 COPY --from=build /app/node_modules node_modules/
-# Built app + its local node_modules
+# Built app + migrations + its local node_modules
 COPY --from=build /app/apps/byos/dist apps/byos/dist/
+COPY --from=build /app/apps/byos/drizzle apps/byos/drizzle/
 COPY --from=build /app/apps/byos/package.json apps/byos/
 COPY --from=build /app/apps/byos/node_modules apps/byos/node_modules/
-# Built workspace dependency
+# Built workspace dependency + its local node_modules
 COPY --from=build /app/packages/common/dist packages/common/dist/
 COPY --from=build /app/packages/common/package.json packages/common/
+COPY --from=build /app/packages/common/node_modules packages/common/node_modules/
 
 EXPOSE 9585 9586
 CMD ["node", "apps/byos/dist/index.js"]
