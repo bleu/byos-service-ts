@@ -392,9 +392,10 @@ describe("/solve economics", () => {
 
 		const [expectedTransfer, expectedExecute] = encodeTrampolineInteractions(
 			TRAMPOLINE,
-			SELL_TOKEN,
 			{
 				orderUidHash: keccak256(u as Hex),
+				sellToken: SELL_TOKEN,
+				buyToken: BUY_TOKEN,
 				sellAmount: 1_000n,
 				minBuyAmount: 950n,
 				quoteBuyAmount: 950n,
@@ -402,7 +403,6 @@ describe("/solve economics", () => {
 				nonce: 1n,
 			},
 			route,
-			BUY_TOKEN,
 			signature,
 		);
 
