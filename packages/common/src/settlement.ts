@@ -106,10 +106,8 @@ export function encodeSettle(
 
 	const [transferIntra, executeIntra] = encodeTrampolineInteractions(
 		trampoline,
-		order.sellToken,
 		proposal,
 		route,
-		order.buyToken,
 		proposalSignature,
 	);
 

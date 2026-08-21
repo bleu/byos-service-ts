@@ -9,6 +9,8 @@ import type { ContractInteraction, Proposal } from "../types.js";
 function sampleProposal(): Proposal {
 	return {
 		orderUidHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		sellToken,
+		buyToken,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
 		quoteBuyAmount: 990_000n,
@@ -36,10 +38,8 @@ describe("trampoline encoding", () => {
 	it("transfer calldata has correct selector (0xa9059cbb)", () => {
 		const [transfer] = encodeTrampolineInteractions(
 			trampoline,
-			sellToken,
 			sampleProposal(),
 			sampleInteractions(),
-			buyToken,
 			signature,
 		);
 
@@ -51,10 +51,8 @@ describe("trampoline encoding", () => {
 	it("execute calldata has correct selector", () => {
 		const [, execute] = encodeTrampolineInteractions(
 			trampoline,
-			sellToken,
 			sampleProposal(),
 			sampleInteractions(),
-			buyToken,
 			signature,
 		);
 
@@ -64,7 +62,7 @@ describe("trampoline encoding", () => {
 		// Verify selector matches keccak256 of the function signature
 		const expectedSelector = keccak256(
 			toHex(
-				"execute((bytes32,uint256,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],address,address,bytes)",
+				"execute((bytes32,address,address,uint256,uint256,uint256,uint256,uint256),(address,uint256,bytes)[],bytes)",
 			),
 		).slice(0, 10);
 		expect(execute.callData.slice(0, 10)).toBe(expectedSelector);
@@ -75,14 +73,7 @@ describe("trampoline encoding", () => {
 		const interactions = sampleInteractions();
 		const sig: Hex = `0x${"01".repeat(65)}`;
 
-		const [, execute] = encodeTrampolineInteractions(
-			trampoline,
-			sellToken,
-			proposal,
-			interactions,
-			buyToken,
-			sig,
-		);
+		const [, execute] = encodeTrampolineInteractions(trampoline, proposal, interactions, sig);
 
 		const decoded = decodeFunctionData({
 			abi: TrampolineAbi,
@@ -90,10 +81,11 @@ describe("trampoline encoding", () => {
 		});
 
 		expect(decoded.functionName).toBe("execute");
-		const [decodedProposal, decodedInteractions, decodedSellToken, decodedBuyToken, decodedSig] =
-			decoded.args;
+		const [decodedProposal, decodedInteractions, decodedSig] = decoded.args;
 
 		expect(decodedProposal.orderUidHash).toBe(proposal.orderUidHash);
+		expect(decodedProposal.sellToken.toLowerCase()).toBe(proposal.sellToken.toLowerCase());
+		expect(decodedProposal.buyToken.toLowerCase()).toBe(proposal.buyToken.toLowerCase());
 		expect(decodedProposal.sellAmount).toBe(proposal.sellAmount);
 		expect(decodedProposal.minBuyAmount).toBe(proposal.minBuyAmount);
 		expect(decodedProposal.quoteBuyAmount).toBe(proposal.quoteBuyAmount);
@@ -103,20 +95,11 @@ describe("trampoline encoding", () => {
 		expect(decodedInteractions[0]?.target.toLowerCase()).toBe(
 			interactions[0]?.target.toLowerCase(),
 		);
-		expect(decodedSellToken.toLowerCase()).toBe(sellToken.toLowerCase());
-		expect(decodedBuyToken.toLowerCase()).toBe(buyToken.toLowerCase());
 		expect(decodedSig.toLowerCase()).toBe(sig.toLowerCase());
 	});
 
 	it("encodes with empty interactions", () => {
-		const [, execute] = encodeTrampolineInteractions(
-			trampoline,
-			sellToken,
-			sampleProposal(),
-			[],
-			buyToken,
-			signature,
-		);
+		const [, execute] = encodeTrampolineInteractions(trampoline, sampleProposal(), [], signature);
 
 		const decoded = decodeFunctionData({
 			abi: TrampolineAbi,

@@ -200,9 +200,10 @@ function buildSolution(
 
 	const [transfer, execute] = encodeTrampolineInteractions(
 		proposal.trampoline,
-		order.sellToken as Address,
 		{
 			orderUidHash: proposal.orderUidHash,
+			sellToken: proposal.sellToken,
+			buyToken: proposal.buyToken,
 			sellAmount: proposal.sellAmount,
 			minBuyAmount: proposal.minBuyAmount,
 			quoteBuyAmount: proposal.quoteBuyAmount,
@@ -210,7 +211,6 @@ function buildSolution(
 			nonce: proposal.nonce,
 		},
 		proposal.interactions,
-		order.buyToken as Address,
 		proposal.signature,
 	);
 

@@ -111,8 +111,13 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 
 // --- Proposal Helpers ---
 
+export const DEFAULT_SELL_TOKEN: Address = "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1";
+export const DEFAULT_BUY_TOKEN: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+
 export interface ProposalOverrides {
 	orderUid?: Hex;
+	sellToken?: Address;
+	buyToken?: Address;
 	sellAmount?: bigint;
 	minBuyAmount?: bigint;
 	quoteBuyAmount?: bigint;
@@ -123,6 +128,8 @@ export interface ProposalOverrides {
 
 export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverrides) {
 	const orderUid = overrides?.orderUid ?? (`0x${"ab".repeat(56)}` as Hex);
+	const sellToken = overrides?.sellToken ?? DEFAULT_SELL_TOKEN;
+	const buyToken = overrides?.buyToken ?? DEFAULT_BUY_TOKEN;
 	const sellAmount = overrides?.sellAmount ?? 1_000_000n;
 	const minBuyAmount = overrides?.minBuyAmount ?? 990_000n;
 	const quoteBuyAmount = overrides?.quoteBuyAmount ?? 990_000n;
@@ -142,6 +149,8 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 
 	const proposal = {
 		orderUidHash,
+		sellToken,
+		buyToken,
 		sellAmount,
 		minBuyAmount,
 		quoteBuyAmount,
@@ -152,6 +161,8 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 
 	const body = {
 		orderUid,
+		sellToken,
+		buyToken,
 		sellAmount: sellAmount.toString(),
 		minBuyAmount: minBuyAmount.toString(),
 		quoteBuyAmount: quoteBuyAmount.toString(),

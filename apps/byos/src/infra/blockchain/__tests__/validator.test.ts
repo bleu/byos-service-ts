@@ -207,6 +207,8 @@ describe("SimulationValidator", () => {
 				record.order,
 				{
 					orderUidHash: proposal.orderUidHash,
+					sellToken: proposal.sellToken,
+					buyToken: proposal.buyToken,
 					sellAmount: proposal.sellAmount,
 					minBuyAmount: proposal.minBuyAmount,
 					quoteBuyAmount: proposal.quoteBuyAmount,

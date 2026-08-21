@@ -152,6 +152,8 @@ export class SimulationValidator implements ValidateProposal {
 			order: record.order,
 			proposal: {
 				orderUidHash: proposal.orderUidHash,
+				sellToken: proposal.sellToken,
+				buyToken: proposal.buyToken,
 				sellAmount: proposal.sellAmount,
 				minBuyAmount: proposal.minBuyAmount,
 				quoteBuyAmount: proposal.quoteBuyAmount,
