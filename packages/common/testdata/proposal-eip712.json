@@ -1,81 +1,81 @@
 {
-  "domain": {
-    "name": "BYOS",
-    "version": "0.1",
-    "chainId": 31337,
-    "verifyingContract": "0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f",
-    "domainSeparator": "0xc913360d38e2cdf39319d69291b0368681dd950b368c8306855fff12994d3fa3"
-  },
-  "proposalTypehash": "0xe59603b4aa21862514931c2c51b115d8115f1444e10123da8258b79944ab577e",
-  "subSolver": {
-    "address": "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7",
-    "privateKey": "0x00000000000000000000000000000000000000000000000000000000000a11ce"
-  },
-  "vectors": [
-    {
-      "orderUid": "0x00000000000000000000000000000000000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000000",
-      "sellToken": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "buyToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      "sellAmount": "1000000000000000000",
-      "minBuyAmount": "5000000",
-      "quoteBuyAmount": "5000000",
-      "validUntil": 1750000000,
-      "nonce": "0",
-      "interactions": [],
-      "orderUidHash": "0xffef5c2fe809a863cc264e489c6094c3ab99b725056b9ce1b7e3d51e69299105",
-      "interactionsHash": "0x569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd",
-      "structHash": "0x4b959f7d53c8a6758f7fc5a35ce03bc4367a3b37695da27b57556cfc55781f78",
-      "digest": "0xb7cd30ffa8b693a521b797d55a3e67e12e8c0870f53183fcc57a8beea1df58ff",
-      "signature": "0x0f968dc94e58df7ba3f82d292af5bb97ba3cca0931dac8da32332d6b47a9eab8321114eda463f6bb45f1f571e8706ff5866cfa2d70a946152de1696de3dd5c801b"
-    },
-    {
-      "orderUid": "0x00000000000000000000000000000000000000000000000000000001e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000007",
-      "sellToken": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-      "buyToken": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "sellAmount": "123456789",
-      "minBuyAmount": "900000000",
-      "quoteBuyAmount": "987654321",
-      "validUntil": 1750000060,
-      "nonce": "1",
-      "interactions": [
-        {
-          "target": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-          "value": "0",
-          "callData": "0xabcdef"
-        }
-      ],
-      "orderUidHash": "0x8d6d0ba3f7eda37c54d350c873be4be9681d10d22bafc2287f897bbf4ca378ac",
-      "interactionsHash": "0x7141799e95ff18ea97dcd246c14108b6970b939ff2dc4c7313d9035378c2ebe1",
-      "structHash": "0x503ff1c5ab6efc16c07f8925895202354ea261dc6b4e18a0ca7f7a3dda8db5f7",
-      "digest": "0x99b550cf21b4845f5fab43973cfad5dd2e74caa2cd0d44ea02084cf6d640bc4f",
-      "signature": "0xb403ceec0286fb4c503b715ac441193c81116d3133a3d281d61cc575c68a2b696cfc59b65b7e47411fcd2a137b518556c8c5f821a51256833ea4cad8d93a476e1b"
-    },
-    {
-      "orderUid": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffe05fcc23807536bee418f142d19fa0d21bb0cff7ffffffffffffffff",
-      "sellToken": "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF",
-      "buyToken": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-      "sellAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
-      "minBuyAmount": "1",
-      "quoteBuyAmount": "1",
-      "validUntil": 4294967295,
-      "nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
-      "interactions": [
-        {
-          "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-          "value": "1000000000000000000",
-          "callData": "0x"
-        },
-        {
-          "target": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-          "value": "0",
-          "callData": "0xa9059cbb0000000000000000000000009008d19f58aabd9ed0d60971565aa8510560ab410000000000000000000000000000000000000000000000000000000005f5e100"
-        }
-      ],
-      "orderUidHash": "0x4027c45e15828a231c9b9b937f4f5b3b6738d810d0f4f3240edb0e06996be6d5",
-      "interactionsHash": "0x17995225789c691016ce27549dd6a75b42ef8ce7a3250f8c98398195959a2ddf",
-      "structHash": "0x4c69e6d907410d32945fff4074bcb52a8de8dcf2dc89e999361e344278692b04",
-      "digest": "0x3acec9a8ebf0c659d4be5e4b9d3454c8ee144d304d91bea9fff29a9059554665",
-      "signature": "0xc928ad0a650006ec4602785a49602cb5c207846238ea8a502a5497922b89a13356586bbf2623050be2838316bd506425547b8525f9a794feca2b1cc384d013461b"
-    }
-  ]
+	"domain": {
+		"name": "BYOS",
+		"version": "0.1",
+		"chainId": 31337,
+		"verifyingContract": "0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f",
+		"domainSeparator": "0xc913360d38e2cdf39319d69291b0368681dd950b368c8306855fff12994d3fa3"
+	},
+	"proposalTypehash": "0xe59603b4aa21862514931c2c51b115d8115f1444e10123da8258b79944ab577e",
+	"subSolver": {
+		"address": "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7",
+		"privateKey": "0x00000000000000000000000000000000000000000000000000000000000a11ce"
+	},
+	"vectors": [
+		{
+			"orderUid": "0x00000000000000000000000000000000000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000000",
+			"sellToken": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+			"buyToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+			"sellAmount": "1000000000000000000",
+			"minBuyAmount": "5000000",
+			"quoteBuyAmount": "5000000",
+			"validUntil": 1750000000,
+			"nonce": "0",
+			"interactions": [],
+			"orderUidHash": "0xffef5c2fe809a863cc264e489c6094c3ab99b725056b9ce1b7e3d51e69299105",
+			"interactionsHash": "0x569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd",
+			"structHash": "0x4b959f7d53c8a6758f7fc5a35ce03bc4367a3b37695da27b57556cfc55781f78",
+			"digest": "0xb7cd30ffa8b693a521b797d55a3e67e12e8c0870f53183fcc57a8beea1df58ff",
+			"signature": "0x0f968dc94e58df7ba3f82d292af5bb97ba3cca0931dac8da32332d6b47a9eab8321114eda463f6bb45f1f571e8706ff5866cfa2d70a946152de1696de3dd5c801b"
+		},
+		{
+			"orderUid": "0x00000000000000000000000000000000000000000000000000000001e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000007",
+			"sellToken": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+			"buyToken": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+			"sellAmount": "123456789",
+			"minBuyAmount": "900000000",
+			"quoteBuyAmount": "987654321",
+			"validUntil": 1750000060,
+			"nonce": "1",
+			"interactions": [
+				{
+					"target": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+					"value": "0",
+					"callData": "0xabcdef"
+				}
+			],
+			"orderUidHash": "0x8d6d0ba3f7eda37c54d350c873be4be9681d10d22bafc2287f897bbf4ca378ac",
+			"interactionsHash": "0x7141799e95ff18ea97dcd246c14108b6970b939ff2dc4c7313d9035378c2ebe1",
+			"structHash": "0x503ff1c5ab6efc16c07f8925895202354ea261dc6b4e18a0ca7f7a3dda8db5f7",
+			"digest": "0x99b550cf21b4845f5fab43973cfad5dd2e74caa2cd0d44ea02084cf6d640bc4f",
+			"signature": "0xb403ceec0286fb4c503b715ac441193c81116d3133a3d281d61cc575c68a2b696cfc59b65b7e47411fcd2a137b518556c8c5f821a51256833ea4cad8d93a476e1b"
+		},
+		{
+			"orderUid": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffe05fcc23807536bee418f142d19fa0d21bb0cff7ffffffffffffffff",
+			"sellToken": "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF",
+			"buyToken": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+			"sellAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+			"minBuyAmount": "1",
+			"quoteBuyAmount": "1",
+			"validUntil": 4294967295,
+			"nonce": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+			"interactions": [
+				{
+					"target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+					"value": "1000000000000000000",
+					"callData": "0x"
+				},
+				{
+					"target": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+					"value": "0",
+					"callData": "0xa9059cbb0000000000000000000000009008d19f58aabd9ed0d60971565aa8510560ab410000000000000000000000000000000000000000000000000000000005f5e100"
+				}
+			],
+			"orderUidHash": "0x4027c45e15828a231c9b9b937f4f5b3b6738d810d0f4f3240edb0e06996be6d5",
+			"interactionsHash": "0x17995225789c691016ce27549dd6a75b42ef8ce7a3250f8c98398195959a2ddf",
+			"structHash": "0x4c69e6d907410d32945fff4074bcb52a8de8dcf2dc89e999361e344278692b04",
+			"digest": "0x3acec9a8ebf0c659d4be5e4b9d3454c8ee144d304d91bea9fff29a9059554665",
+			"signature": "0xc928ad0a650006ec4602785a49602cb5c207846238ea8a502a5497922b89a13356586bbf2623050be2838316bd506425547b8525f9a794feca2b1cc384d013461b"
+		}
+	]
 }
