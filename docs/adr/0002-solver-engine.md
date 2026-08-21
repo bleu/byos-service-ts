@@ -23,6 +23,14 @@ CoW's score is surplus plus protocol fees; gas reaches it only because the solve
 
 BYOS does not estimate protocol fees either — the driver applies them itself, then encodes and simulates. A solution that cannot absorb the fee fails that simulation and is dropped with no revert, no penalty, and no escrow debit. Estimating it before `/solve` is also impossible: fee policies arrive only in the `/solve` payload.
 
+**Fee-transform invariants (COW-1240).** The whole fee design rests on the assumption that the stock driver's protocol-fee application only moves the user/fee split and leaves everything else alone. This was established by reading the driver source in COW-1189 and verified against a real settlement with `FEE_POLICIES=surplus:0.5:0.01:any` in the offline demo stack (`offline-mode` branch `cow-1240`). Three invariants held:
+
+1. The Trampoline `execute` interaction in the encoded `settle()` calldata is byte-identical to what BYOS sent — the driver does not touch the Trampoline call.
+2. The sell amount pulled from the user is unchanged — the fee is not levied on the sell side.
+3. The credited buy amount is reduced by exactly the computed protocol fee — the fee comes entirely from the buyer's surplus.
+
+This confirms that BYOS can treat the Trampoline payload as immutable across the driver's fee application step.
+
 ### Why single best per order UID
 
 Returning all valid proposals would flood the driver's encoding budget (each requires gas simulation via RPC). BYOS's internal pre-ranking ensures only competitive proposals consume encoding slots. With pick-one there is no fallback if the selected proposal fails the driver's post-encoding re-simulation, but the divergence between cached-gas score and the driver's fresh one is marginal.
