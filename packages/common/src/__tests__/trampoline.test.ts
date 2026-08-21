@@ -73,12 +73,7 @@ describe("trampoline encoding", () => {
 		const interactions = sampleInteractions();
 		const sig: Hex = `0x${"01".repeat(65)}`;
 
-		const [, execute] = encodeTrampolineInteractions(
-			trampoline,
-			proposal,
-			interactions,
-			sig,
-		);
+		const [, execute] = encodeTrampolineInteractions(trampoline, proposal, interactions, sig);
 
 		const decoded = decodeFunctionData({
 			abi: TrampolineAbi,
@@ -104,12 +99,7 @@ describe("trampoline encoding", () => {
 	});
 
 	it("encodes with empty interactions", () => {
-		const [, execute] = encodeTrampolineInteractions(
-			trampoline,
-			sampleProposal(),
-			[],
-			signature,
-		);
+		const [, execute] = encodeTrampolineInteractions(trampoline, sampleProposal(), [], signature);
 
 		const decoded = decodeFunctionData({
 			abi: TrampolineAbi,
