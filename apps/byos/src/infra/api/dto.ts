@@ -11,6 +11,8 @@ import type { Proposal } from "../../domain/proposal.js";
 export interface ParsedProposal {
 	orderUid: string;
 	orderUidHash: Hex;
+	sellToken: Address;
+	buyToken: Address;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
 	quoteBuyAmount: bigint;
@@ -41,6 +43,8 @@ export function parseCreateProposalRequest(body: CreateProposalRequest): ParsedP
 	return {
 		orderUid: orderUidHex,
 		orderUidHash,
+		sellToken: body.sellToken.toLowerCase() as Address,
+		buyToken: body.buyToken.toLowerCase() as Address,
 		sellAmount: BigInt(body.sellAmount),
 		minBuyAmount: BigInt(body.minBuyAmount),
 		quoteBuyAmount: BigInt(body.quoteBuyAmount),

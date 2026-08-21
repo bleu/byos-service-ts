@@ -34,7 +34,7 @@ describe("EIP-712", () => {
 		it("matches the on-chain PROPOSAL_TYPEHASH constant", () => {
 			const manual = keccak256(
 				new TextEncoder().encode(
-					"ProposalData(bytes32 orderUidHash,uint256 sellAmount,uint256 minBuyAmount,uint256 quoteBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)",
+					"ProposalData(bytes32 orderUidHash,address sellToken,address buyToken,uint256 sellAmount,uint256 minBuyAmount,uint256 quoteBuyAmount,bytes32 interactionsHash,uint256 validUntil,uint256 nonce)",
 				),
 			);
 			expect(manual).toBe(PROPOSAL_TYPEHASH);
@@ -78,6 +78,8 @@ describe("EIP-712", () => {
 			it(`vector ${i}: digest matches`, () => {
 				const proposal: Proposal = {
 					orderUidHash: keccak256(vector.orderUid as Hex),
+					sellToken: vector.sellToken as Address,
+					buyToken: vector.buyToken as Address,
 					sellAmount: BigInt(vector.sellAmount),
 					minBuyAmount: BigInt(vector.minBuyAmount),
 					quoteBuyAmount: BigInt(vector.quoteBuyAmount),
@@ -93,6 +95,8 @@ describe("EIP-712", () => {
 			it(`vector ${i}: signature recovers sub-solver address`, async () => {
 				const proposal: Proposal = {
 					orderUidHash: vector.orderUidHash as Hex,
+					sellToken: vector.sellToken as Address,
+					buyToken: vector.buyToken as Address,
 					sellAmount: BigInt(vector.sellAmount),
 					minBuyAmount: BigInt(vector.minBuyAmount),
 					quoteBuyAmount: BigInt(vector.quoteBuyAmount),
@@ -120,6 +124,8 @@ describe("EIP-712", () => {
 		it("proposal sign/recover", async () => {
 			const proposal: Proposal = {
 				orderUidHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				sellToken: "0x0000000000000000000000000000000000000011",
+				buyToken: "0x0000000000000000000000000000000000000022",
 				sellAmount: 1_000_000n,
 				minBuyAmount: 990_000n,
 				quoteBuyAmount: 990_000n,
@@ -156,6 +162,8 @@ describe("EIP-712", () => {
 		it("wrong interactions hash recovers wrong address", async () => {
 			const proposal: Proposal = {
 				orderUidHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				sellToken: "0x0000000000000000000000000000000000000033",
+				buyToken: "0x0000000000000000000000000000000000000044",
 				sellAmount: 500_000n,
 				minBuyAmount: 495_000n,
 				quoteBuyAmount: 495_000n,

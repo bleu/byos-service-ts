@@ -14,14 +14,12 @@ export interface SettlementInteraction {
  * proposal in a Trampoline `execute` call.
  *
  * 1. `sellToken.transfer(trampoline, sellAmount)` — push trade capital
- * 2. `trampoline.execute(proposal, interactions, sellToken, buyToken, signature)` — run the route
+ * 2. `trampoline.execute(proposal, interactions, signature)` — run the route
  */
 export function encodeTrampolineInteractions(
 	trampoline: Address,
-	sellToken: Address,
 	proposal: Proposal,
 	interactions: readonly ContractInteraction[],
-	buyToken: Address,
 	signature: Hex,
 ): [SettlementInteraction, SettlementInteraction] {
 	const transferCalldata = encodeFunctionData({
@@ -31,7 +29,7 @@ export function encodeTrampolineInteractions(
 	});
 
 	const transfer: SettlementInteraction = {
-		target: sellToken,
+		target: proposal.sellToken,
 		value: 0n,
 		callData: transferCalldata,
 	};
@@ -42,6 +40,8 @@ export function encodeTrampolineInteractions(
 		args: [
 			{
 				orderUidHash: proposal.orderUidHash,
+				sellToken: proposal.sellToken,
+				buyToken: proposal.buyToken,
 				sellAmount: proposal.sellAmount,
 				minBuyAmount: proposal.minBuyAmount,
 				quoteBuyAmount: proposal.quoteBuyAmount,
@@ -53,8 +53,6 @@ export function encodeTrampolineInteractions(
 				value: i.value,
 				callData: i.callData,
 			})),
-			sellToken,
-			buyToken,
 			signature,
 		],
 	});

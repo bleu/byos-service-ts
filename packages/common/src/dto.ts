@@ -31,8 +31,12 @@ export type DtoInteraction = z.infer<typeof interactionSchema>;
 
 // --- Create Proposal ---
 
+const addressString = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a checksummed or lowercase EVM address");
+
 export const createProposalRequestSchema = z.object({
 	orderUid: z.string().regex(/^(0x)?[0-9a-fA-F]{112}$/, "expected 56 hex bytes"),
+	sellToken: addressString,
+	buyToken: addressString,
 	sellAmount: u256String,
 	minBuyAmount: u256String,
 	quoteBuyAmount: u256String,
@@ -105,6 +109,7 @@ export const RejectionReason = {
 	InsufficientEscrow: "InsufficientEscrow",
 	UnsupportedOrder: "UnsupportedOrder",
 	AmountMismatch: "AmountMismatch",
+	TokenMismatch: "TokenMismatch",
 	OrderNotFound: "OrderNotFound",
 	Unprofitable: "Unprofitable",
 } as const;
@@ -115,6 +120,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.InsufficientEscrow,
 	RejectionReason.UnsupportedOrder,
 	RejectionReason.AmountMismatch,
+	RejectionReason.TokenMismatch,
 	RejectionReason.OrderNotFound,
 	RejectionReason.Unprofitable,
 ]);
