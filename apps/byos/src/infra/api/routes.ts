@@ -70,6 +70,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 				domain,
 				{
 					orderUidHash: parsed.orderUidHash,
+					sellToken: parsed.sellToken,
+					buyToken: parsed.buyToken,
 					sellAmount: parsed.sellAmount,
 					minBuyAmount: parsed.minBuyAmount,
 					quoteBuyAmount: parsed.quoteBuyAmount,
@@ -100,11 +102,11 @@ export function createPublicRoutes(config: RoutesConfig) {
 			subSolver,
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
+			sellToken: parsed.sellToken,
+			buyToken: parsed.buyToken,
 			sellAmount: parsed.sellAmount,
 			minBuyAmount: parsed.minBuyAmount,
 			quoteBuyAmount: parsed.quoteBuyAmount,
-			sellToken: "0x0000000000000000000000000000000000000000" as Address, // Set by validator
-			buyToken: "0x0000000000000000000000000000000000000000" as Address,
 			interactions: parsed.interactions,
 			interactionsHash: parsed.interactionsHash,
 			validUntil: parsed.validUntil,
