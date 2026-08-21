@@ -6,6 +6,7 @@ RUN corepack enable pnpm
 # Copy workspace manifests first for layer caching
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/byos/package.json apps/byos/
+COPY apps/subsolver/package.json apps/subsolver/
 COPY packages/common/package.json packages/common/
 
 RUN pnpm install --frozen-lockfile
