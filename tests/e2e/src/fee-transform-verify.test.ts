@@ -7,6 +7,10 @@
  *   2. The sell amount pulled from the user is unchanged
  *   3. The credited buy amount dropped by exactly the protocol fee
  *
+ * This test also covers the happy-path for a USDC → WETH sell order
+ * (place order → submit proposal → settle → proposal reaches "settled").
+ * There is no separate happy-path sell-order test.
+ *
  * Requires the full e2e stack running with the updated autopilot.
  */
 import { type Hex, decodeFunctionData, pad, parseAbi } from "viem";
