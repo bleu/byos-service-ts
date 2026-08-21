@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { config as dotenvConfig } from "dotenv";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -25,8 +27,8 @@ export default defineConfig({
 			},
 			{
 				test: {
-					name: "e2e",
-					root: "tests/e2e",
+					name: "integration",
+					root: "tests/integration",
 					include: ["**/*.test.ts"],
 				},
 			},
@@ -36,6 +38,16 @@ export default defineConfig({
 					root: "tests/onchain",
 					include: ["**/*.test.ts"],
 					testTimeout: 60_000,
+				},
+			},
+			{
+				test: {
+					name: "e2e",
+					root: "tests/e2e",
+					include: ["**/*.test.ts"],
+					testTimeout: 120_000,
+					hookTimeout: 60_000,
+					env: dotenvConfig({ path: resolve(".env.e2e") }).parsed ?? {},
 				},
 			},
 		],

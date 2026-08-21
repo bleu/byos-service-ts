@@ -36,14 +36,16 @@ export interface Queues {
 	balanceRefresh: Queue;
 }
 
+const PREFIX = "byos";
+
 export function createQueues(connection: Redis): Queues {
 	return {
-		validation: new Queue("byos:validation", { connection }),
-		validateProposal: new Queue("byos:validate-proposal", { connection }),
-		retention: new Queue("byos:retention", { connection }),
-		penalty: new Queue("byos:penalty", { connection }),
-		audit: new Queue("byos:audit", { connection }),
-		balanceRefresh: new Queue("byos:balance-refresh", { connection }),
+		validation: new Queue("validation", { connection, prefix: PREFIX }),
+		validateProposal: new Queue("validate-proposal", { connection, prefix: PREFIX }),
+		retention: new Queue("retention", { connection, prefix: PREFIX }),
+		penalty: new Queue("penalty", { connection, prefix: PREFIX }),
+		audit: new Queue("audit", { connection, prefix: PREFIX }),
+		balanceRefresh: new Queue("balance-refresh", { connection, prefix: PREFIX }),
 	};
 }
 

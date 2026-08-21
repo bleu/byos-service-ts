@@ -11,7 +11,8 @@ See [`docs/shared/`](docs/shared/) for the normative BYOS specification, domain 
 | `apps/byos` | Main BYOS service (proposal API + solver engine + background jobs) | Complete |
 | `apps/subsolver` | Reference sub-solver (Uniswap V2 routing, orderbook polling) | Complete |
 | `packages/common` | Shared types: EIP-712, ABIs, DTOs, settlement encoding | Complete |
-| `tests/e2e` | API integration tests (proposal lifecycle, /solve, /notify) | Complete |
+| `tests/integration` | API integration tests (proposal lifecycle, /solve, /notify) | Complete |
+| `tests/e2e` | End-to-end tests (order → proposal → settlement on Anvil) | Complete |
 | `docs/adr` | Architecture decision records (14 ADRs) | Complete |
 | `docs/reference` | CoW Protocol background (slashing, auctions, CIPs) | Complete |
 
@@ -58,14 +59,41 @@ The service starts two HTTP listeners:
 | Command | Description |
 |---------|-------------|
 | `pnpm build` | Build all packages and apps |
-| `pnpm test` | Run all tests (unit + e2e) |
+| `pnpm test` | Run unit tests |
 | `pnpm test:db` | Run database-tier tests only |
+| `pnpm test:integration` | Run API integration tests (in-process, no Docker) |
 | `pnpm lint` | Check code with Biome |
 | `pnpm lint:fix` | Auto-fix lint issues |
 | `pnpm typecheck` | Type-check with `tsc -b` |
 | `pnpm format` | Format code with Biome |
 | `pnpm lint:openapi` | Validate OpenAPI spec |
 | `pnpm dev` | Start Postgres + run byos in watch mode |
+| `pnpm e2e:up` | Start the full e2e stack (Anvil + CoW services + BYOS) |
+| `pnpm e2e:down` | Tear down the e2e stack and remove volumes |
+| `pnpm test:e2e` | Run end-to-end tests (requires `e2e:up` first) |
+
+### End-to-end tests
+
+The e2e tests exercise the complete round-trip: GPv2 order submission, BYOS proposal, autopilot auction, driver settlement, and on-chain execution against a local Anvil fork with the full CoW Protocol stack running in Docker.
+
+```bash
+# Start the stack (builds Docker images, deploys contracts, waits for healthy)
+pnpm e2e:up
+
+# Run the tests
+pnpm test:e2e
+
+# Tear down when done (removes containers + volumes)
+pnpm e2e:down
+```
+
+To reset the stack (e.g. after contract changes):
+
+```bash
+pnpm e2e:down && pnpm e2e:up
+```
+
+The e2e stack is defined in [`docker-compose.e2e.yml`](docker-compose.e2e.yml) (BYOS-specific services) layered on top of the [`offline-mode`](https://github.com/bleu/cow-offline-mode) submodule (Anvil chain, orderbook, autopilot, driver). Contract addresses are baked into the Anvil state via [`offline-mode/scripts/byos/deploy-byos-contracts.sh`](offline-mode/scripts/byos/deploy-byos-contracts.sh).
 
 ## Technology stack
 

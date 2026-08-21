@@ -19,7 +19,8 @@ We need a standard shape for packages in this workspace: how apps are structured
 | `apps/byos` | app | The BYOS service: public proposal API + solver engine, one process, two listeners ([ADR-0001](0001-proposal-api.md)) |
 | `apps/subsolver` | app | Reference sub-solver: example proposal-API client, e2e-test counterpart, documentation for external teams |
 | `packages/common` | library | Shared types: EIP-712 encoding, ABIs, DTOs, settlement encoding |
-| `tests/e2e` | tests | End-to-end tests: in-process Hono apps with real Postgres ([ADR-0009](0009-testing-strategy.md)) |
+| `tests/integration` | tests | API integration tests: in-process Hono apps with real Postgres ([ADR-0009](0009-testing-strategy.md)) |
+| `tests/e2e` | tests | End-to-end tests: full CoW Protocol stack on Anvil ([ADR-0009](0009-testing-strategy.md)) |
 
 New capabilities get their own small, single-purpose, kebab-case-named packages rather than growing a `utils` module.
 
@@ -48,6 +49,6 @@ Match the Solver Engine API conventions from the CoW driver: camelCase JSON, 256
 
 ## Consequences
 
-- The e2e tests can drive the real service and the real sub-solver in-process, no docker needed for the common path.
+- The integration tests can drive the real service and the real sub-solver in-process, no docker needed for the common path.
 - Per-route Zod schemas mean some type duplication between wire format and domain types; that duplication is the point — wire format and domain model evolve independently.
 - The `openapi.yml` for the proposal API becomes a deliverable in its own right and can be linted in CI.

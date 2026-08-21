@@ -13,9 +13,12 @@
 		"test": "vitest run --project unit",
 		"test:db": "vitest run --project db",
 		"test:redis": "vitest run --project redis",
-		"test:e2e": "vitest run --project e2e",
+		"test:integration": "vitest run --project integration",
 		"test:onchain": "vitest run --project onchain",
+		"test:e2e": "vitest run --project e2e --no-file-parallelism",
 		"test:watch": "vitest",
+		"e2e:up": "./scripts/e2e-stack.sh up -d --build --wait",
+		"e2e:down": "./scripts/e2e-stack.sh down -v",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"lint:openapi": "npx --yes @apidevtools/swagger-cli@4 validate apps/byos/openapi.yml && npx --yes @stoplight/spectral-cli@6 lint apps/byos/openapi.yml",
@@ -26,6 +29,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.0.0",
+		"dotenv": "^16.0.0",
 		"tsup": "^8.0.0",
 		"typescript": "^5.8.0",
 		"vitest": "^3.0.0"

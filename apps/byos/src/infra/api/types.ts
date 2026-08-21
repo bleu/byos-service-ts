@@ -61,6 +61,7 @@ export type Auction = z.infer<typeof auctionSchema>;
 /** Solution response types for /solve. */
 
 export interface SolutionInteraction {
+	kind: "custom";
 	target: string;
 	value: string;
 	callData: string;
@@ -71,7 +72,8 @@ export interface SolutionInteraction {
 }
 
 export interface Fulfillment {
-	orderUid: string;
+	kind: "fulfillment";
+	order: string;
 	executedAmount: string;
 	fee: string;
 }
