@@ -18,6 +18,8 @@ describe("sell/buy amount validation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
 				sellAmount: "0x1000",
 				minBuyAmount: "900",
 				quoteBuyAmount: "900",
@@ -39,6 +41,8 @@ describe("sell/buy amount validation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
 				sellAmount: "1000",
 				minBuyAmount: "0xff",
 				quoteBuyAmount: "900",
@@ -62,6 +66,8 @@ describe("signature validation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
 				sellAmount: "1000",
 				minBuyAmount: "900",
 				quoteBuyAmount: "900",
@@ -82,6 +88,8 @@ describe("signature validation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
 				sellAmount: "1000",
 				minBuyAmount: "900",
 				quoteBuyAmount: "900",
@@ -102,6 +110,8 @@ describe("signature validation", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
 				sellAmount: "1000",
 				minBuyAmount: "900",
 				quoteBuyAmount: "900",

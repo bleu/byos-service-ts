@@ -374,6 +374,8 @@ describe("/solve economics", () => {
 		const signature = `0x${"11".repeat(65)}` as Hex;
 		await seedProposal(app.ctx.db, {
 			orderUid: u,
+			sellToken: SELL_TOKEN,
+			buyToken: BUY_TOKEN,
 			sellAmount: 1_000n,
 			minBuyAmount: 950n,
 			quoteBuyAmount: 950n,

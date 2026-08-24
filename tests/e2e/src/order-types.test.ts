@@ -135,10 +135,12 @@ describe("order types", () => {
 		expect(wethBalance).toBeGreaterThan(0n);
 
 		// 9. Verify proposal reached settled status
-		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
-			"settled",
-			"settleFailed",
-		], 60_000);
+		const proposal = await waitForProposalStatus(
+			subSolverWallet,
+			proposalId,
+			["settled", "settleFailed"],
+			60_000,
+		);
 		expect(proposal.status).toBe("settled");
 	});
 
