@@ -25,3 +25,4 @@ Thumbs.db
 
 # Test coverage
 coverage/
+.env.e2e

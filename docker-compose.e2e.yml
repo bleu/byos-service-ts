@@ -1,0 +1,72 @@
+services:
+  # --- BYOS-specific infrastructure ---
+
+  byos-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: byos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  byos-redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  byos-ts:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - path: ../.env.e2e
+        required: false
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@byos-db:5432/byos
+      REDIS_URL: redis://byos-redis:6379
+      CHAIN_ID: "1"
+      RPC_URL: http://chain:8545
+      ORDERBOOK_URL: http://orderbook:80
+      SETTLEMENT_ADDRESS: "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+      MIN_COLLATERAL: "10000000000000000"
+      DEFAULT_GAS_PRICE: "10000000000"
+      SOLVE_BEARER_TOKEN: ""
+      PUBLIC_ADDR_PORT: "9585"
+      INTERNAL_ADDR_PORT: "9586"
+      LOG_LEVEL: debug
+      JSON_LOGS: "true"
+    ports:
+      - "19585:9585"
+      - "19586:9586"
+    depends_on:
+      byos-db:
+        condition: service_healthy
+      byos-redis:
+        condition: service_healthy
+      chain:
+        condition: service_healthy
+      orderbook:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9585/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+
+  # --- Overrides for existing offline-mode services ---
+
+  driver:
+    volumes:
+      - ../config/e2e:/config/e2e:ro
+    command: --config /config/e2e/driver.toml
+
+  autopilot:
+    environment:
+      DRIVERS: "byos-ts|http://driver/byos-ts|0x90F79bf6EB2c4f870365E785982E1f101E93b906"

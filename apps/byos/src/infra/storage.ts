@@ -810,6 +810,7 @@ export async function insertBufferEntry(
 			nativeTokenAmount: entry.nativeTokenAmount,
 		})
 		.returning({ id: bufferEntries.id });
+	// biome-ignore lint/style/noNonNullAssertion: INSERT RETURNING always yields one row
 	return result[0]!.id;
 }
 
