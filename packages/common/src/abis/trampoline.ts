@@ -1,6 +1,8 @@
 /** ABI component definitions reused across trampoline and settlement encoding. */
 export const proposalComponents = [
 	{ name: "orderUidHash", type: "bytes32" },
+	{ name: "sellToken", type: "address" },
+	{ name: "buyToken", type: "address" },
 	{ name: "sellAmount", type: "uint256" },
 	{ name: "minBuyAmount", type: "uint256" },
 	{ name: "quoteBuyAmount", type: "uint256" },
@@ -21,8 +23,6 @@ export const TrampolineAbi = [
 		inputs: [
 			{ name: "_proposal", type: "tuple", components: proposalComponents },
 			{ name: "_interactions", type: "tuple[]", components: interactionComponents },
-			{ name: "_sellToken", type: "address" },
-			{ name: "_buyToken", type: "address" },
 			{ name: "_signature", type: "bytes" },
 		],
 		outputs: [],

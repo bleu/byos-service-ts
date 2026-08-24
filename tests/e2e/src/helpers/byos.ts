@@ -3,7 +3,7 @@
  */
 import type { ContractInteraction } from "@byos/common";
 import { byosDomain, signProposal, signReadAuth } from "@byos/common";
-import type { Hex, WalletClient } from "viem";
+import type { Address, Hex, WalletClient } from "viem";
 import { keccak256 } from "viem";
 import { CONFIG, CONTRACTS } from "./config.js";
 
@@ -17,6 +17,8 @@ function makeSignFn(client: WalletClient) {
 export interface SubmitProposalParams {
 	walletClient: WalletClient;
 	orderUid: string;
+	sellToken: Address;
+	buyToken: Address;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
 	quoteBuyAmount: bigint;
@@ -38,6 +40,8 @@ export async function signAndSubmitProposal(
 	const orderUidHash = keccak256(params.orderUid as Hex);
 	const proposal = {
 		orderUidHash,
+		sellToken: params.sellToken,
+		buyToken: params.buyToken,
 		sellAmount: params.sellAmount,
 		minBuyAmount: params.minBuyAmount,
 		quoteBuyAmount: params.quoteBuyAmount,
@@ -49,6 +53,8 @@ export async function signAndSubmitProposal(
 
 	const body = {
 		orderUid: params.orderUid,
+		sellToken: params.sellToken,
+		buyToken: params.buyToken,
 		sellAmount: params.sellAmount.toString(),
 		minBuyAmount: params.minBuyAmount.toString(),
 		quoteBuyAmount: params.quoteBuyAmount.toString(),

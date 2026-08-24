@@ -23,6 +23,13 @@ export function checkEnvelope(record: OrderRecord, proposal: Proposal): Rejectio
 	if (!record.erc20Balances) {
 		return "UnsupportedOrder";
 	}
+	// Token pair must match the order — prevents cross-pair signature reuse
+	if (
+		proposal.sellToken.toLowerCase() !== record.order.sellToken.toLowerCase() ||
+		proposal.buyToken.toLowerCase() !== record.order.buyToken.toLowerCase()
+	) {
+		return "TokenMismatch";
+	}
 	// Structural invariant: minBuyAmount must not exceed quoteBuyAmount
 	if (proposal.minBuyAmount > proposal.quoteBuyAmount) {
 		return "AmountMismatch";

@@ -63,6 +63,33 @@ describe("order envelope", () => {
 		expect(result).toBe("UnsupportedOrder");
 	});
 
+	it("rejects mismatched sell token", () => {
+		const result = checkEnvelope(
+			sampleRecord(),
+			matchingProposal({ sellToken: "0x0000000000000000000000000000000000000001" }),
+		);
+		expect(result).toBe("TokenMismatch");
+	});
+
+	it("rejects mismatched buy token", () => {
+		const result = checkEnvelope(
+			sampleRecord(),
+			matchingProposal({ buyToken: "0x0000000000000000000000000000000000000002" }),
+		);
+		expect(result).toBe("TokenMismatch");
+	});
+
+	it("accepts matching tokens case-insensitively", () => {
+		const result = checkEnvelope(
+			sampleRecord(),
+			matchingProposal({
+				sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1",
+				buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+			}),
+		);
+		expect(result).toBeNull();
+	});
+
 	it("rejects minBuyAmount > quoteBuyAmount", () => {
 		const result = checkEnvelope(
 			sampleRecord(),

@@ -27,6 +27,8 @@ export interface RouteParams {
 /** A fully signed proposal ready for submission to BYOS. */
 export interface SignedProposal {
 	orderUid: Hex;
+	sellToken: Address;
+	buyToken: Address;
 	sellAmount: bigint;
 	minBuyAmount: bigint;
 	quoteBuyAmount: bigint;
@@ -142,6 +144,8 @@ export async function buildProposal(
 	// Reference subsolver does not use loose slippage: min = max
 	const proposal: Proposal = {
 		orderUidHash,
+		sellToken: order.sellToken,
+		buyToken: order.buyToken,
 		sellAmount,
 		minBuyAmount: buyAmount,
 		quoteBuyAmount: buyAmount,
@@ -153,6 +157,8 @@ export async function buildProposal(
 
 	return {
 		orderUid: order.uid,
+		sellToken: order.sellToken,
+		buyToken: order.buyToken,
 		sellAmount,
 		minBuyAmount: buyAmount,
 		quoteBuyAmount: buyAmount,

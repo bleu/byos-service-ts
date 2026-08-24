@@ -145,6 +145,8 @@ async function submitOrderAndProposal(opts?: { validUntilOffset?: number }) {
 	const { id: proposalId } = await signAndSubmitProposal({
 		walletClient: subSolverWallet,
 		orderUid,
+		sellToken,
+		buyToken,
 		sellAmount,
 		minBuyAmount,
 		quoteBuyAmount: expectedBuyAmount,
@@ -237,6 +239,8 @@ describe("solve edge cases", () => {
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
+			sellToken,
+			buyToken,
 			sellAmount,
 			minBuyAmount,
 			quoteBuyAmount: expectedBuyAmount,

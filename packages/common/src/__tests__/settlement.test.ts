@@ -29,6 +29,8 @@ function fixtureProposal(): Proposal {
 		"0xb9403b4c8342c3567e5b1928398030f010730c0b1d83657248e4e4e47984d90bd2e80d60aff5377587e49ff32c9bad639d6f68bc6a678be0" as Hex;
 	return {
 		orderUidHash: keccak256(orderUid),
+		sellToken: "0xB1F1ee126e9c96231Cc3d3fAD7C08b4cf873b1f1",
+		buyToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		sellAmount: 20_000_002_675_677_095_795n,
 		minBuyAmount: 773_213_156n,
 		quoteBuyAmount: 773_213_156n,

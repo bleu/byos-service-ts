@@ -177,6 +177,8 @@ describe("partial fill with hooks", () => {
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
+			sellToken,
+			buyToken,
 			sellAmount: fillAmount,
 			minBuyAmount,
 			quoteBuyAmount: expectedBuyAmount,
