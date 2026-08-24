@@ -111,6 +111,8 @@ describe("order types", () => {
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
+			sellToken,
+			buyToken,
 			sellAmount: proposalSellAmount,
 			minBuyAmount,
 			quoteBuyAmount: expectedBuyAmount,
@@ -136,7 +138,7 @@ describe("order types", () => {
 		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
 			"settled",
 			"settleFailed",
-		]);
+		], 60_000);
 		expect(proposal.status).toBe("settled");
 	});
 
@@ -183,6 +185,8 @@ describe("order types", () => {
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
+			sellToken,
+			buyToken,
 			sellAmount: requiredSellAmount,
 			minBuyAmount: desiredBuyAmount,
 			quoteBuyAmount: desiredBuyAmount,

@@ -102,6 +102,8 @@ describe("happy path", () => {
 		const { id: proposalId } = await signAndSubmitProposal({
 			walletClient: subSolverWallet,
 			orderUid,
+			sellToken,
+			buyToken,
 			sellAmount,
 			minBuyAmount,
 			quoteBuyAmount: expectedBuyAmount,
