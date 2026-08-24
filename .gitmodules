@@ -4,4 +4,4 @@
 [submodule "offline-mode"]
 	path = offline-mode
 	url = https://github.com/bleu/cow-offline-mode.git
-	branch = cow-1237
+	branch = cow-1240
