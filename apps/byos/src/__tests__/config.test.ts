@@ -93,17 +93,16 @@ describe("parseConfig", () => {
 		);
 	});
 
-	it("rejects RPC_URL without its companion settings", () => {
+	it("rejects RPC_URL without DEFAULT_GAS_PRICE (the only remaining required companion)", () => {
 		expect(() => parseConfig({ ...base, RPC_URL: chain.RPC_URL })).toThrow(
-			/ORDERBOOK_URL.*required when RPC_URL is set/s,
+			/DEFAULT_GAS_PRICE.*required when RPC_URL is set/s,
 		);
 	});
 
-	it("rejects RPC_URL when a single companion is missing", () => {
+	it("accepts RPC_URL without ESCROW_ADDRESS (resolved from chain at context build)", () => {
+		// ESCROW_ADDRESS is now an optional override; the chain record handles it.
 		const { ESCROW_ADDRESS: _dropped, ...partial } = chain;
-		expect(() => parseConfig({ ...base, ...partial })).toThrow(
-			/ESCROW_ADDRESS: required when RPC_URL is set/,
-		);
+		expect(() => parseConfig({ ...base, ...partial })).not.toThrow();
 	});
 
 	it("rejects an operator key without RPC_URL", () => {

@@ -2,7 +2,6 @@ import "dotenv/config";
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import pino from "pino";
-import type { Address } from "viem";
 import { parseConfig } from "./config.js";
 import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
@@ -38,7 +37,7 @@ async function main() {
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
-		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
+		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		gasPriceRef: ctx.gasPriceRef,
@@ -53,7 +52,7 @@ async function main() {
 	const internalApp = createInternalApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
-		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
+		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		gasPriceRef: ctx.gasPriceRef,

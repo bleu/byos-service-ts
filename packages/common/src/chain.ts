@@ -1,11 +1,13 @@
 import {
+	COW_PROTOCOL_SETTLEMENT_CONTRACT_ADDRESS,
 	type EvmChainInfo,
 	getChainInfo,
 	isEvmChainInfo,
 	isSupportedChain,
+	ORDER_BOOK_PROD_CONFIG,
 	SupportedChainId,
 } from "@cowprotocol/cow-sdk";
-import { type Chain, defineChain } from "viem";
+import { type Address, type Chain, defineChain } from "viem";
 import { foundry } from "viem/chains";
 
 /**
@@ -95,6 +97,152 @@ export function isSupportedEvmChain(chainId: number): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * CoW Protocol settlement contract address per chain, from the sdk.
+ *
+ * The sdk carries the same address on every EVM chain CoW settles on — it is
+ * an immutable singleton — but is keyed per chain so a future divergence (e.g.
+ * a V2 deployed only on a new chain) arrives as a sdk bump rather than a silent
+ * wrong address.
+ *
+ * Throws for chains where CoW has no settlement contract (Solana, local anvil).
+ * The caller should prefer `COW_PROTOCOL_SETTLEMENT_ADDRESS` override before
+ * falling through here.
+ */
+export function settlementAddressFor(chainId: number): Address {
+	if (chainId === foundry.id) return LOCAL_SETTLEMENT_ADDRESS;
+
+	if (!isSupportedChain(chainId)) {
+		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
+	}
+
+	const address = COW_PROTOCOL_SETTLEMENT_CONTRACT_ADDRESS[chainId];
+	if (!address) {
+		throw new Error(`chain ${chainId} has no CoW settlement contract`);
+	}
+
+	return address as Address;
+}
+
+/**
+ * CoW Protocol orderbook API base URL per chain, from the sdk.
+ *
+ * Points to production (`api.cow.fi`). A barn/staging override belongs in the
+ * caller's env var, not here: barn is an operational concern, not a chain
+ * property.
+ *
+ * Throws for Solana and local anvil (no hosted orderbook for either).
+ */
+export function orderbookUrlFor(chainId: number): string {
+	if (chainId === foundry.id) return LOCAL_ORDERBOOK_URL;
+
+	if (!isSupportedChain(chainId)) {
+		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
+	}
+
+	const url = ORDER_BOOK_PROD_CONFIG[chainId];
+	if (!url) {
+		throw new Error(`chain ${chainId} has no CoW orderbook URL`);
+	}
+
+	return url;
+}
+
+/** Anvil orderbook URL for the offline CoW stack used in local dev and e2e. */
+const LOCAL_ORDERBOOK_URL = "http://localhost:8080";
+
+/** Anvil settlement address — the same as the mainnet singleton, baked into
+ * the offline-mode fork by e2e-stack.sh. */
+const LOCAL_SETTLEMENT_ADDRESS: Address = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+
+/**
+ * Bleu-deployed Escrow contract address per chain.
+ *
+ * Exhaustive over `SupportedChainId`: adding a chain to the sdk is a compile
+ * error here until an entry is added. `null` means BYOS is not deployed on
+ * that chain — the caller must reject it at startup.
+ *
+ * Non-EVM chains (Solana) are null by construction.
+ * Chains where BYOS is not yet live carry null as a deliberate placeholder.
+ */
+const ESCROW_ADDRESS: Record<SupportedChainId, Address | null> = {
+	[SupportedChainId.MAINNET]: null,
+	[SupportedChainId.BNB]: null,
+	[SupportedChainId.GNOSIS_CHAIN]: null,
+	[SupportedChainId.POLYGON]: null,
+	[SupportedChainId.BASE]: null,
+	[SupportedChainId.PLASMA]: null,
+	[SupportedChainId.ARBITRUM_ONE]: null,
+	[SupportedChainId.AVALANCHE]: null,
+	[SupportedChainId.INK]: null,
+	[SupportedChainId.LINEA]: null,
+	[SupportedChainId.SEPOLIA]: null,
+	[SupportedChainId.SOLANA]: null,
+};
+
+/** Anvil escrow address for local dev and e2e — deployed dynamically by
+ * e2e-stack.sh and read from ESCROW_ADDRESS env var in those environments.
+ * This sentinel is only reached if neither the override nor the per-chain
+ * record supplies an address. */
+const LOCAL_ESCROW_ADDRESS: Address | null = null;
+
+/**
+ * Bleu-deployed Escrow address for a chain.
+ *
+ * Returns `null` when BYOS is not yet deployed on the chain — the caller must
+ * treat that as a startup error (no escrow means no collateral checks).
+ */
+export function escrowAddressFor(chainId: number): Address | null {
+	if (chainId === foundry.id) return LOCAL_ESCROW_ADDRESS;
+
+	if (!isSupportedChain(chainId)) {
+		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
+	}
+
+	return ESCROW_ADDRESS[chainId];
+}
+
+/**
+ * Bleu-deployed TrampolineFactory contract address per chain.
+ *
+ * Same exhaustive pattern as ESCROW_ADDRESS: a new sdk chain is a compile
+ * error until an entry is added here. `null` means not deployed.
+ */
+const TRAMPOLINE_FACTORY_ADDRESS: Record<SupportedChainId, Address | null> = {
+	[SupportedChainId.MAINNET]: null,
+	[SupportedChainId.BNB]: null,
+	[SupportedChainId.GNOSIS_CHAIN]: null,
+	[SupportedChainId.POLYGON]: null,
+	[SupportedChainId.BASE]: null,
+	[SupportedChainId.PLASMA]: null,
+	[SupportedChainId.ARBITRUM_ONE]: null,
+	[SupportedChainId.AVALANCHE]: null,
+	[SupportedChainId.INK]: null,
+	[SupportedChainId.LINEA]: null,
+	[SupportedChainId.SEPOLIA]: null,
+	[SupportedChainId.SOLANA]: null,
+};
+
+/** Anvil TrampolineFactory address for local dev and e2e — from the offline
+ * CoW stack. Override via TRAMPOLINE_FACTORY env var in those environments. */
+const LOCAL_TRAMPOLINE_FACTORY_ADDRESS: Address = "0x00000000000000000000000000000000000fac70";
+
+/**
+ * Bleu-deployed TrampolineFactory address for a chain.
+ *
+ * Returns `null` when not yet deployed — the caller must treat that as a
+ * startup error when RPC validation is enabled.
+ */
+export function trampolineFactoryFor(chainId: number): Address | null {
+	if (chainId === foundry.id) return LOCAL_TRAMPOLINE_FACTORY_ADDRESS;
+
+	if (!isSupportedChain(chainId)) {
+		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
+	}
+
+	return TRAMPOLINE_FACTORY_ADDRESS[chainId];
 }
 
 /**

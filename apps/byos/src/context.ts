@@ -1,5 +1,12 @@
 import { resolve } from "node:path";
-import { evmChainFor, minCollateralFor } from "@byos/common";
+import {
+	escrowAddressFor,
+	evmChainFor,
+	minCollateralFor,
+	orderbookUrlFor,
+	settlementAddressFor,
+	trampolineFactoryFor,
+} from "@byos/common";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
@@ -42,6 +49,9 @@ export interface AppContext {
 	 * MIN_COLLATERAL override. Feeds the validator threshold, the penalty
 	 * parameter c_l, and the request-path escrow floor gate. */
 	minCollateralWei: bigint;
+	/** Resolved TrampolineFactory address: the chain's default from
+	 * `trampolineFactoryFor`, or the TRAMPOLINE_FACTORY override. */
+	trampolineFactory: Address;
 	queues: Queues;
 	config: Config;
 	gasPriceRef: GasPriceRef;
@@ -118,6 +128,20 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// it can never reject a proposal the validator accepts.
 	const rateLimits = rateLimitsFromConfig(config, minCollateralWei);
 
+	// TrampolineFactory is needed for EIP-712 domain even without RPC.
+	// Resolve it once here, failing fast if neither the override nor the
+	// per-chain table provides an address.
+	const trampolineFactory: Address = (() => {
+		if (config.TRAMPOLINE_FACTORY) return config.TRAMPOLINE_FACTORY as Address;
+		const addr = trampolineFactoryFor(config.CHAIN_ID);
+		if (!addr) {
+			throw new Error(
+				`No TRAMPOLINE_FACTORY for chain ${config.CHAIN_ID} — set TRAMPOLINE_FACTORY env var`,
+			);
+		}
+		return addr;
+	})();
+
 	// Blockchain (optional — depends on RPC_URL)
 	let validator: ValidateProposal = acceptAll;
 	let operator: EscrowOperator | null = null;
@@ -139,9 +163,22 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		}
 		logger.info("rpc connected");
 
-		// The config schema requires these alongside RPC_URL, so the casts
-		// cannot see undefined — same guarantee clap's requires_all gives Rust.
-		const escrowAddress = config.ESCROW_ADDRESS as Address;
+		// Resolve per-chain addresses, allowing env var overrides.
+		const escrowAddress: Address = (() => {
+			if (config.ESCROW_ADDRESS) return config.ESCROW_ADDRESS as Address;
+			const addr = escrowAddressFor(config.CHAIN_ID);
+			if (!addr) {
+				throw new Error(
+					`No ESCROW_ADDRESS for chain ${config.CHAIN_ID} — set ESCROW_ADDRESS env var`,
+				);
+			}
+			return addr;
+		})();
+
+		const settlementAddress: Address =
+			(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
+
+		const orderbookUrl: string = config.ORDERBOOK_URL ?? orderbookUrlFor(config.CHAIN_ID);
 
 		// Escrow validator
 		const escrowValidator = new EscrowValidator(
@@ -152,15 +189,15 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		);
 
 		// Orderbook client
-		const orderbook = new OrderbookClient(config.ORDERBOOK_URL as string);
+		const orderbook = new OrderbookClient(orderbookUrl);
 
 		// Simulation validator
 		const simulationValidator = new SimulationValidator(
 			publicClient,
 			orderbook,
-			config.SETTLEMENT_ADDRESS as Address,
+			settlementAddress,
 			escrowAddress,
-			config.TRAMPOLINE_FACTORY as Address,
+			trampolineFactory,
 			gasPriceRef,
 			BigInt(config.MIN_PROPOSAL_SCORE),
 		);
@@ -211,6 +248,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		redis,
 		requestRedis,
 		minCollateralWei,
+		trampolineFactory,
 		queues,
 		config,
 		gasPriceRef,

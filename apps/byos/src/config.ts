@@ -12,7 +12,12 @@ export const configSchema = z.object({
 		.number()
 		.int()
 		.refine(isSupportedEvmChain, "Must be an EVM chain supported by CoW Protocol"),
-	TRAMPOLINE_FACTORY: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
+	/** Overrides the chain's TrampolineFactory address from `trampolineFactoryFor`. Omit to
+	 * take the per-chain value. Required only when the chain has no entry yet. */
+	TRAMPOLINE_FACTORY: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
 
 	// Listeners
 	PUBLIC_ADDR_PORT: z.coerce.number().default(9585),
@@ -21,13 +26,17 @@ export const configSchema = z.object({
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 
-	// Chain connectivity (all required together when RPC_URL is set)
+	// Chain connectivity (RPC_URL is the primary knob; the rest resolve from the chain)
 	RPC_URL: z.string().optional(),
+	/** Overrides the orderbook URL from `orderbookUrlFor`. Useful for barn/staging. */
 	ORDERBOOK_URL: z.string().optional(),
+	/** Overrides the escrow address from `escrowAddressFor`. Required when the chain
+	 * has no entry yet. */
 	ESCROW_ADDRESS: z
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
+	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
@@ -94,17 +103,16 @@ export const configSchema = z.object({
 
 /**
  * Mirrors the Rust CLI's requires_all: a half-configured chain connection
- * must fail startup, not boot with an undefined escrow address.
+ * must fail startup, not boot with a missing value.
+ *
+ * ORDERBOOK_URL, ESCROW_ADDRESS, and SETTLEMENT_ADDRESS are no longer listed:
+ * they resolve from the chain via their `*For()` helpers in `@byos/common`.
+ * They may still be set as overrides (barn, staging, not-yet-deployed chains).
  *
  * MIN_COLLATERAL is not listed: it defaults to the chain's value, so an absent
  * one is a deliberate choice rather than a half-configuration.
  */
-const RPC_COMPANIONS = [
-	"ORDERBOOK_URL",
-	"ESCROW_ADDRESS",
-	"SETTLEMENT_ADDRESS",
-	"DEFAULT_GAS_PRICE",
-] as const;
+const RPC_COMPANIONS = ["DEFAULT_GAS_PRICE"] as const;
 
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
 	if (cfg.RPC_URL) {
