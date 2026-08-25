@@ -1,6 +1,14 @@
 import { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { describe, expect, it } from "vitest";
-import { evmChainFor, isSupportedEvmChain, minCollateralFor } from "../chain.js";
+import {
+	escrowAddressFor,
+	evmChainFor,
+	isSupportedEvmChain,
+	minCollateralFor,
+	orderbookUrlFor,
+	settlementAddressFor,
+	trampolineFactoryFor,
+} from "../chain.js";
 
 /** Every EVM chain CoW settles on. Solana is excluded deliberately — BYOS
  * cannot operate there, so it must be rejected rather than skipped. */
@@ -54,6 +62,82 @@ describe("evmChainFor", () => {
 		expect(isSupportedEvmChain(SupportedChainId.MAINNET)).toBe(true);
 		expect(isSupportedEvmChain(SupportedChainId.SOLANA)).toBe(false);
 		expect(isSupportedEvmChain(999_999)).toBe(false);
+	});
+});
+
+describe("settlementAddressFor", () => {
+	it("returns the CoW settlement singleton for every EVM chain", () => {
+		// The settlement contract is the same address on every EVM chain CoW
+		// Protocol settles on — an immutable singleton.
+		const SINGLETON = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
+		for (const id of EVM_CHAIN_IDS) {
+			expect(settlementAddressFor(id)).toBe(SINGLETON);
+		}
+	});
+
+	it("returns the offline-mode address for anvil (31337)", () => {
+		// The offline CoW stack forks mainnet so the address is the same.
+		expect(settlementAddressFor(31337)).toBe("0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
+	});
+
+	it("throws for an unsupported chain", () => {
+		expect(() => settlementAddressFor(999_999)).toThrow(/not supported/);
+	});
+});
+
+describe("orderbookUrlFor", () => {
+	it("returns a prod api.cow.fi URL for every EVM chain", () => {
+		for (const id of EVM_CHAIN_IDS) {
+			expect(orderbookUrlFor(id)).toMatch(/^https:\/\/api\.cow\.fi\//);
+		}
+	});
+
+	it("returns the local orderbook URL for anvil (31337)", () => {
+		expect(orderbookUrlFor(31337)).toBe("http://localhost:8080");
+	});
+
+	it("returns the mainnet orderbook URL for mainnet", () => {
+		expect(orderbookUrlFor(SupportedChainId.MAINNET)).toBe("https://api.cow.fi/mainnet");
+	});
+
+	it("throws for an unsupported chain", () => {
+		expect(() => orderbookUrlFor(999_999)).toThrow(/not supported/);
+	});
+});
+
+describe("escrowAddressFor", () => {
+	it("returns null for all chains (bleu contracts not yet deployed)", () => {
+		// All production entries are null until bleu deploys the Escrow contract.
+		// This test should be updated per chain as addresses are filled in.
+		for (const id of EVM_CHAIN_IDS) {
+			expect(escrowAddressFor(id)).toBeNull();
+		}
+	});
+
+	it("returns null for anvil (resolved via env override in e2e/local)", () => {
+		// e2e-stack.sh writes ESCROW_ADDRESS, which overrides this null.
+		expect(escrowAddressFor(31337)).toBeNull();
+	});
+
+	it("throws for an unsupported chain", () => {
+		expect(() => escrowAddressFor(999_999)).toThrow(/not supported/);
+	});
+});
+
+describe("trampolineFactoryFor", () => {
+	it("returns null for all production chains (not yet deployed)", () => {
+		for (const id of EVM_CHAIN_IDS) {
+			expect(trampolineFactoryFor(id)).toBeNull();
+		}
+	});
+
+	it("returns the offline-mode factory address for anvil (31337)", () => {
+		// The offline CoW stack deploys TrampolineFactory at this address.
+		expect(trampolineFactoryFor(31337)).toBe("0x00000000000000000000000000000000000fac70");
+	});
+
+	it("throws for an unsupported chain", () => {
+		expect(() => trampolineFactoryFor(999_999)).toThrow(/not supported/);
 	});
 });
 
