@@ -681,11 +681,12 @@ export async function listBySubSolver(db: Db, subSolver: Address): Promise<Propo
 
 /**
  * Returns the gas used for all proposals of a sub-solver that are in-flight
- * (`submitted` or `executing`), excluding one proposal by id (the one being
- * validated). Used by EscrowValidator to compute cumulative exposure.
+ * (`submitted`, `active`, or `executing`), excluding one proposal by id (the
+ * one being validated). Used by EscrowValidator to compute cumulative exposure.
  *
  * `submitted` proposals have not been simulated yet, so their `gasUsed` is
  * null — they contribute 0 gas to the exposure (minCollateral only).
+ * `active` proposals have been simulated and carry a real gas estimate.
  * `executing` proposals may or may not have a gas estimate; same rule applies.
  */
 export async function inflightGasUsedBySubSolver(
@@ -699,7 +700,7 @@ export async function inflightGasUsedBySubSolver(
 		.where(
 			and(
 				eq(proposals.subSolver, subSolver.toLowerCase()),
-				inArray(proposals.status, ["submitted", "executing"]),
+				inArray(proposals.status, ["submitted", "active", "executing"]),
 				sql`${proposals.id} != ${excludeId}`,
 			),
 		);
