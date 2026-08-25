@@ -3,10 +3,10 @@ import {
 	escrowAddressFor,
 	evmChainFor,
 	minCollateralFor,
-	orderbookUrlFor,
 	settlementAddressFor,
 	trampolineFactoryFor,
 } from "@byos/common";
+import type { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
@@ -178,8 +178,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		const settlementAddress: Address =
 			(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
-		const orderbookUrl: string = config.ORDERBOOK_URL ?? orderbookUrlFor(config.CHAIN_ID);
-
 		// Escrow validator
 		const escrowValidator = new EscrowValidator(
 			publicClient,
@@ -188,8 +186,12 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 			gasPriceRef,
 		);
 
-		// Orderbook client
-		const orderbook = new OrderbookClient(orderbookUrl);
+		// Orderbook client — uses the chain's SupportedChainId so the sdk can
+		// select the correct base URL. ORDERBOOK_URL overrides it (barn/staging).
+		const orderbook = new OrderbookClient(
+			config.CHAIN_ID as SupportedChainId,
+			config.ORDERBOOK_URL,
+		);
 
 		// Simulation validator
 		const simulationValidator = new SimulationValidator(
