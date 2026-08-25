@@ -413,6 +413,11 @@ components:
       type: string
       pattern: "^[0-9]+$"
       example: "1000000000000000000"
+    I256:
+      description: A 256-bit signed integer as a decimal string (may be negative).
+      type: string
+      pattern: "^-?[0-9]+$"
+      example: "-1000000000000000000"
     UnixTimestamp:
       description: |
         A Unix timestamp in seconds, as a decimal string (256-bit range on
@@ -667,21 +672,27 @@ components:
         buyToken:
           $ref: "#/components/schemas/Address"
         delta:
-          description: Signed amount difference (buy token units) as a decimal string.
+          description: |
+            Amount of buy token delivered by the Trampoline (from the
+            on-chain `Executed` event, `uint256`), as a decimal string.
           allOf:
             - $ref: "#/components/schemas/U256"
         gap:
           description: |
-            The gap between the proposal's buy amount and the order's buy
-            amount (buy token units) as a decimal string.
+            `quoteBuyAmount - delta`: the shortfall (positive) or excess
+            (negative) relative to the quoted buy amount, in buy-token
+            units, as a decimal string. Negative when the sub-solver
+            over-delivered.
           allOf:
-            - $ref: "#/components/schemas/U256"
+            - $ref: "#/components/schemas/I256"
         nativeTokenAmount:
           description: |
-            Native-token equivalent of the delta, in wei, as a decimal string.
-            This is the amount that contributes to `outstandingBalance`.
+            Native-token equivalent of `gap`, in wei, as a decimal string.
+            Positive = under-delivery debit; negative = over-delivery
+            credit. This is the signed amount that contributes to
+            `outstandingBalance`.
           allOf:
-            - $ref: "#/components/schemas/U256"
+            - $ref: "#/components/schemas/I256"
         createdAt:
           description: ISO-8601 timestamp of when the entry was created.
           type: string
@@ -696,11 +707,13 @@ components:
       properties:
         outstandingBalance:
           description: |
-            Sum of all uncleared `nativeTokenAmount` values, in wei, as a
-            decimal string. When this exceeds `threshold`, the sub-solver
-            approaches the escrow floor gate on `POST /proposals`.
+            Signed sum of all uncleared `nativeTokenAmount` values, in
+            wei, as a decimal string. Positive means net under-delivery
+            (debit owed); negative means net over-delivery (credit). When
+            this exceeds `threshold`, the sub-solver approaches the escrow
+            floor gate on `POST /proposals`.
           allOf:
-            - $ref: "#/components/schemas/U256"
+            - $ref: "#/components/schemas/I256"
         threshold:
           description: |
             The configured collateral threshold (`c_l`), in wei, as a
