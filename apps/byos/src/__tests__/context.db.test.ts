@@ -68,7 +68,13 @@ function startJsonRpcStub(): Promise<{ url: string; close: () => Promise<void> }
 			}
 			const url = `http://127.0.0.1:${addr.port}`;
 			const close = () =>
-				new Promise<void>((res, rej) => server.close((err) => (err ? rej(err) : res())));
+				new Promise<void>((res, rej) => {
+					// closeAllConnections() drops keep-alive sockets that viem's
+					// undici transport may hold open; without it server.close() waits
+					// for them to drain and the afterAll hangs.
+					server.closeAllConnections();
+					server.close((err) => (err ? rej(err) : res()));
+				});
 			resolve({ url, close });
 		});
 	});
@@ -310,6 +316,66 @@ describe("buildContext — RPC with operator", () => {
 	it("validator and balanceRefresh are also set when operator is present", () => {
 		expect(ctx.validator).toBeInstanceOf(ProposalValidator);
 		expect(ctx.balanceRefresh).not.toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+
+describe("buildContext — RPC with MIN_COLLATERAL override", () => {
+	// Verifies that the custom floor reaches balanceRefresh.floorWei (the
+	// request-path escrow floor gate) when RPC is active. The no-RPC
+	// MIN_COLLATERAL tests below can never exercise this path because
+	// balanceRefresh is null without RPC.
+	let dbCtx: TestContext;
+	let rpcStub: { url: string; close: () => Promise<void> };
+	let ctx: Awaited<ReturnType<typeof buildContext>>;
+
+	beforeAll(async () => {
+		dbCtx = await createTestDb();
+		rpcStub = await startJsonRpcStub();
+
+		const config = parseConfig({
+			DATABASE_URL: dbCtx.url,
+			CHAIN_ID: "1",
+			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
+			RPC_URL: rpcStub.url,
+			ORDERBOOK_URL: "http://127.0.0.1:1",
+			ESCROW_ADDRESS: FAKE_ESCROW,
+			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
+			DEFAULT_GAS_PRICE: "1000000000",
+			MIN_COLLATERAL: "999000000000000000", // 0.999 ETH — distinct from any chain default
+		});
+
+		ctx = await buildContext(config, logger);
+	});
+
+	afterAll(async () => {
+		await ctx.queues.validation.close();
+		await ctx.queues.validateProposal.close();
+		await ctx.queues.retention.close();
+		await ctx.queues.penalty.close();
+		await ctx.queues.audit.close();
+		await ctx.queues.balanceRefresh.close();
+		ctx.redis.disconnect();
+		ctx.requestRedis.disconnect();
+		await ctx.dbClient.end();
+		await rpcStub.close();
+		await dbCtx.cleanup();
+	});
+
+	// Deleting the `floorWei: rateLimits.floorWei` line inside the balanceRefresh
+	// object literal (context.ts ~line 218) would leave it 0n or undefined.
+	// The no-RPC MIN_COLLATERAL tests below cannot catch this because
+	// balanceRefresh is null when RPC is absent.
+	it("MIN_COLLATERAL override reaches balanceRefresh.floorWei (the request-path escrow floor gate)", () => {
+		const CUSTOM = 999000000000000000n;
+		// context.ts: `floorWei: rateLimits.floorWei` in the balanceRefresh object.
+		// If that line read `0n` or `minCollateralFor(config.CHAIN_ID)` instead,
+		// this assertion would catch the drift.
+		expect(ctx.balanceRefresh?.floorWei).toBe(CUSTOM);
+		// Consistency: the rate-limit gate and the balance-refresh gate must agree.
+		expect(ctx.rateLimits.floorWei).toBe(CUSTOM);
+		expect(ctx.minCollateralWei).toBe(CUSTOM);
 	});
 });
 
