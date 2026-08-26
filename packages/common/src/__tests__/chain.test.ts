@@ -101,4 +101,3 @@ describe("orderbookUrlFor", () => {
 		expect(() => orderbookUrlFor(999_999)).toThrow(/not supported/);
 	});
 });
-
