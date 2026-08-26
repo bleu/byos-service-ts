@@ -252,6 +252,39 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /buffer-balance:
+    get:
+      operationId: getBufferBalance
+      summary: Get the caller's off-chain buffer balance.
+      description: |
+        Returns the caller's outstanding buffer balance — the sum of
+        uncleared native-token amounts across all live buffer entries — the
+        configured collateral threshold (`c_l`), and the individual entries
+        that make up the balance.
+
+        Owner-scoped: the recovered signer only sees its own entries.
+        Useful for sub-solvers to track how close they are to the escrow
+        floor before new proposals may be blocked.
+      security:
+        - readAuth: []
+      responses:
+        "200":
+          description: The caller's buffer balance and uncleared entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BufferBalanceResponse"
+        "400":
+          description: Missing or invalid `X-Signature` header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /proposals/{orderUid}:
     get:
       operationId: listProposalsByOrder
@@ -380,6 +413,11 @@ components:
       type: string
       pattern: "^[0-9]+$"
       example: "1000000000000000000"
+    I256:
+      description: A 256-bit signed integer as a decimal string (may be negative).
+      type: string
+      pattern: "^-?[0-9]+$"
+      example: "-1000000000000000000"
     UnixTimestamp:
       description: |
         A Unix timestamp in seconds, as a decimal string (256-bit range on
@@ -613,6 +651,80 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProposalMetadata"
+    BufferEntry:
+      description: |
+        One uncleared buffer entry representing a native-token amount owed
+        to the buffer for a settled proposal.
+      type: object
+      required:
+        - proposalId
+        - orderUid
+        - buyToken
+        - delta
+        - gap
+        - nativeTokenAmount
+        - createdAt
+      properties:
+        proposalId:
+          $ref: "#/components/schemas/ProposalId"
+        orderUid:
+          $ref: "#/components/schemas/OrderUid"
+        buyToken:
+          $ref: "#/components/schemas/Address"
+        delta:
+          description: |
+            Amount of buy token delivered by the Trampoline (from the
+            on-chain `Executed` event, `uint256`), as a decimal string.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        gap:
+          description: |
+            `quoteBuyAmount - delta`: the shortfall (positive) or excess
+            (negative) relative to the quoted buy amount, in buy-token
+            units, as a decimal string. Negative when the sub-solver
+            over-delivered.
+          allOf:
+            - $ref: "#/components/schemas/I256"
+        nativeTokenAmount:
+          description: |
+            Native-token equivalent of `gap`, in wei, as a decimal string.
+            Positive = under-delivery debit; negative = over-delivery
+            credit. This is the signed amount that contributes to
+            `outstandingBalance`.
+          allOf:
+            - $ref: "#/components/schemas/I256"
+        createdAt:
+          description: ISO-8601 timestamp of when the entry was created.
+          type: string
+          format: date-time
+          example: "2025-07-01T12:00:00.000Z"
+    BufferBalanceResponse:
+      type: object
+      required:
+        - outstandingBalance
+        - threshold
+        - entries
+      properties:
+        outstandingBalance:
+          description: |
+            Signed sum of all uncleared `nativeTokenAmount` values, in
+            wei, as a decimal string. Positive means net under-delivery
+            (debit owed); negative means net over-delivery (credit). When
+            this exceeds `threshold`, the sub-solver approaches the escrow
+            floor gate on `POST /proposals`.
+          allOf:
+            - $ref: "#/components/schemas/I256"
+        threshold:
+          description: |
+            The configured collateral threshold (`c_l`), in wei, as a
+            decimal string.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        entries:
+          description: Uncleared buffer entries that make up `outstandingBalance`.
+          type: array
+          items:
+            $ref: "#/components/schemas/BufferEntry"
     Error:
       description: |
         JSON error body. `kind` is the machine-readable
