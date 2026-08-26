@@ -2,6 +2,7 @@
 	"files": [],
 	"references": [
 		{ "path": "packages/common" },
+		{ "path": "packages/subsolver-core" },
 		{ "path": "apps/byos" },
 		{ "path": "apps/subsolver" }
 	]
