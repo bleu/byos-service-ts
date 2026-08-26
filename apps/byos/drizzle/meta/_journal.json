@@ -29,6 +29,13 @@
 			"when": 1786896000000,
 			"tag": "0003_buffer_entries",
 			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "7",
+			"when": 1787780800000,
+			"tag": "0004_nonce_uniqueness_and_supersession",
+			"breakpoints": true
 		}
 	]
 }
