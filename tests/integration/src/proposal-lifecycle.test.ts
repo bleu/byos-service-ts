@@ -27,6 +27,36 @@ describe("proposal lifecycle", () => {
 		expect(body.id).toBeGreaterThan(0);
 	});
 
+	it("replays an identical signed proposal → original id with 202", async () => {
+		const { response: firstResponse, body } = await signAndSubmitProposal(app.publicApp, {
+			nonce: 99n,
+		});
+		expect(firstResponse.status, await firstResponse.clone().text()).toBe(202);
+		const first = await firstResponse.json();
+
+		const replayResponse = await app.publicApp.request("/proposals", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+
+		expect(replayResponse.status).toBe(202);
+		expect(await replayResponse.json()).toEqual({ id: first.id });
+	});
+
+	it("rejects a reused nonce with different signed content → 409", async () => {
+		const first = await signAndSubmitProposal(app.publicApp, { nonce: 100n });
+		expect(first.response.status).toBe(202);
+
+		const conflicting = await signAndSubmitProposal(app.publicApp, {
+			nonce: 100n,
+			orderUid: `0x${"cd".repeat(56)}`,
+		});
+
+		expect(conflicting.response.status).toBe(409);
+		expect(await conflicting.response.json()).toMatchObject({ kind: "NonceAlreadyUsed" });
+	});
+
 	it("rejects expired proposal → 400", async () => {
 		const { response } = await signAndSubmitProposal(app.publicApp, {
 			validUntil: 1n, // far in the past

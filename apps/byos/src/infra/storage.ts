@@ -134,6 +134,26 @@ export async function insert(
 	return { id, auditEvent };
 }
 
+/** Returns the proposal that first consumed a nonce for a sub-solver. */
+export async function findBySubSolverAndNonce(
+	db: Db,
+	subSolver: Address,
+	nonce: bigint,
+): Promise<Proposal | null> {
+	const [row] = await db
+		.select()
+		.from(proposals)
+		.where(
+			and(
+				eq(proposals.subSolver, subSolver.toLowerCase()),
+				eq(proposals.nonce, nonce.toString()),
+			),
+		)
+		.limit(1);
+
+	return row ? rowToProposal(row) : null;
+}
+
 export async function transition(
 	db: Db,
 	proposal: Proposal,

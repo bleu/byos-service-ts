@@ -97,6 +97,14 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.ProposalLifetimeExceeded);
 		}
 
+		const existing = await store.findBySubSolverAndNonce(config.db, subSolver, parsed.nonce);
+		if (existing) {
+			if (existing.signature.toLowerCase() === parsed.signature.toLowerCase()) {
+				return c.json({ id: existing.id }, 202);
+			}
+			throw new AppError(Kind.NonceAlreadyUsed);
+		}
+
 		// Insert as Submitted
 		const { id, auditEvent } = await store.insert(config.db, {
 			subSolver,
