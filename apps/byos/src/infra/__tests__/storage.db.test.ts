@@ -9,6 +9,7 @@ import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 
 let ctx: TestContext;
+let nonceCounter = 0n;
 
 beforeAll(async () => {
 	ctx = await createTestDb();
@@ -37,7 +38,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		],
 		interactionsHash: `0x${"dd".repeat(32)}` as Hex,
 		validUntil: 1_700_000_000n,
-		nonce: 1n,
+		nonce: nonceCounter++,
 		signature: `0x${"ee".repeat(65)}` as Hex,
 		status: "submitted",
 		rejectionReason: null,
