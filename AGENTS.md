@@ -2,6 +2,20 @@
 
 Instructions for AI agents working on this codebase.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in Linear under the BYOS project. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Linear workflow labels use the five default canonical names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Project overview
 
 This repo is the **BYOS service** — a CoW Protocol solver that sources routes from permissionless external sub-solvers. BYOS (Bring Your Own Solver) accepts settlement proposals, validates them against escrow collateral, and answers the CoW driver's `/solve` auction with the best route per order.
