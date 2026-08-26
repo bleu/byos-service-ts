@@ -16,6 +16,7 @@ The normative BYOS specification lives in `docs/shared/` (a Git submodule pointi
 
 ```
 CONTEXT.md              Domain language and architecture map — read first
+AGENTS/skills/          Agent skills available in this repo (e.g. linear-review)
 apps/byos/              The BYOS service (proposal API, solver engine, workers)
 apps/subsolver/         Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
