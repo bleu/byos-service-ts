@@ -67,7 +67,7 @@ export class EscrowValidator implements ValidateProposal {
 	private async cumulativeExposure(subSolver: Address, excludeId: number): Promise<bigint> {
 		if (!this.fetchInflightGasUsed) return 0n;
 		const gasUsedList = await this.fetchInflightGasUsed(subSolver, excludeId);
-		return gasUsedList.reduce((sum, gas) => sum + this.threshold(gas ?? 0n), 0n);
+		return gasUsedList.reduce<bigint>((sum, gas) => sum + this.threshold(gas ?? 0n), 0n);
 	}
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {
