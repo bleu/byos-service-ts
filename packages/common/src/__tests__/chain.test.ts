@@ -1,13 +1,10 @@
 import { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { describe, expect, it } from "vitest";
 import {
-	escrowAddressFor,
 	evmChainFor,
 	isSupportedEvmChain,
-	minCollateralFor,
 	orderbookUrlFor,
 	settlementAddressFor,
-	trampolineFactoryFor,
 } from "../chain.js";
 
 /** Every EVM chain CoW settles on. Solana is excluded deliberately — BYOS
@@ -105,60 +102,3 @@ describe("orderbookUrlFor", () => {
 	});
 });
 
-describe("escrowAddressFor", () => {
-	it("returns null for all chains (bleu contracts not yet deployed)", () => {
-		// All production entries are null until bleu deploys the Escrow contract.
-		// This test should be updated per chain as addresses are filled in.
-		for (const id of EVM_CHAIN_IDS) {
-			expect(escrowAddressFor(id)).toBeNull();
-		}
-	});
-
-	it("returns null for anvil (resolved via env override in e2e/local)", () => {
-		// e2e-stack.sh writes ESCROW_ADDRESS, which overrides this null.
-		expect(escrowAddressFor(31337)).toBeNull();
-	});
-
-	it("throws for an unsupported chain", () => {
-		expect(() => escrowAddressFor(999_999)).toThrow(/not supported/);
-	});
-});
-
-describe("trampolineFactoryFor", () => {
-	it("returns null for all production chains (not yet deployed)", () => {
-		for (const id of EVM_CHAIN_IDS) {
-			expect(trampolineFactoryFor(id)).toBeNull();
-		}
-	});
-
-	it("returns the offline-mode factory address for anvil (31337)", () => {
-		// The offline CoW stack deploys TrampolineFactory at this address.
-		expect(trampolineFactoryFor(31337)).toBe("0x00000000000000000000000000000000000fac70");
-	});
-
-	it("throws for an unsupported chain", () => {
-		expect(() => trampolineFactoryFor(999_999)).toThrow(/not supported/);
-	});
-});
-
-describe("minCollateralFor", () => {
-	it("gives every EVM chain a non-zero default", () => {
-		// A zero floor silently disables the negative set, which is what bounds
-		// the balance refresh population by capital rather than attacker effort.
-		for (const id of EVM_CHAIN_IDS) {
-			expect(minCollateralFor(id)).toBeGreaterThan(0n);
-		}
-	});
-
-	it("covers anvil, so local development has a floor too", () => {
-		expect(minCollateralFor(31337)).toBeGreaterThan(0n);
-	});
-
-	it("refuses Solana rather than defaulting it to zero", () => {
-		expect(() => minCollateralFor(SupportedChainId.SOLANA)).toThrow(/does not operate/);
-	});
-
-	it("refuses a chain CoW does not support", () => {
-		expect(() => minCollateralFor(999_999)).toThrow(/not supported/);
-	});
-});
