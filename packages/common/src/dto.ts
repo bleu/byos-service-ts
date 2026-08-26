@@ -69,6 +69,7 @@ export const Status = {
 	Penalized: "penalized",
 	SimFailed: "simFailed",
 	Cancelled: "cancelled",
+	Superseded: "superseded",
 } as const;
 
 export type Status = (typeof Status)[keyof typeof Status];
@@ -84,6 +85,7 @@ export const statusSchema = z.enum([
 	Status.Penalized,
 	Status.SimFailed,
 	Status.Cancelled,
+	Status.Superseded,
 ]);
 
 /**
@@ -99,6 +101,7 @@ export function isTerminalStatus(status: Status): boolean {
 		case Status.Penalized:
 		case Status.SimFailed:
 		case Status.Cancelled:
+		case Status.Superseded:
 			return true;
 		default:
 			return false;

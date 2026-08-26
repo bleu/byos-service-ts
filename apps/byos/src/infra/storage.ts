@@ -59,6 +59,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
 		penaltyTxHash: (row.penaltyTxHash as Hex) ?? null,
 		pendingCancellation: row.pendingCancellation,
+		supersededByProposalId: row.supersededByProposalId,
 	};
 }
 
@@ -118,6 +119,7 @@ export async function insert(
 			trampoline: proposal.trampoline?.toLowerCase() ?? null,
 			settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
 			penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
+			supersededByProposalId: proposal.supersededByProposalId,
 		})
 		.returning({ id: proposals.id });
 
@@ -768,6 +770,7 @@ export async function solutionProposals(
 			settlementTxHash: proposals.settlementTxHash,
 			penaltyTxHash: proposals.penaltyTxHash,
 			pendingCancellation: proposals.pendingCancellation,
+			supersededByProposalId: proposals.supersededByProposalId,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

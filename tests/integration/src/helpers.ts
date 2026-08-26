@@ -211,6 +211,7 @@ export async function seedProposal(
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		supersededByProposalId: null,
 		...overrides,
 		orderUid,
 	};

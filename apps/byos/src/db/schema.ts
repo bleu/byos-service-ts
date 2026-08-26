@@ -9,6 +9,7 @@ import {
 	primaryKey,
 	text,
 	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // --- proposals ---
@@ -37,6 +38,7 @@ export const proposals = pgTable(
 		settlementTxHash: text("settlement_tx_hash"),
 		penaltyTxHash: text("penalty_tx_hash"),
 		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
+		supersededByProposalId: bigint("superseded_by_proposal_id", { mode: "number" }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
 	},
@@ -44,6 +46,7 @@ export const proposals = pgTable(
 		index("proposals_order_uid_status_idx").on(table.orderUid, table.status),
 		index("proposals_sub_solver_status_idx").on(table.subSolver, table.status),
 		index("proposals_status_status_changed_at_idx").on(table.status, table.statusChangedAt),
+		uniqueIndex("proposals_sub_solver_nonce_key").on(table.subSolver, table.nonce),
 	],
 );
 

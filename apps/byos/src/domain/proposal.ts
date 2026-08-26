@@ -28,6 +28,8 @@ export interface Proposal {
 	settlementTxHash: Hex | null;
 	penaltyTxHash: Hex | null;
 	pendingCancellation: boolean;
+	/** Set when a newer proposal for this sub-solver/order supersedes this one. */
+	supersededByProposalId?: number | null;
 }
 
 /** What the driver reported about a settlement. */
