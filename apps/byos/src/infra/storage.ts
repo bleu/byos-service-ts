@@ -146,10 +146,7 @@ export async function findBySubSolverAndNonce(
 		.select()
 		.from(proposals)
 		.where(
-			and(
-				eq(proposals.subSolver, subSolver.toLowerCase()),
-				eq(proposals.nonce, nonce.toString()),
-			),
+			and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.nonce, nonce.toString())),
 		)
 		.limit(1);
 
