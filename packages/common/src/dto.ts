@@ -101,8 +101,6 @@ export function isTerminalStatus(status: Status): boolean {
 		case Status.Penalized:
 		case Status.SimFailed:
 		case Status.Cancelled:
-		case Status.Superseded:
-			return true;
 		default:
 			return false;
 	}

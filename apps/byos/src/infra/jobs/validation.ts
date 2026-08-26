@@ -105,7 +105,7 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 	// Sweep 2: Snapshot live proposals, expire and enqueue the rest
 	let live: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
-		live = await store.snapshotByStatuses(db, ["submitted", "active"]);
+		live = await store.snapshotByStatuses(db, ["submitted", "active", "superseded"]);
 	} catch (e) {
 		logger.error({ err: e }, "failed to snapshot live proposals");
 		return;
