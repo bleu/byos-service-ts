@@ -418,6 +418,9 @@ components:
         - `penalized` — that debit landed; see `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
         - `cancelled` — cancelled by a signed `DELETE`.
+        - `superseded` — a newer validated proposal from the same sub-solver
+          replaced this route for the order. It may still receive a delayed
+          settlement outcome and expires at `validUntil`.
 
         All states except `submitted`, `active`, `executing`, and
         `settleFailed` are terminal.
@@ -433,6 +436,7 @@ components:
         - penalized
         - simFailed
         - cancelled
+        - superseded
     RejectionReason:
       description: |
         Why the background validator rejected a proposal:
