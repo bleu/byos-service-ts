@@ -82,9 +82,11 @@ describe("parseConfig", () => {
 		).toThrow(/RATE_MIN_PER_WINDOW/);
 	});
 
-	it("treats MIN_COLLATERAL as optional, since the chain supplies a default", () => {
-		const { MIN_COLLATERAL: _omitted, ...withoutFloor } = chain;
-		expect(parseConfig({ ...base, ...withoutFloor }).MIN_COLLATERAL).toBeUndefined();
+	it("defaults MIN_COLLATERAL to 10^16 wei when not set", () => {
+		// The default is a placeholder (COW-1265) — identical to what the old
+		// per-chain table carried for every EVM chain. Operators override it via
+		// MIN_COLLATERAL when deploying.
+		expect(parseConfig(base).MIN_COLLATERAL).toBe("10000000000000000");
 	});
 
 	it("rejects a MIN_COLLATERAL that is not a decimal wei amount", () => {
@@ -93,16 +95,26 @@ describe("parseConfig", () => {
 		);
 	});
 
-	it("rejects RPC_URL without DEFAULT_GAS_PRICE (the only remaining required companion)", () => {
+	it("rejects RPC_URL without ESCROW_ADDRESS or DEFAULT_GAS_PRICE", () => {
+		// BYOS has no per-chain lookup table for its own contracts. The operator
+		// who deployed the Escrow must set ESCROW_ADDRESS.
 		expect(() => parseConfig({ ...base, RPC_URL: chain.RPC_URL })).toThrow(
+			/required when RPC_URL is set/,
+		);
+	});
+
+	it("rejects RPC_URL with ESCROW_ADDRESS but no DEFAULT_GAS_PRICE", () => {
+		const { DEFAULT_GAS_PRICE: _dropped, ...partial } = chain;
+		expect(() => parseConfig({ ...base, ...partial })).toThrow(
 			/DEFAULT_GAS_PRICE.*required when RPC_URL is set/s,
 		);
 	});
 
-	it("accepts RPC_URL without ESCROW_ADDRESS (resolved from chain at context build)", () => {
-		// ESCROW_ADDRESS is now an optional override; the chain record handles it.
+	it("rejects RPC_URL with DEFAULT_GAS_PRICE but no ESCROW_ADDRESS", () => {
 		const { ESCROW_ADDRESS: _dropped, ...partial } = chain;
-		expect(() => parseConfig({ ...base, ...partial })).not.toThrow();
+		expect(() => parseConfig({ ...base, ...partial })).toThrow(
+			/ESCROW_ADDRESS.*required when RPC_URL is set/s,
+		);
 	});
 
 	it("rejects an operator key without RPC_URL", () => {

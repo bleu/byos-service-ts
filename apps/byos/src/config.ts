@@ -12,12 +12,9 @@ export const configSchema = z.object({
 		.number()
 		.int()
 		.refine(isSupportedEvmChain, "Must be an EVM chain supported by CoW Protocol"),
-	/** Overrides the chain's TrampolineFactory address from `trampolineFactoryFor`. Omit to
-	 * take the per-chain value. Required only when the chain has no entry yet. */
-	TRAMPOLINE_FACTORY: z
-		.string()
-		.regex(addressPattern, "Must be a valid 0x-prefixed address")
-		.optional(),
+	/** TrampolineFactory address for this deployment. Required: BYOS needs it
+	 * for EIP-712 domain construction even before an RPC is configured. */
+	TRAMPOLINE_FACTORY: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
 
 	// Listeners
 	PUBLIC_ADDR_PORT: z.coerce.number().default(9585),
@@ -30,8 +27,8 @@ export const configSchema = z.object({
 	RPC_URL: z.string().optional(),
 	/** Overrides the orderbook URL from `orderbookUrlFor`. Useful for barn/staging. */
 	ORDERBOOK_URL: z.string().optional(),
-	/** Overrides the escrow address from `escrowAddressFor`. Required when the chain
-	 * has no entry yet. */
+	/** Escrow contract address for this deployment. Required when RPC_URL is set;
+	 * set once per chain by the operator who deployed the contract. */
 	ESCROW_ADDRESS: z
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
@@ -41,9 +38,13 @@ export const configSchema = z.object({
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
-	/** Overrides the chain's default minimum collateral. Omit to take the
-	 * per-chain value from `minCollateralFor`. */
-	MIN_COLLATERAL: z.string().regex(/^\d+$/, "Must be a decimal wei amount").optional(),
+	/** Minimum escrow collateral for this deployment, in wei. Defaults to 10^16
+	 * (0.01 ETH-equivalent) — a placeholder until per-chain gas data informs it
+	 * (COW-1265). Override with MIN_COLLATERAL when deploying. */
+	MIN_COLLATERAL: z
+		.string()
+		.regex(/^\d+$/, "Must be a decimal wei amount")
+		.default("10000000000000000"),
 	DEFAULT_GAS_PRICE: z.string().optional(),
 
 	// Timing
@@ -105,14 +106,11 @@ export const configSchema = z.object({
  * Mirrors the Rust CLI's requires_all: a half-configured chain connection
  * must fail startup, not boot with a missing value.
  *
- * ORDERBOOK_URL, ESCROW_ADDRESS, and SETTLEMENT_ADDRESS are no longer listed:
- * they resolve from the chain via their `*For()` helpers in `@byos/common`.
- * They may still be set as overrides (barn, staging, not-yet-deployed chains).
- *
- * MIN_COLLATERAL is not listed: it defaults to the chain's value, so an absent
- * one is a deliberate choice rather than a half-configuration.
+ * ESCROW_ADDRESS is required with RPC_URL: there is no per-chain lookup table
+ * for BYOS-specific contracts — the operator sets the address for the chain
+ * they deployed to.
  */
-const RPC_COMPANIONS = ["DEFAULT_GAS_PRICE"] as const;
+const RPC_COMPANIONS = ["ESCROW_ADDRESS", "DEFAULT_GAS_PRICE"] as const;
 
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
 	if (cfg.RPC_URL) {

@@ -1,11 +1,5 @@
 import { resolve } from "node:path";
-import {
-	escrowAddressFor,
-	evmChainFor,
-	minCollateralFor,
-	settlementAddressFor,
-	trampolineFactoryFor,
-} from "@byos/common";
+import { evmChainFor, settlementAddressFor } from "@byos/common";
 import type { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
@@ -106,10 +100,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// One resolution of the collateral floor, shared by everything that needs
 	// it, so the validator, the penalty loop and the floor gate cannot drift.
 	const chain = evmChainFor(config.CHAIN_ID);
-	const minCollateralWei =
-		config.MIN_COLLATERAL !== undefined
-			? BigInt(config.MIN_COLLATERAL)
-			: minCollateralFor(config.CHAIN_ID);
+	const minCollateralWei = BigInt(config.MIN_COLLATERAL);
 
 	if (minCollateralWei === 0n) {
 		// The negative set is what bounds the refresh population by capital
@@ -129,18 +120,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	const rateLimits = rateLimitsFromConfig(config, minCollateralWei);
 
 	// TrampolineFactory is needed for EIP-712 domain even without RPC.
-	// Resolve it once here, failing fast if neither the override nor the
-	// per-chain table provides an address.
-	const trampolineFactory: Address = (() => {
-		if (config.TRAMPOLINE_FACTORY) return config.TRAMPOLINE_FACTORY as Address;
-		const addr = trampolineFactoryFor(config.CHAIN_ID);
-		if (!addr) {
-			throw new Error(
-				`No TRAMPOLINE_FACTORY for chain ${config.CHAIN_ID} — set TRAMPOLINE_FACTORY env var`,
-			);
-		}
-		return addr;
-	})();
+	// Required in config, so always present here.
+	const trampolineFactory = config.TRAMPOLINE_FACTORY as Address;
 
 	// Blockchain (optional — depends on RPC_URL)
 	let validator: ValidateProposal = acceptAll;
@@ -163,17 +144,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		}
 		logger.info("rpc connected");
 
-		// Resolve per-chain addresses, allowing env var overrides.
-		const escrowAddress: Address = (() => {
-			if (config.ESCROW_ADDRESS) return config.ESCROW_ADDRESS as Address;
-			const addr = escrowAddressFor(config.CHAIN_ID);
-			if (!addr) {
-				throw new Error(
-					`No ESCROW_ADDRESS for chain ${config.CHAIN_ID} — set ESCROW_ADDRESS env var`,
-				);
-			}
-			return addr;
-		})();
+		// Required alongside RPC_URL in config, so always present here.
+		const escrowAddress = config.ESCROW_ADDRESS as Address;
 
 		const settlementAddress: Address =
 			(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);

@@ -12,7 +12,6 @@
  */
 
 import * as http from "node:http";
-import { minCollateralFor } from "@byos/common";
 import pino from "pino";
 import type { Address } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -151,28 +150,27 @@ describe("buildContext — no RPC", () => {
 		expect(ctx.operator).toBeNull();
 	});
 
-	// Deleting `const minCollateralWei = config.MIN_COLLATERAL !== undefined ? ...`
-	// or swapping to a hard-coded value would break this.
-	it("minCollateralWei is the chain default when MIN_COLLATERAL is unset", () => {
-		// context.ts: `minCollateralFor(config.CHAIN_ID)` is called when
-		// `config.MIN_COLLATERAL` is undefined.
-		expect(ctx.minCollateralWei).toBe(minCollateralFor(1));
+	// Deleting `const minCollateralWei = BigInt(config.MIN_COLLATERAL)` or
+	// swapping to a hard-coded value would break this.
+	it("minCollateralWei is the config default when MIN_COLLATERAL is unset", () => {
+		// context.ts: `BigInt(config.MIN_COLLATERAL)` — MIN_COLLATERAL defaults
+		// to "10000000000000000" in the Zod schema when not explicitly set.
+		expect(ctx.minCollateralWei).toBe(10n ** 16n);
 	});
 
 	// Deleting the `rateLimits = rateLimitsFromConfig(config, minCollateralWei)` line
 	// would leave rateLimits.floorWei at 0 or undefined.
-	it("rateLimits.floorWei is the resolved chain collateral floor", () => {
+	it("rateLimits.floorWei is the resolved collateral floor", () => {
 		// context.ts: `rateLimitsFromConfig(config, minCollateralWei)` passes
 		// the resolved floor; if the arg was `0n` or omitted the assertion fails.
-		expect(ctx.rateLimits.floorWei).toBe(minCollateralFor(1));
+		expect(ctx.rateLimits.floorWei).toBe(10n ** 16n);
 	});
 
-	// Deleting `const trampolineFactory: Address = ...` or failing to return it
-	// in the context object would break this.
+	// Deleting `const trampolineFactory = config.TRAMPOLINE_FACTORY as Address` or
+	// failing to return it in the context object would break this.
 	it("trampolineFactory is the TRAMPOLINE_FACTORY from config", () => {
-		// context.ts: `if (config.TRAMPOLINE_FACTORY) return config.TRAMPOLINE_FACTORY as Address`
-		// If that line were removed, trampolineFactoryFor(1) would be called;
-		// for mainnet (chain 1) that returns null and throws.
+		// context.ts: `const trampolineFactory = config.TRAMPOLINE_FACTORY as Address`
+		// TRAMPOLINE_FACTORY is required in config, so it is always present here.
 		expect(ctx.trampolineFactory).toBe(FAKE_TRAMPOLINE_FACTORY);
 	});
 });
@@ -422,8 +420,9 @@ describe("buildContext — MIN_COLLATERAL override", () => {
 			await ctx.dbClient.end();
 		});
 
-		// context.ts: `config.MIN_COLLATERAL !== undefined ? BigInt(config.MIN_COLLATERAL)`
-		// If that branch were removed, minCollateralFor(1) = 10^16 would be used instead.
+		// context.ts: `BigInt(config.MIN_COLLATERAL)` — MIN_COLLATERAL is always
+		// present (required or defaulted). If this line were removed or defaulted
+		// to 0n, the assertion would fail.
 		expect(ctx.minCollateralWei).toBe(BigInt(CUSTOM_COLLATERAL));
 
 		// context.ts: `rateLimitsFromConfig(config, minCollateralWei)`
@@ -454,14 +453,13 @@ describe("buildContext — MIN_COLLATERAL override", () => {
 			await ctx.dbClient.end();
 		});
 
-		const chainDefault = minCollateralFor(1);
-
-		// context.ts: `minCollateralFor(config.CHAIN_ID)` is called when
-		// `config.MIN_COLLATERAL` is undefined.
-		expect(ctx.minCollateralWei).toBe(chainDefault);
+		// MIN_COLLATERAL defaults to "10000000000000000" in the Zod schema.
+		// context.ts: `BigInt(config.MIN_COLLATERAL)` — if that line were removed
+		// or hardcoded to 0n the assertions below would catch the drift.
+		expect(ctx.minCollateralWei).toBe(10n ** 16n);
 
 		// Both consumers must see the same value — if one were hardcoded to a
 		// different number this would catch the drift.
-		expect(ctx.rateLimits.floorWei).toBe(chainDefault);
+		expect(ctx.rateLimits.floorWei).toBe(10n ** 16n);
 	});
 });
