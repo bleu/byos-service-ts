@@ -381,9 +381,9 @@ describe("/solve economics", () => {
 			quoteBuyAmount: 950n,
 			gasUsed: 200_000n,
 			trampoline: TRAMPOLINE,
-		interactions: route,
-		signature,
-		nonce: 999n,
+			interactions: route,
+			signature,
+			nonce: 999n,
 		});
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000", "900", "0"));
