@@ -8,6 +8,8 @@ const envSchema = z.object({
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
+	SUBSOLVER_PROVIDER: z.enum(["baseline", "fynd"]).default("baseline"),
+	FYND_URL: z.string().url().optional(),
 	CONFIG_PATH: z.string().optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
@@ -29,6 +31,8 @@ export interface Config {
 	rpcUrl: string;
 	privateKey: Hex;
 	logLevel: string;
+	provider: "baseline" | "fynd";
+	fyndUrl?: string;
 	toml: TomlConfig;
 }
 
@@ -64,6 +68,8 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as Hex,
 		logLevel: result.data.LOG_LEVEL,
+		provider: result.data.SUBSOLVER_PROVIDER,
+		fyndUrl: result.data.FYND_URL,
 		toml,
 	};
 }

@@ -1,11 +1,13 @@
 import "dotenv/config";
 import { byosDomain } from "@byos/common";
+import { FyndProvider } from "@byos/subsolver-core";
+import { FyndClient } from "@kayibal/fynd-client";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
-import { buildProposal, type Order } from "./domain/proposal.js";
+import { buildProposal, buildProposalFromRoute, type Order } from "./domain/proposal.js";
 import { pairAddress } from "./domain/routing.js";
 import { ChainClient, type ReservesQuery } from "./infra/blockchain.js";
 import { ByosClient } from "./infra/byos.js";
@@ -27,6 +29,7 @@ class Subsolver {
 		private readonly chain: ChainClient,
 		private readonly domain: ReturnType<typeof byosDomain>,
 		private readonly trampoline: Address,
+		private readonly fynd: FyndProvider | null,
 		// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 		private readonly signFn: (params: any) => Promise<Hex>,
 		private readonly logger: pino.Logger,
@@ -59,6 +62,35 @@ class Subsolver {
 		}
 
 		if (pending.length === 0) return;
+		if (this.fynd) {
+			for (const order of pending) {
+				try {
+					const route = await this.fynd.quote({
+						uid: order.uid,
+						chainId: this.config.toml.chainId,
+						sellToken: order.sellToken,
+						buyToken: order.buyToken,
+						remainingSell: order.sellAmount,
+						scaledLimitBuy: order.buyAmount,
+					});
+					if (!route) continue;
+					const proposal = await buildProposalFromRoute(
+						order,
+						route,
+						now + 60n,
+						this.nextNonce++,
+						this.domain,
+						this.signFn,
+					);
+					if (!proposal) continue;
+					const id = await this.byos.submit(proposal);
+					this.live.set(order.uid.toLowerCase(), { id, validUntil: now + 60n });
+				} catch (e) {
+					this.logger.warn({ err: e, orderUid: order.uid }, "Fynd quote failed");
+				}
+			}
+			return;
+		}
 
 		// Batch fetch reserves (single multicall)
 		const queries: ReservesQuery[] = pending.map((o) => ({
@@ -180,6 +212,19 @@ async function main() {
 	// Clients
 	const orderbook = new OrderbookClient(config.orderBookUrl);
 	const byos = new ByosClient(config.byosUrl, domain, signFn);
+	const fynd =
+		config.provider === "fynd"
+			? new FyndProvider({
+					client: new FyndClient({
+						baseUrl: config.fyndUrl ?? "http://fynd:3000",
+						timeoutMs: 7000,
+						retry: { maxAttempts: 2 },
+					}),
+					chainId: config.toml.chainId,
+					trampoline,
+					settlement: "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+				})
+			: null;
 
 	// Subsolver
 	const subsolver = new Subsolver(
@@ -189,6 +234,7 @@ async function main() {
 		chain,
 		domain,
 		trampoline,
+		fynd,
 		signFn,
 		logger,
 	);

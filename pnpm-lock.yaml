@@ -78,6 +78,12 @@ importers:
       '@byos/common':
         specifier: workspace:*
         version: link:../../packages/common
+      '@byos/subsolver-core':
+        specifier: workspace:^
+        version: link:../../packages/subsolver-core
+      '@kayibal/fynd-client':
+        specifier: 0.99.17
+        version: 0.99.17(typescript@5.9.3)(zod@3.25.76)
       dotenv:
         specifier: ^16.0.0
         version: 16.6.1

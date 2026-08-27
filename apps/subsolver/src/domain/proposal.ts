@@ -38,6 +38,41 @@ export interface SignedProposal {
 	signature: Hex;
 }
 
+/** Signs a provider-produced route without imposing a venue-specific encoding. */
+export async function buildProposalFromRoute(
+	order: Order,
+	route: { quoteBuyAmount: bigint; minBuyAmount: bigint; interactions: ContractInteraction[] },
+	validUntil: bigint,
+	nonce: bigint,
+	domain: TypedDataDomain,
+	signFn: SignFn,
+): Promise<SignedProposal | null> {
+	if (order.kind !== "sell" || route.minBuyAmount < order.buyAmount) return null;
+	const proposal: Proposal = {
+		orderUidHash: keccak256(order.uid),
+		sellToken: order.sellToken,
+		buyToken: order.buyToken,
+		sellAmount: order.sellAmount,
+		minBuyAmount: route.minBuyAmount,
+		quoteBuyAmount: route.quoteBuyAmount,
+		validUntil,
+		nonce,
+	};
+	const signature = await signProposal(signFn, domain, proposal, route.interactions);
+	return {
+		orderUid: order.uid,
+		sellToken: order.sellToken,
+		buyToken: order.buyToken,
+		sellAmount: order.sellAmount,
+		minBuyAmount: route.minBuyAmount,
+		quoteBuyAmount: route.quoteBuyAmount,
+		interactions: route.interactions,
+		validUntil,
+		nonce,
+		signature,
+	};
+}
+
 /** ERC20 approve ABI for building approve interactions. */
 const erc20ApproveAbi = [
 	{

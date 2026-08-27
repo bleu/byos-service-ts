@@ -28,12 +28,16 @@ export class FyndProvider implements RouteProvider {
 	}
 
 	async ready(): Promise<boolean> {
-		const [info, health] = await Promise.all([this.config.client.info(), this.config.client.health()]);
+		const [info, health] = await Promise.all([
+			this.config.client.info(),
+			this.config.client.health(),
+		]);
 		return info.chainId === this.config.chainId && info.routerAddress != null && health.healthy;
 	}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
-		if (order.chainId !== 56 || order.sellToken.toLowerCase() === order.buyToken.toLowerCase()) return null;
+		if (order.chainId !== 56 || order.sellToken.toLowerCase() === order.buyToken.toLowerCase())
+			return null;
 		const info = await this.config.client.info();
 		if (info.chainId !== 56 || info.routerAddress == null) return null;
 		const quote = await this.config.client.quote({
@@ -53,14 +57,23 @@ export class FyndProvider implements RouteProvider {
 	private toRoute(order: CandidateOrder, router: Address, quote: Quote): ProviderRoute | null {
 		if (quote.status !== "success" || quote.amountIn !== order.remainingSell) return null;
 		if (!quote.route || !quote.transaction || !quote.feeBreakdown) return null;
-		if (quote.transaction.to.toLowerCase() !== router.toLowerCase() || quote.transaction.value !== 0n) return null;
+		if (
+			quote.transaction.to.toLowerCase() !== router.toLowerCase() ||
+			quote.transaction.value !== 0n
+		)
+			return null;
 		if (quote.feeBreakdown.minAmountReceived < order.scaledLimitBuy) return null;
 		if (this.now() - quote.block.timestamp > this.maxQuoteAgeSeconds) return null;
 		return {
 			quoteBuyAmount: quote.amountOut,
 			minBuyAmount: quote.feeBreakdown.minAmountReceived,
 			interactions: [
-				{ target: router, value: 0n, callData: `0x095ea7b3${router.slice(2).padStart(64, "0")}${order.remainingSell.toString(16).padStart(64, "0")}` as Hex },
+				{
+					target: router,
+					value: 0n,
+					callData:
+						`0x095ea7b3${router.slice(2).padStart(64, "0")}${order.remainingSell.toString(16).padStart(64, "0")}` as Hex,
+				},
 				{ target: quote.transaction.to, value: 0n, callData: quote.transaction.data },
 			],
 		};
