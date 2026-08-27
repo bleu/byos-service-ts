@@ -6,9 +6,12 @@ const client = {
 	info: async () => ({ chainId: 56, routerAddress: router, permit2Address: router }),
 	health: async () => ({ healthy: true, lastUpdateMs: 1, numSolverPools: 1 }),
 	quote: async () => ({
+		orderId: "quote-1",
 		status: "success" as const,
+		backend: "fynd" as const,
 		amountIn: 100n,
 		amountOut: 120n,
+		gasEstimate: 1n,
 		route: { swaps: [] },
 		block: { number: 1, hash: "0x", timestamp: 100 },
 		tokenOut: "0x0000000000000000000000000000000000000002" as const,

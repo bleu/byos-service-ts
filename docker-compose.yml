@@ -22,3 +22,28 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  baseline-subsolver:
+    build: .
+    command: ["node", "apps/subsolver/dist/index.js"]
+    profiles: ["baseline-subsolver"]
+    env_file: .env.subsolver.example
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fynd-subsolver:
+    build: .
+    command: ["node", "apps/subsolver/dist/index.js"]
+    profiles: ["fynd-subsolver"]
+    env_file: .env.fynd-subsolver.example
+    depends_on:
+      fynd:
+        condition: service_started
+
+  fynd:
+    image: ghcr.io/propeller-heads/fynd:0.99.17
+    profiles: ["fynd-subsolver"]
+    command: ["serve", "--chain", "bsc"]
+    environment:
+      TYCHO_API_KEY: ${TYCHO_API_KEY:-}
