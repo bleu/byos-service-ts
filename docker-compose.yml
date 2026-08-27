@@ -28,6 +28,8 @@ services:
     command: ["node", "apps/subsolver/dist/index.js"]
     profiles: ["baseline-subsolver"]
     env_file: .env.subsolver.example
+    volumes:
+      - ${SUBSOLVER_CONFIG_PATH:-./config.toml}:/app/config.toml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +39,8 @@ services:
     command: ["node", "apps/subsolver/dist/index.js"]
     profiles: ["fynd-subsolver"]
     env_file: .env.fynd-subsolver.example
+    volumes:
+      - ${SUBSOLVER_CONFIG_PATH:-./config.toml}:/app/config.toml:ro
     depends_on:
       fynd:
         condition: service_started
