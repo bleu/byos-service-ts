@@ -1,6 +1,11 @@
 import { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { describe, expect, it } from "vitest";
-import { evmChainFor, isSupportedEvmChain, minCollateralFor } from "../chain.js";
+import {
+	evmChainFor,
+	isSupportedEvmChain,
+	orderbookUrlFor,
+	settlementAddressFor,
+} from "../chain.js";
 
 /** Every EVM chain CoW settles on. Solana is excluded deliberately — BYOS
  * cannot operate there, so it must be rejected rather than skipped. */
@@ -57,24 +62,42 @@ describe("evmChainFor", () => {
 	});
 });
 
-describe("minCollateralFor", () => {
-	it("gives every EVM chain a non-zero default", () => {
-		// A zero floor silently disables the negative set, which is what bounds
-		// the balance refresh population by capital rather than attacker effort.
+describe("settlementAddressFor", () => {
+	it("returns the CoW settlement singleton for every EVM chain", () => {
+		// The settlement contract is the same address on every EVM chain CoW
+		// Protocol settles on — an immutable singleton.
+		const SINGLETON = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
 		for (const id of EVM_CHAIN_IDS) {
-			expect(minCollateralFor(id)).toBeGreaterThan(0n);
+			expect(settlementAddressFor(id)).toBe(SINGLETON);
 		}
 	});
 
-	it("covers anvil, so local development has a floor too", () => {
-		expect(minCollateralFor(31337)).toBeGreaterThan(0n);
+	it("returns the offline-mode address for anvil (31337)", () => {
+		// The offline CoW stack forks mainnet so the address is the same.
+		expect(settlementAddressFor(31337)).toBe("0x9008D19f58AAbD9eD0D60971565AA8510560ab41");
 	});
 
-	it("refuses Solana rather than defaulting it to zero", () => {
-		expect(() => minCollateralFor(SupportedChainId.SOLANA)).toThrow(/does not operate/);
+	it("throws for an unsupported chain", () => {
+		expect(() => settlementAddressFor(999_999)).toThrow(/not supported/);
+	});
+});
+
+describe("orderbookUrlFor", () => {
+	it("returns a prod api.cow.fi URL for every EVM chain", () => {
+		for (const id of EVM_CHAIN_IDS) {
+			expect(orderbookUrlFor(id)).toMatch(/^https:\/\/api\.cow\.fi\//);
+		}
 	});
 
-	it("refuses a chain CoW does not support", () => {
-		expect(() => minCollateralFor(999_999)).toThrow(/not supported/);
+	it("returns the local orderbook URL for anvil (31337)", () => {
+		expect(orderbookUrlFor(31337)).toBe("http://localhost:8080");
+	});
+
+	it("returns the mainnet orderbook URL for mainnet", () => {
+		expect(orderbookUrlFor(SupportedChainId.MAINNET)).toBe("https://api.cow.fi/mainnet");
+	});
+
+	it("throws for an unsupported chain", () => {
+		expect(() => orderbookUrlFor(999_999)).toThrow(/not supported/);
 	});
 });
