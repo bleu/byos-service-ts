@@ -28,6 +28,7 @@ describe("proposal lifecycle", () => {
 	});
 
 	it("replays an identical signed proposal → original id with 202", async () => {
+		const auditCount = app.auditEvents.length;
 		const { response: firstResponse, body } = await signAndSubmitProposal(app.publicApp, {
 			nonce: 99n,
 		});
@@ -42,9 +43,11 @@ describe("proposal lifecycle", () => {
 
 		expect(replayResponse.status).toBe(202);
 		expect(await replayResponse.json()).toEqual({ id: first.id });
+		expect(app.auditEvents).toHaveLength(auditCount + 1);
 	});
 
 	it("rejects a reused nonce with different signed content → 409", async () => {
+		const auditCount = app.auditEvents.length;
 		const first = await signAndSubmitProposal(app.publicApp, { nonce: 100n });
 		expect(first.response.status).toBe(202);
 
@@ -55,6 +58,9 @@ describe("proposal lifecycle", () => {
 
 		expect(conflicting.response.status).toBe(409);
 		expect(await conflicting.response.json()).toMatchObject({ kind: "NonceAlreadyUsed" });
+		expect(app.auditEvents.slice(auditCount)).toContainEqual(
+			expect.objectContaining({ kind: expect.objectContaining({ type: "nonceConflict" }) }),
+		);
 	});
 
 	it("rejects expired proposal → 400", async () => {
@@ -114,6 +120,7 @@ describe("proposal lifecycle", () => {
 		expect(listResp.status).toBe(200);
 		const body = await listResp.json();
 		expect(body.proposals.length).toBeGreaterThanOrEqual(1);
+		expect(body.proposals[0]).toMatchObject({ orderUid: expect.stringMatching(/^0x/) });
 	});
 
 	it("cancels a submitted proposal → 204", async () => {
