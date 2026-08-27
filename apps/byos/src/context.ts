@@ -31,6 +31,7 @@ import {
 } from "./infra/jobs/index.js";
 import { OrderbookClient } from "./infra/orderbook.js";
 import { createRedisRateLimiter } from "./infra/rate-limit.js";
+import * as store from "./infra/storage.js";
 
 export interface AppContext {
 	db: Db;
@@ -149,6 +150,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 			escrowAddress,
 			minCollateralWei,
 			gasPriceRef,
+			(subSolver, excludeId) => store.inflightGasUsedBySubSolver(db, subSolver, excludeId),
 		);
 
 		// Orderbook client
