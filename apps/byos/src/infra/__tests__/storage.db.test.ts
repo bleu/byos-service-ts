@@ -183,6 +183,74 @@ describe("proposal store", () => {
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 	});
 
+	it("never supersedes an executing proposal when a replacement activates", async () => {
+		const orderUid = `0x${"f3".repeat(56)}`;
+		const { id: executingId } = await store.insert(
+			ctx.db,
+			sampleProposal({ orderUid, status: "executing" }),
+		);
+		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		await store.resolveVerdict(ctx.db, replacementId, { kind: "accept", simulation: null });
+
+		expect((await store.get(ctx.db, executingId))?.status).toBe("executing");
+		expect((await store.get(ctx.db, replacementId))?.status).toBe("active");
+	});
+
+	it("accepts delayed terminal outcomes for superseded proposals", async () => {
+		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const { id: abandonedId } = await store.insert(
+			ctx.db,
+			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
+		);
+		const abandoned = (await store.get(ctx.db, abandonedId))!;
+		await store.applySettlementOutcome(ctx.db, abandoned, { kind: "started" });
+		const executing = (await store.get(ctx.db, abandonedId))!;
+		await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
+		expect((await store.get(ctx.db, abandonedId))?.status).toBe("superseded");
+
+		const { id: successId } = await store.insert(
+			ctx.db,
+			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
+		);
+		const success = (await store.get(ctx.db, successId))!;
+		await store.applySettlementOutcome(ctx.db, success, {
+			kind: "succeeded",
+			txHash: `0x${"11".repeat(32)}` as Hex,
+		});
+		expect((await store.get(ctx.db, successId))?.status).toBe("settled");
+
+		const { id: revertId } = await store.insert(
+			ctx.db,
+			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
+		);
+		const reverted = (await store.get(ctx.db, revertId))!;
+		await store.applySettlementOutcome(ctx.db, reverted, {
+			kind: "reverted",
+			txHash: `0x${"12".repeat(32)}` as Hex,
+		});
+		expect((await store.get(ctx.db, revertId))?.status).toBe("settleFailed");
+	});
+
+	it("keeps superseded proposals out of solve reads and expires them", async () => {
+		const orderUid = `0x${"f4".repeat(56)}`;
+		const { id: supersededId } = await store.insert(
+			ctx.db,
+			sampleProposal({ orderUid, status: "superseded" }),
+		);
+		const { id: activeId } = await store.insert(
+			ctx.db,
+			sampleProposal({ orderUid, status: "active" }),
+		);
+
+		expect((await store.listByOrderUid(ctx.db, orderUid)).map((proposal) => proposal.id)).toEqual([
+			activeId,
+		]);
+		const superseded = (await store.get(ctx.db, supersededId))!;
+		await store.transition(ctx.db, superseded, "expired");
+		expect((await store.get(ctx.db, supersededId))?.status).toBe("expired");
+	});
+
 	it("restores a timed-out superseded execution to superseded", async () => {
 		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
 		const { id } = await store.insert(
