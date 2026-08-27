@@ -167,6 +167,9 @@ export async function runProposalValidation(
 		if (result.auditEvent) {
 			onAuditEvent(result.auditEvent);
 		}
+		for (const event of result.supersessionAuditEvents) {
+			onAuditEvent(event);
+		}
 	} catch (e) {
 		logger.warn({ err: e, id: proposal.id }, "validation failed");
 	}

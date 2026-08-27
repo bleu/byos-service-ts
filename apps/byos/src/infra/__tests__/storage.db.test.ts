@@ -151,11 +151,67 @@ describe("proposal store", () => {
 		await store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null });
 		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 
-		await store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null });
+		const result = await store.resolveVerdict(ctx.db, newerId, {
+			kind: "accept",
+			simulation: null,
+		});
 
 		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
 		expect((await store.get(ctx.db, olderId))?.supersededByProposalId).toBe(newerId);
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
+		if ("status" in result) {
+			expect(result.supersessionAuditEvents).toHaveLength(1);
+			expect(result.supersessionAuditEvents[0]?.kind).toMatchObject({
+				type: "statusChanged",
+				from: "active",
+				to: "superseded",
+			});
+		}
+	});
+
+	it("serializes concurrent validators so an older proposal cannot reactivate", async () => {
+		const orderUid = `0x${"f2".repeat(56)}`;
+		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		await Promise.all([
+			store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null }),
+			store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null }),
+		]);
+
+		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
+	});
+
+	it("restores a timed-out superseded execution to superseded", async () => {
+		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const { id } = await store.insert(
+			ctx.db,
+			sampleProposal({ status: "executing", supersededByProposalId: replacementId }),
+		);
+		await ctx.db.execute(
+			sql`UPDATE proposals SET status_changed_at = now() - interval '61 seconds' WHERE id = ${id}`,
+		);
+
+		const events = await store.releaseStaleExecuting(ctx.db, 60);
+
+		expect((await store.get(ctx.db, id))?.status).toBe("superseded");
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				kind: expect.objectContaining({ proposalId: id, to: "superseded" }),
+			}),
+		);
+	});
+
+	it("derives a fingerprint from all signed payload fields", async () => {
+		const proposal = sampleProposal();
+		const differentRoute = {
+			...proposal,
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xdeadbeef" as Hex }],
+		};
+		expect(store.signedProposalFingerprint(proposal)).not.toBe(
+			store.signedProposalFingerprint(differentRoute),
+		);
 	});
 
 	it("verdict on a terminal proposal is stale", async () => {

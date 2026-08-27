@@ -597,6 +597,7 @@ components:
       required:
         - id
         - subSolver
+        - orderUid
         - validUntil
         - status
       properties:
@@ -604,10 +605,16 @@ components:
           $ref: "#/components/schemas/ProposalId"
         subSolver:
           $ref: "#/components/schemas/Address"
+        orderUid:
+          $ref: "#/components/schemas/OrderUid"
         validUntil:
           $ref: "#/components/schemas/UnixTimestamp"
         status:
           $ref: "#/components/schemas/ProposalStatus"
+        supersededByProposalId:
+          description: Present when this proposal was replaced by a newer active proposal.
+          allOf:
+            - $ref: "#/components/schemas/ProposalId"
     ListProposalsResponse:
       type: object
       required:
