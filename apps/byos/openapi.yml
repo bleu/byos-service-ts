@@ -439,6 +439,11 @@ components:
 
         - `InsufficientEscrow` — the sub-solver's escrow balance is below
           the required minimum. Fix: deposit escrow and resubmit.
+        - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
+          exposure (sum of `gasUsed * gasPrice + minCollateral` across all
+          active, submitted, and executing proposals) would exceed their
+          effective escrow balance. Fix: wait for in-flight proposals to
+          settle before submitting more.
         - `UnsupportedOrder` — the order is outside the simulation envelope
           (hooks, non-erc20 balances).
         - `AmountMismatch` — for fill-or-kill orders, the proposal amount
@@ -453,6 +458,7 @@ components:
       type: string
       enum:
         - InsufficientEscrow
+        - ExposureCapExceeded
         - UnsupportedOrder
         - AmountMismatch
         - OrderNotFound
