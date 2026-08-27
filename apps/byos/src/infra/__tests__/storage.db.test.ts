@@ -282,6 +282,26 @@ describe("proposal store", () => {
 		);
 	});
 
+	it("canonicalizes calldata casing in the signed payload fingerprint", async () => {
+		const proposal = sampleProposal({
+			interactions: [
+				{
+					target: "0x00000000000000000000000000000000000000cc" as Address,
+					value: 0n,
+					callData: "0xdeadbeef" as Hex,
+				},
+			],
+		});
+		const sameBytesDifferentCasing = {
+			...proposal,
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xDEADBEEF" as Hex }],
+		};
+
+		expect(store.signedProposalFingerprint(proposal)).toBe(
+			store.signedProposalFingerprint(sameBytesDifferentCasing),
+		);
+	});
+
 	it("verdict on a terminal proposal is stale", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "settled" }));
 

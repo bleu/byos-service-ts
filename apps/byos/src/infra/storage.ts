@@ -87,7 +87,7 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 	return interactions.map((i) => ({
 		target: i.target.toLowerCase(),
 		value: i.value.toString(),
-		callData: i.callData,
+		callData: i.callData.toLowerCase(),
 	}));
 }
 
