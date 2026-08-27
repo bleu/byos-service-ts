@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quoteBatch, type CandidateOrder, type RouteProvider } from "../provider.js";
+import { type CandidateOrder, quoteBatch, type RouteProvider } from "../provider.js";
 
 const candidate = (uid: string): CandidateOrder => ({
 	uid,

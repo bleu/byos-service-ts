@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { BUY_ETH_ADDRESS } from "@byos/common";
+import { describe, expect, it } from "vitest";
 import { FyndConfigurationError, FyndProvider } from "../fynd-provider.js";
 
 const router = "0x0000000000000000000000000000000000000003" as const;
@@ -50,7 +50,13 @@ describe("FyndProvider", () => {
 	it("skips native-token, same-token, and zero-size orders without calling Fynd", async () => {
 		let calls = 0;
 		const provider = new FyndProvider({
-			client: { ...client, quote: async () => ((calls += 1), client.quote()) },
+			client: {
+				...client,
+				quote: async () => {
+					calls += 1;
+					return client.quote();
+				},
+			},
 			chainId: 56,
 			trampoline: "0x0000000000000000000000000000000000000005",
 			settlement: "0x0000000000000000000000000000000000000004",
