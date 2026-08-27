@@ -63,6 +63,15 @@ class Subsolver {
 
 		if (pending.length === 0) return;
 		if (this.fynd) {
+			try {
+				if (!(await this.fynd.ready())) {
+					this.logger.warn("Fynd sidecar is not ready; skipping this polling cycle");
+					return;
+				}
+			} catch (e) {
+				this.logger.warn({ err: e }, "Fynd sidecar health check failed");
+				return;
+			}
 			for (const order of pending) {
 				try {
 					const route = await this.fynd.quote({
