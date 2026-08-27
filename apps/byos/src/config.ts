@@ -17,6 +17,10 @@ export const configSchema = z.object({
 	// Listeners
 	PUBLIC_ADDR_PORT: z.coerce.number().default(9585),
 	INTERNAL_ADDR_PORT: z.coerce.number().default(9586),
+	ADMIN_ADDR_PORT: z.coerce.number().default(9587),
+
+	// Admin auth
+	GOOGLE_CLIENT_ID: z.string().optional(),
 
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
