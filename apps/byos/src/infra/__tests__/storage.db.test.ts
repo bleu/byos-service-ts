@@ -145,6 +145,19 @@ describe("proposal store", () => {
 		}
 	});
 
+	it("activating the newest proposal supersedes older live proposals for its sub-solver and order", async () => {
+		const orderUid = `0x${"f1".repeat(56)}`;
+		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+		await store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null });
+		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		await store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null });
+
+		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, olderId))?.supersededByProposalId).toBe(newerId);
+		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
+	});
+
 	it("verdict on a terminal proposal is stale", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "settled" }));
 

@@ -219,6 +219,17 @@ export async function resolveVerdict(
 			return { kind: "staleTransition" as const, id, expected: "submitted|active", actual: from };
 		}
 
+		// Lock the complete replacement group before deciding whether this is
+		// still the newest eligible proposal. This prevents a slow validator for
+		// an older submission from reactivating it after a newer route won.
+		const group = await tx
+			.select({ id: proposals.id, status: proposals.status })
+			.from(proposals)
+			.where(
+				and(eq(proposals.subSolver, locked.subSolver), eq(proposals.orderUid, locked.orderUid)),
+			)
+			.for("update");
+
 		let toStatus: Status;
 		let rejectionReason: RejectionReason | null = null;
 		let gasUsed: number | null = null;
@@ -228,6 +239,19 @@ export async function resolveVerdict(
 
 		switch (verdict.kind) {
 			case "accept":
+				if (
+					group.some(
+						(proposal) =>
+							proposal.id > id && (proposal.status === "submitted" || proposal.status === "active"),
+					)
+				) {
+					return {
+						kind: "staleTransition" as const,
+						id,
+						expected: "newest submitted|active",
+						actual: from,
+					};
+				}
 				toStatus = "active";
 				if (verdict.simulation) {
 					gasUsed = Number(verdict.simulation.gasUsed);
@@ -259,6 +283,24 @@ export async function resolveVerdict(
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
+
+		if (verdict.kind === "accept") {
+			await tx
+				.update(proposals)
+				.set({
+					status: "superseded" as Status,
+					supersededByProposalId: id,
+					statusChangedAt: sql`now()`,
+				})
+				.where(
+					and(
+						eq(proposals.subSolver, locked.subSolver),
+						eq(proposals.orderUid, locked.orderUid),
+						sql`${proposals.id} < ${id}`,
+						inArray(proposals.status, ["submitted", "active"]),
+					),
+				);
+		}
 
 		const auditEvent: AuditEvent | null = statusChanged
 			? {
@@ -365,6 +407,7 @@ export async function applySettlementOutcome(
 			.select({
 				status: proposals.status,
 				pendingCancellation: proposals.pendingCancellation,
+				supersededByProposalId: proposals.supersededByProposalId,
 			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
@@ -381,23 +424,27 @@ export async function applySettlementOutcome(
 
 		switch (outcome.kind) {
 			case "started":
-				if (from === "active") toStatus = "executing";
+				if (from === "active" || from === "superseded") toStatus = "executing";
 				break;
 			case "succeeded":
-				if (from === "active" || from === "executing") {
+				if (from === "active" || from === "executing" || from === "superseded") {
 					toStatus = "settled";
 					txHash = outcome.txHash;
 				}
 				break;
 			case "reverted":
-				if (from === "active" || from === "executing") {
+				if (from === "active" || from === "executing" || from === "superseded") {
 					toStatus = "settleFailed";
 					txHash = outcome.txHash;
 				}
 				break;
 			case "abandoned":
 				if (from === "executing") {
-					toStatus = locked.pendingCancellation ? "cancelled" : "active";
+					toStatus = locked.pendingCancellation
+						? "cancelled"
+						: locked.supersededByProposalId != null
+							? "superseded"
+							: "active";
 					insertPenalty = true;
 				}
 				break;
