@@ -1,26 +1,35 @@
 import "dotenv/config";
 import { byosDomain } from "@byos/common";
-import { FyndProvider } from "@byos/subsolver-core";
+import {
+	FyndProvider,
+	buildProposalFromRoute,
+	quoteBatch,
+	RequestBudget,
+	randomNonce,
+	toCandidateOrder,
+} from "@byos/subsolver-core";
 import { FyndClient } from "@kayibal/fynd-client";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
-import { buildProposal, buildProposalFromRoute, type Order } from "./domain/proposal.js";
+import { buildProposal, type Order } from "./domain/proposal.js";
 import { pairAddress } from "./domain/routing.js";
 import { ChainClient, type ReservesQuery } from "./infra/blockchain.js";
-import { ByosClient } from "./infra/byos.js";
+import { ByosClient, ByosRateLimitError } from "./infra/byos.js";
 import { OrderbookClient } from "./infra/orderbook.js";
 
 interface Live {
 	id: number;
 	validUntil: bigint;
+	lastSubmitted: bigint;
 }
 
 class Subsolver {
 	private live = new Map<string, Live>();
-	private nextNonce: bigint;
+	private syncHealthy = false;
+	private retryAtMs = 0;
 
 	constructor(
 		private readonly config: ReturnType<typeof parseConfig>,
@@ -33,11 +42,35 @@ class Subsolver {
 		// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 		private readonly signFn: (params: any) => Promise<Hex>,
 		private readonly logger: pino.Logger,
-	) {
-		this.nextNonce = BigInt(Date.now());
+		private readonly budget: RequestBudget,
+	) {}
+
+	/** Recover current proposals before submitting anything after a restart. */
+	async synchronize(now: bigint): Promise<boolean> {
+		if (!this.budget.consumeRead()) return false;
+		try {
+			const proposals = await this.byos.proposals();
+			this.live.clear();
+			for (const proposal of proposals) {
+				if (this.byos.isTerminal(proposal.status) || proposal.validUntil <= now) continue;
+				this.live.set(proposal.orderUid.toLowerCase(), {
+					id: proposal.id,
+					validUntil: proposal.validUntil,
+					lastSubmitted: now,
+				});
+			}
+			this.syncHealthy = true;
+			return true;
+		} catch (error) {
+			this.syncHealthy = false;
+			this.handleByosError(error, "failed to synchronize BYOS proposal state");
+			return false;
+		}
 	}
 
 	async pollOnce(now: bigint): Promise<void> {
+		if (Date.now() < this.retryAtMs) return;
+		if (!this.syncHealthy && !(await this.synchronize(now))) return;
 		// Cleanup expired proposals
 		for (const [uid, live] of this.live) {
 			if (live.validUntil <= now) {
@@ -56,12 +89,20 @@ class Subsolver {
 
 		// Filter to orders without a live proposal
 		const pending: Order[] = [];
+		const refreshes: Order[] = [];
 		for (const order of orders) {
 			const held = await this.holdsLiveProposal(order.uid);
-			if (!held) pending.push(order);
+			if (!held) {
+				pending.push(order);
+				continue;
+			}
+			const live = this.live.get(order.uid.toLowerCase());
+			if (live && now - live.lastSubmitted >= BigInt(this.config.proposalRefreshIntervalSeconds)) {
+				refreshes.push(order);
+			}
 		}
 
-		if (pending.length === 0) return;
+		if (pending.length === 0 && refreshes.length === 0) return;
 		if (this.fynd) {
 			try {
 				if (!(await this.fynd.ready())) {
@@ -72,37 +113,13 @@ class Subsolver {
 				this.logger.warn({ err: e }, "Fynd sidecar health check failed");
 				return;
 			}
-			for (const order of pending) {
-				try {
-					const route = await this.fynd.quote({
-						uid: order.uid,
-						chainId: this.config.toml.chainId,
-						sellToken: order.sellToken,
-						buyToken: order.buyToken,
-						remainingSell: order.sellAmount,
-						scaledLimitBuy: order.buyAmount,
-					});
-					if (!route) continue;
-					const proposal = await buildProposalFromRoute(
-						order,
-						route,
-						now + 60n,
-						this.nextNonce++,
-						this.domain,
-						this.signFn,
-					);
-					if (!proposal) continue;
-					const id = await this.byos.submit(proposal);
-					this.live.set(order.uid.toLowerCase(), { id, validUntil: now + 60n });
-				} catch (e) {
-					this.logger.warn({ err: e, orderUid: order.uid }, "Fynd quote failed");
-				}
-			}
+			await this.submitFyndRoutes([...pending, ...refreshes], now);
 			return;
 		}
 
 		// Batch fetch reserves (single multicall)
-		const queries: ReservesQuery[] = pending.map((o) => ({
+		const candidates = [...pending, ...refreshes];
+		const queries: ReservesQuery[] = candidates.map((o) => ({
 			pair: pairAddress(
 				this.config.toml.uniswapFactory,
 				this.config.toml.pairInitCodeHash,
@@ -122,19 +139,75 @@ class Subsolver {
 		}
 
 		// Per-order proposal
-		for (let i = 0; i < pending.length; i++) {
-			const order = pending[i]!;
+		for (let i = 0; i < candidates.length; i++) {
+			const order = candidates[i]!;
 			const reserve = reserves[i];
 			if (!reserve) continue;
 
 			try {
+				if (!this.budget.consumeSubmission()) return;
 				const result = await this.propose(order, reserve.reserveSell, reserve.reserveBuy, now);
 				if (result) {
 					this.live.set(order.uid.toLowerCase(), result);
 					this.logger.info({ id: result.id, orderUid: order.uid }, "proposal submitted");
 				}
-			} catch (e) {
-				this.logger.warn({ err: e, orderUid: order.uid }, "proposal failed");
+			} catch (error) {
+				this.handleByosError(error, "proposal failed", order.uid);
+			}
+		}
+	}
+
+	private async submitFyndRoutes(orders: readonly Order[], now: bigint): Promise<void> {
+		const byUid = new Map(orders.map((order) => [order.uid.toLowerCase(), order]));
+		const candidates = orders.flatMap((order) => {
+			if (order.kind !== "sell") return [];
+			const fullSellAmount = order.fullSellAmount ?? order.sellAmount;
+			const fullBuyAmount = order.fullBuyAmount ?? order.buyAmount;
+			const candidate = toCandidateOrder({
+				uid: order.uid,
+				chainId: this.config.toml.chainId,
+				sellToken: order.sellToken,
+				buyToken: order.buyToken,
+				fullSellAmount,
+				fullBuyAmount,
+				executedSellAmount: fullSellAmount - order.sellAmount,
+			});
+			return candidate ? [candidate] : [];
+		});
+		const results = await quoteBatch(this.fynd!, candidates, this.config.fyndQuoteConcurrency);
+		for (const result of results) {
+			const order = byUid.get(result.order.uid.toLowerCase());
+			if (!order) continue;
+			if (result.error) {
+				this.logger.warn({ err: result.error, orderUid: order.uid }, "Fynd quote failed");
+				continue;
+			}
+			if (!result.route) continue;
+			if (!this.budget.consumeSubmission()) {
+				this.logger.info("BYOS submission budget reserved for proposal state reads");
+				return;
+			}
+			try {
+				const candidateOrder: Order = {
+					...order,
+					sellAmount: result.order.remainingSell,
+					buyAmount: result.order.scaledLimitBuy,
+				};
+				const validUntil = now + BigInt(this.config.toml.proposalTtl);
+				const proposal = await buildProposalFromRoute(
+					candidateOrder,
+					result.route,
+					validUntil,
+					randomNonce(),
+					this.domain,
+					this.signFn,
+				);
+				if (!proposal) continue;
+				const id = await this.byos.submit(proposal);
+				this.live.set(order.uid.toLowerCase(), { id, validUntil, lastSubmitted: now });
+				this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
+			} catch (error) {
+				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
 			}
 		}
 	}
@@ -144,6 +217,7 @@ class Subsolver {
 		const live = this.live.get(key);
 		if (!live) return false;
 
+		if (!this.budget.consumeRead()) return true;
 		try {
 			const view = await this.byos.proposal(live.id);
 			if (this.byos.isTerminal(view.status)) {
@@ -154,10 +228,23 @@ class Subsolver {
 				return false;
 			}
 			return true;
-		} catch {
+		} catch (error) {
+			this.handleByosError(error, "failed to read proposal state", orderUid);
 			// Poll failure: hold optimistically
 			return true;
 		}
+	}
+
+	private handleByosError(error: unknown, message: string, orderUid?: Hex): void {
+		if (error instanceof ByosRateLimitError) {
+			this.retryAtMs = Date.now() + error.retryAfterMs;
+			this.logger.warn(
+				{ retryAfterMs: error.retryAfterMs, orderUid },
+				"BYOS rate limited subsolver",
+			);
+			return;
+		}
+		this.logger.warn({ err: error, orderUid }, message);
 	}
 
 	private async propose(
@@ -167,7 +254,7 @@ class Subsolver {
 		now: bigint,
 	): Promise<Live | null> {
 		const validUntil = now + BigInt(this.config.toml.proposalTtl);
-		const nonce = this.nextNonce++;
+		const nonce = randomNonce();
 
 		const proposal = await buildProposal(
 			order,
@@ -187,7 +274,7 @@ class Subsolver {
 		if (!proposal) return null;
 
 		const id = await this.byos.submit(proposal);
-		return { id, validUntil };
+		return { id, validUntil, lastSubmitted: now };
 	}
 }
 
@@ -231,9 +318,12 @@ async function main() {
 					}),
 					chainId: config.toml.chainId,
 					trampoline,
-					settlement: "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+					settlement: config.gpv2Settlement!,
+					slippageBps: config.fyndSlippageBps,
+					maxQuoteAgeSeconds: config.fyndMaxQuoteAgeSeconds,
 				})
 			: null;
+	if (fynd) await fynd.initialize();
 
 	// Subsolver
 	const subsolver = new Subsolver(
@@ -246,7 +336,9 @@ async function main() {
 		fynd,
 		signFn,
 		logger,
+		new RequestBudget(config.byosRequestsPerMinute, config.byosReadReserve),
 	);
+	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
 
 	// Main loop
 	const pollInterval = config.toml.pollInterval * 1000;

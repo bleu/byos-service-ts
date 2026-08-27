@@ -7,6 +7,8 @@ interface AuctionOrderDto {
 	buyToken: string;
 	sellAmount: string;
 	buyAmount: string;
+	fullSellAmount?: string;
+	fullBuyAmount?: string;
 	kind: string;
 	sellTokenBalance: string;
 	buyTokenBalance: string;
@@ -40,6 +42,8 @@ export class OrderbookClient {
 				buyToken: o.buyToken as Address,
 				sellAmount: BigInt(o.sellAmount),
 				buyAmount: BigInt(o.buyAmount),
+				fullSellAmount: BigInt(o.fullSellAmount ?? o.sellAmount),
+				fullBuyAmount: BigInt(o.fullBuyAmount ?? o.buyAmount),
 				kind: o.kind as "sell" | "buy",
 			}));
 	}

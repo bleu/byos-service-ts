@@ -4,14 +4,17 @@
 	"private": true,
 	"type": "module",
 	"main": "./dist/index.js",
+	"types": "./src/index.ts",
 	"scripts": {
 		"build": "tsup src/index.ts --format esm --dts"
 	},
 	"dependencies": {
 		"@byos/common": "workspace:*",
-		"@kayibal/fynd-client": "0.99.17"
+		"@kayibal/fynd-client": "0.99.17",
+		"viem": "^2.0.0"
 	},
 	"devDependencies": {
+		"@types/node": "^22.0.0",
 		"tsup": "^8.0.0",
 		"typescript": "^5.8.0"
 	}

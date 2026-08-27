@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUY_ETH_ADDRESS } from "@byos/common";
 import { FyndProvider } from "../fynd-provider.js";
 
 const router = "0x0000000000000000000000000000000000000003" as const;
@@ -40,6 +41,78 @@ describe("FyndProvider", () => {
 		});
 		expect(route?.minBuyAmount).toBe(110n);
 		expect(route?.interactions).toHaveLength(2);
-		expect(route?.interactions[0]?.target).toBe(router);
+		expect(route?.interactions[0]?.target).toBe("0x0000000000000000000000000000000000000001");
+		expect(route?.interactions[0]?.callData).toBe(
+			"0x095ea7b300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000064",
+		);
+	});
+
+	it("skips native-token, same-token, and zero-size orders without calling Fynd", async () => {
+		let calls = 0;
+		const provider = new FyndProvider({
+			client: { ...client, quote: async () => ((calls += 1), client.quote()) },
+			chainId: 56,
+			trampoline: "0x0000000000000000000000000000000000000005",
+			settlement: "0x0000000000000000000000000000000000000004",
+		});
+		for (const [sellToken, buyToken, remainingSell] of [
+			[BUY_ETH_ADDRESS, "0x0000000000000000000000000000000000000002", 100n],
+			["0x0000000000000000000000000000000000000001", BUY_ETH_ADDRESS, 100n],
+			[
+				"0x0000000000000000000000000000000000000001",
+				"0x0000000000000000000000000000000000000001",
+				100n,
+			],
+			[
+				"0x0000000000000000000000000000000000000001",
+				"0x0000000000000000000000000000000000000002",
+				0n,
+			],
+		] as const) {
+			await expect(
+				provider.quote({
+					uid: "0x01",
+					chainId: 56,
+					sellToken,
+					buyToken,
+					remainingSell,
+					scaledLimitBuy: 1n,
+				}),
+			).resolves.toBeNull();
+		}
+		expect(calls).toBe(0);
+	});
+
+	it("rejects stale, unsafe, and under-limit successful responses", async () => {
+		const badQuote = {
+			...client.quote,
+		};
+		const response = await client.quote();
+		const variants = [
+			{ ...response, block: { ...response.block, timestamp: 94 } },
+			{ ...response, transaction: { ...response.transaction, value: 1n } },
+			{ ...response, feeBreakdown: { ...response.feeBreakdown, minAmountReceived: 99n } },
+			{ ...response, status: "not_ready" as const },
+		];
+		for (const quote of variants) {
+			const provider = new FyndProvider({
+				client: { ...client, quote: async () => quote },
+				chainId: 56,
+				trampoline: "0x0000000000000000000000000000000000000005",
+				settlement: "0x0000000000000000000000000000000000000004",
+				now: () => 105,
+			});
+			await expect(
+				provider.quote({
+					uid: "0x01",
+					chainId: 56,
+					sellToken: "0x0000000000000000000000000000000000000001",
+					buyToken: "0x0000000000000000000000000000000000000002",
+					remainingSell: 100n,
+					scaledLimitBuy: 100n,
+				}),
+			).resolves.toBeNull();
+		}
+		expect(badQuote).toBeDefined();
 	});
 });

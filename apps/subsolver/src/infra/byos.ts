@@ -1,6 +1,6 @@
 import { isTerminalStatus, signCancellation, signReadAuth } from "@byos/common";
+import type { SignedProposal } from "@byos/subsolver-core";
 import type { Hex, TypedDataDomain } from "viem";
-import type { SignedProposal } from "../domain/proposal.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 type SignFn = (params: any) => Promise<Hex>;
@@ -9,6 +9,25 @@ interface ProposalView {
 	id: number;
 	status: string;
 	rejectionReason?: string;
+}
+
+export interface ProposalMetadata {
+	id: number;
+	orderUid: Hex;
+	validUntil: bigint;
+	status: string;
+}
+
+/** Signals an explicit API rate limit so the polling loop can honour it. */
+export class ByosRateLimitError extends Error {
+	constructor(readonly retryAfterMs: number) {
+		super("BYOS request budget exhausted");
+	}
+}
+
+function rateLimitError(response: Response): ByosRateLimitError {
+	const seconds = Number(response.headers.get("Retry-After") ?? "1");
+	return new ByosRateLimitError(Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000);
 }
 
 export class ByosClient {
@@ -51,6 +70,7 @@ export class ByosClient {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
 		});
+		if (response.status === 429) throw rateLimitError(response);
 
 		if (!response.ok) {
 			const err = await response.json().catch(() => ({ description: "unknown error" }));
@@ -69,12 +89,32 @@ export class ByosClient {
 		const response = await fetch(`${this.baseUrl}/proposal/${id}`, {
 			headers: { "X-Signature": sig },
 		});
+		if (response.status === 429) throw rateLimitError(response);
 
 		if (!response.ok) {
 			throw new Error(`proposal ${response.status}`);
 		}
 
 		return (await response.json()) as ProposalView;
+	}
+
+	/** Bulk owner-scoped snapshot used to recover proposal state after restart. */
+	async proposals(): Promise<ProposalMetadata[]> {
+		const sig = await this.readAuth();
+		const response = await fetch(`${this.baseUrl}/proposals/by-sub-solver`, {
+			headers: { "X-Signature": sig },
+		});
+		if (response.status === 429) throw rateLimitError(response);
+		if (!response.ok) throw new Error(`list proposals ${response.status}`);
+		const body = (await response.json()) as {
+			proposals: Array<{ id: number; orderUid: Hex; validUntil: string; status: string }>;
+		};
+		return body.proposals.map((proposal) => ({
+			id: proposal.id,
+			orderUid: proposal.orderUid,
+			validUntil: BigInt(proposal.validUntil),
+			status: proposal.status,
+		}));
 	}
 
 	/** Cancels a proposal. */

@@ -1,4 +1,5 @@
 import { type ContractInteraction, type Proposal, signProposal } from "@byos/common";
+import type { SignedProposal } from "@byos/subsolver-core";
 import type { Address, Hex, TypedDataDomain } from "viem";
 import { encodeFunctionData, keccak256 } from "viem";
 import { amountIn, amountOut } from "./routing.js";
@@ -11,6 +12,9 @@ export interface Order {
 	sellAmount: bigint;
 	buyAmount: bigint;
 	kind: "sell" | "buy";
+	/** The auction's original amounts, used to calculate a partial remaining fill. */
+	fullSellAmount?: bigint;
+	fullBuyAmount?: bigint;
 }
 
 /** Parameters for building a routed proposal. */
@@ -22,55 +26,6 @@ export interface RouteParams {
 	validUntil: bigint;
 	nonce: bigint;
 	extraInteractions: ContractInteraction[];
-}
-
-/** A fully signed proposal ready for submission to BYOS. */
-export interface SignedProposal {
-	orderUid: Hex;
-	sellToken: Address;
-	buyToken: Address;
-	sellAmount: bigint;
-	minBuyAmount: bigint;
-	quoteBuyAmount: bigint;
-	interactions: ContractInteraction[];
-	validUntil: bigint;
-	nonce: bigint;
-	signature: Hex;
-}
-
-/** Signs a provider-produced route without imposing a venue-specific encoding. */
-export async function buildProposalFromRoute(
-	order: Order,
-	route: { quoteBuyAmount: bigint; minBuyAmount: bigint; interactions: ContractInteraction[] },
-	validUntil: bigint,
-	nonce: bigint,
-	domain: TypedDataDomain,
-	signFn: SignFn,
-): Promise<SignedProposal | null> {
-	if (order.kind !== "sell" || route.minBuyAmount < order.buyAmount) return null;
-	const proposal: Proposal = {
-		orderUidHash: keccak256(order.uid),
-		sellToken: order.sellToken,
-		buyToken: order.buyToken,
-		sellAmount: order.sellAmount,
-		minBuyAmount: route.minBuyAmount,
-		quoteBuyAmount: route.quoteBuyAmount,
-		validUntil,
-		nonce,
-	};
-	const signature = await signProposal(signFn, domain, proposal, route.interactions);
-	return {
-		orderUid: order.uid,
-		sellToken: order.sellToken,
-		buyToken: order.buyToken,
-		sellAmount: order.sellAmount,
-		minBuyAmount: route.minBuyAmount,
-		quoteBuyAmount: route.quoteBuyAmount,
-		interactions: route.interactions,
-		validUntil,
-		nonce,
-		signature,
-	};
 }
 
 /** ERC20 approve ABI for building approve interactions. */
