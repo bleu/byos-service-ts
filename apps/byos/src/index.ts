@@ -8,6 +8,7 @@ import { buildContext } from "./context.js";
 import { createAdminApp } from "./infra/api/admin.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
+import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
@@ -93,7 +94,14 @@ async function main() {
 	}
 
 	// 6. Start BullMQ workers
-	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger);
+	const slackWorker = config.SLACK_WEBHOOK_URL
+		? createSlackWorker(ctx.redis, config.SLACK_WEBHOOK_URL, logger)
+		: null;
+
+	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, {
+		slackQueue: slackWorker ? ctx.queues.slackNotification : undefined,
+		redis: slackWorker ? ctx.redis : undefined,
+	});
 
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,
@@ -140,7 +148,16 @@ async function main() {
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
+		slackWorker,
 	].filter(Boolean) as import("bullmq").Worker[];
+
+	// Startup Slack notification (direct, not queued — queue may not be drained yet)
+	if (config.SLACK_WEBHOOK_URL) {
+		enqueueSlackNotification(
+			ctx.queues.slackNotification,
+			`🚀 BYOS service started (chain ${config.CHAIN_ID})`,
+		).catch((err) => logger.warn({ err }, "failed to enqueue startup slack notification"));
+	}
 
 	// 7. Graceful shutdown
 	const shutdown = async (signal: string) => {
@@ -189,6 +206,7 @@ async function main() {
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
 			ctx.queues.balanceRefresh.close(),
+			ctx.queues.slackNotification.close(),
 		]);
 
 		// Close Redis
