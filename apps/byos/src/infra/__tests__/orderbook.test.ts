@@ -20,17 +20,30 @@ describe("classifyOrderbookError", () => {
 	it("5xx → transient", () => {
 		expect(classifyOrderbookError(makeApiError(500), "test")).toEqual({
 			kind: "transient",
-			message: "test 500: server error",
+			message: "test 500",
 		});
 		expect(classifyOrderbookError(makeApiError(503), "test")).toEqual({
 			kind: "transient",
-			message: "test 503: server error",
+			message: "test 503",
 		});
 	});
 
-	it("4xx non-404 → notFound (terminal)", () => {
-		expect(classifyOrderbookError(makeApiError(400), "test")).toEqual({ kind: "notFound" });
-		expect(classifyOrderbookError(makeApiError(422), "test")).toEqual({ kind: "notFound" });
+	it("429 → transient (rate-limited, not terminal)", () => {
+		expect(classifyOrderbookError(makeApiError(429), "test")).toEqual({
+			kind: "transient",
+			message: "test 429",
+		});
+	});
+
+	it("4xx non-404 → transient (defer rather than permanently reject)", () => {
+		expect(classifyOrderbookError(makeApiError(400), "test")).toEqual({
+			kind: "transient",
+			message: "test 400",
+		});
+		expect(classifyOrderbookError(makeApiError(422), "test")).toEqual({
+			kind: "transient",
+			message: "test 422",
+		});
 	});
 
 	it("network-level error (TypeError) → transient", () => {

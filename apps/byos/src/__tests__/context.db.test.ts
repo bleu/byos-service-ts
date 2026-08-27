@@ -87,97 +87,10 @@ const FAKE_TRAMPOLINE_FACTORY: Address = "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
 const TEST_OPERATOR_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 // ---------------------------------------------------------------------------
-// Test-database setup (one per describe block so contexts don't share state)
+// Standard config (RPC + operator)
 // ---------------------------------------------------------------------------
 
-describe("buildContext — no RPC", () => {
-	let dbCtx: TestContext;
-	let ctx: Awaited<ReturnType<typeof buildContext>>;
-
-	beforeAll(async () => {
-		dbCtx = await createTestDb();
-
-		const config = parseConfig({
-			DATABASE_URL: dbCtx.url,
-			CHAIN_ID: "1",
-			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
-		});
-
-		ctx = await buildContext(config, logger);
-	});
-
-	afterAll(async () => {
-		// Close BullMQ queues and Redis connections to avoid open handle warnings.
-		await ctx.queues.validation.close();
-		await ctx.queues.validateProposal.close();
-		await ctx.queues.retention.close();
-		await ctx.queues.penalty.close();
-		await ctx.queues.audit.close();
-		await ctx.queues.balanceRefresh.close();
-		ctx.redis.disconnect();
-		ctx.requestRedis.disconnect();
-		await ctx.dbClient.end();
-		await dbCtx.cleanup();
-	});
-
-	// Deleting the `let validator: ValidateProposal = acceptAll` line (or the
-	// assignment inside the `else` branch) would make validator undefined / a
-	// ProposalValidator, which would fail this check.
-	it("validator is acceptAll when no RPC is configured", () => {
-		// ProposalValidator is only constructed inside the `if (config.RPC_URL)`
-		// block; without RPC the code falls through to the `acceptAll` default.
-		// Removing `let validator: ValidateProposal = acceptAll` in context.ts
-		// would make this a ProposalValidator or throw.
-		expect(ctx.validator).not.toBeInstanceOf(ProposalValidator);
-		// acceptAll has a `validate` method but no class prototype — the name
-		// check is the clearest way to express "this is the stub, not the real one".
-		expect(ctx.validator.validate).toBeDefined();
-	});
-
-	// Deleting the `let balanceRefresh: BalanceRefreshConfig | null = null` line
-	// or the RPC guard would leave balanceRefresh as something non-null.
-	it("balanceRefresh is null when no RPC is configured", () => {
-		// context.ts: `let balanceRefresh: BalanceRefreshConfig | null = null`
-		// is only overwritten inside `if (config.RPC_URL)`.
-		expect(ctx.balanceRefresh).toBeNull();
-	});
-
-	// Deleting `let operator: EscrowOperator | null = null` or the RPC guard
-	// would make operator non-null or throw.
-	it("operator is null when no RPC is configured", () => {
-		// context.ts: `let operator: EscrowOperator | null = null`
-		// is only overwritten inside `if (config.RPC_URL) { if (OPERATOR_KEY) ... }`.
-		expect(ctx.operator).toBeNull();
-	});
-
-	// Deleting `const minCollateralWei = BigInt(config.MIN_COLLATERAL)` or
-	// swapping to a hard-coded value would break this.
-	it("minCollateralWei is the config default when MIN_COLLATERAL is unset", () => {
-		// context.ts: `BigInt(config.MIN_COLLATERAL)` — MIN_COLLATERAL defaults
-		// to "10000000000000000" in the Zod schema when not explicitly set.
-		expect(ctx.minCollateralWei).toBe(10n ** 16n);
-	});
-
-	// Deleting the `rateLimits = rateLimitsFromConfig(config, minCollateralWei)` line
-	// would leave rateLimits.floorWei at 0 or undefined.
-	it("rateLimits.floorWei is the resolved collateral floor", () => {
-		// context.ts: `rateLimitsFromConfig(config, minCollateralWei)` passes
-		// the resolved floor; if the arg was `0n` or omitted the assertion fails.
-		expect(ctx.rateLimits.floorWei).toBe(10n ** 16n);
-	});
-
-	// Deleting `const trampolineFactory = config.TRAMPOLINE_FACTORY as Address` or
-	// failing to return it in the context object would break this.
-	it("trampolineFactory is the TRAMPOLINE_FACTORY from config", () => {
-		// context.ts: `const trampolineFactory = config.TRAMPOLINE_FACTORY as Address`
-		// TRAMPOLINE_FACTORY is required in config, so it is always present here.
-		expect(ctx.trampolineFactory).toBe(FAKE_TRAMPOLINE_FACTORY);
-	});
-});
-
-// ---------------------------------------------------------------------------
-
-describe("buildContext — RPC without operator", () => {
+describe("buildContext", () => {
 	let dbCtx: TestContext;
 	let rpcStub: { url: string; close: () => Promise<void> };
 	let ctx: Awaited<ReturnType<typeof buildContext>>;
@@ -192,89 +105,6 @@ describe("buildContext — RPC without operator", () => {
 			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
 			RPC_URL: rpcStub.url,
 			ORDERBOOK_URL: "http://127.0.0.1:1", // unused — no orderbook calls in buildContext
-			ESCROW_ADDRESS: FAKE_ESCROW,
-			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
-			DEFAULT_GAS_PRICE: "1000000000",
-		});
-
-		ctx = await buildContext(config, logger);
-	});
-
-	afterAll(async () => {
-		await ctx.queues.validation.close();
-		await ctx.queues.validateProposal.close();
-		await ctx.queues.retention.close();
-		await ctx.queues.penalty.close();
-		await ctx.queues.audit.close();
-		await ctx.queues.balanceRefresh.close();
-		ctx.redis.disconnect();
-		ctx.requestRedis.disconnect();
-		await ctx.dbClient.end();
-		await rpcStub.close();
-		await dbCtx.cleanup();
-	});
-
-	// Deleting `validator = new ProposalValidator(escrowValidator, simulationValidator)`
-	// inside the RPC block leaves validator as `acceptAll`.
-	it("validator is a ProposalValidator when RPC is configured", () => {
-		// context.ts: inside `if (config.RPC_URL)`, the code builds
-		// EscrowValidator + SimulationValidator and wraps them in ProposalValidator.
-		// If that assignment were removed, `ctx.validator` would still be `acceptAll`.
-		expect(ctx.validator).toBeInstanceOf(ProposalValidator);
-	});
-
-	// Deleting `balanceRefresh = { store: balanceStore, ... }` inside the RPC
-	// block would leave it null.
-	it("balanceRefresh is non-null when RPC is configured", () => {
-		// context.ts: `balanceRefresh = { store: balanceStore, fetchBalances, ... }`
-		// is set inside `if (config.RPC_URL)`.
-		expect(ctx.balanceRefresh).not.toBeNull();
-	});
-
-	// Deleting `balanceRefresh.floorWei = rateLimits.floorWei` would leave it 0.
-	it("balanceRefresh.floorWei matches rateLimits.floorWei", () => {
-		// context.ts: `floorWei: rateLimits.floorWei` in the balanceRefresh object.
-		// If that line passed 0n instead of rateLimits.floorWei, this assertion fails.
-		expect(ctx.balanceRefresh?.floorWei).toBe(ctx.rateLimits.floorWei);
-	});
-
-	// Deleting `let operator: EscrowOperator | null = null` or the OPERATOR_KEY
-	// guard would break the invariant that no-key means null operator.
-	it("operator is null when OPERATOR_PRIVATE_KEY is absent", () => {
-		// context.ts: `if (config.OPERATOR_PRIVATE_KEY) { ... operator = new EscrowOperator(...) }`
-		// Without the key the assignment is skipped; operator stays null.
-		expect(ctx.operator).toBeNull();
-	});
-
-	// Deleting `const escrowAddress = ...` or passing the wrong address to
-	// EscrowValidator would be caught here because balanceRefresh.fetchBalances
-	// is created with `createEscrowBalanceReader(publicClient, escrowAddress)`.
-	// We probe that the escrow address reached the config field.
-	it("config.ESCROW_ADDRESS is preserved in context.config", () => {
-		// context.ts: `const { db, client: dbClient } = createDb(config.DATABASE_URL)`
-		// and `return { ..., config, ... }` — if config were replaced with a copy
-		// that cleared ESCROW_ADDRESS the assertion would fail.
-		expect(ctx.config.ESCROW_ADDRESS?.toLowerCase()).toBe(FAKE_ESCROW.toLowerCase());
-	});
-});
-
-// ---------------------------------------------------------------------------
-
-describe("buildContext — RPC with operator", () => {
-	let dbCtx: TestContext;
-	let rpcStub: { url: string; close: () => Promise<void> };
-	let ctx: Awaited<ReturnType<typeof buildContext>>;
-
-	beforeAll(async () => {
-		dbCtx = await createTestDb();
-		rpcStub = await startJsonRpcStub();
-
-		const config = parseConfig({
-			DATABASE_URL: dbCtx.url,
-			CHAIN_ID: "1",
-			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
-			RPC_URL: rpcStub.url,
-			ORDERBOOK_URL: "http://127.0.0.1:1",
 			ESCROW_ADDRESS: FAKE_ESCROW,
 			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
 			DEFAULT_GAS_PRICE: "1000000000",
@@ -298,32 +128,43 @@ describe("buildContext — RPC with operator", () => {
 		await dbCtx.cleanup();
 	});
 
-	// Deleting `operator = new EscrowOperator(walletClient, publicClient, escrowAddress)`
-	// inside the OPERATOR_PRIVATE_KEY block would leave operator null.
-	it("operator is an EscrowOperator when OPERATOR_PRIVATE_KEY is set", () => {
-		// context.ts: `if (config.OPERATOR_PRIVATE_KEY) {`
-		// `  const account = privateKeyToAccount(config.OPERATOR_PRIVATE_KEY as Hex);`
-		// `  const walletClient = createWalletClient({ account, chain, transport });`
-		// `  operator = new EscrowOperator(walletClient, publicClient, escrowAddress);`
-		// Removing that block or the assignment leaves operator as null.
+	// Deleting `validator = new ProposalValidator(escrowValidator, simulationValidator)`
+	// would leave validator as something other than ProposalValidator.
+	it("validator is a ProposalValidator", () => {
+		expect(ctx.validator).toBeInstanceOf(ProposalValidator);
+	});
+
+	// Deleting `balanceRefresh = { store: balanceStore, ... }` would leave it null.
+	it("balanceRefresh is wired", () => {
+		expect(ctx.balanceRefresh).not.toBeNull();
+	});
+
+	// Deleting `balanceRefresh.floorWei = rateLimits.floorWei` would leave it 0.
+	it("balanceRefresh.floorWei matches rateLimits.floorWei", () => {
+		// context.ts: `floorWei: rateLimits.floorWei` in the balanceRefresh object.
+		// If that line passed 0n instead of rateLimits.floorWei, this assertion fails.
+		expect(ctx.balanceRefresh.floorWei).toBe(ctx.rateLimits.floorWei);
+	});
+
+	// Deleting `operator = new EscrowOperator(...)` would leave operator null/undefined.
+	it("operator is an EscrowOperator", () => {
 		expect(ctx.operator).toBeInstanceOf(EscrowOperator);
 	});
 
-	// All three RPC-dependent fields must be non-null together — the operator
-	// variant still needs a working validator and balance refresh.
-	it("validator and balanceRefresh are also set when operator is present", () => {
-		expect(ctx.validator).toBeInstanceOf(ProposalValidator);
-		expect(ctx.balanceRefresh).not.toBeNull();
+	// Deleting `const trampolineFactory = config.TRAMPOLINE_FACTORY as Address` or
+	// failing to return it in the context object would break this.
+	it("trampolineFactory is the TRAMPOLINE_FACTORY from config", () => {
+		expect(ctx.trampolineFactory).toBe(FAKE_TRAMPOLINE_FACTORY);
 	});
 });
 
 // ---------------------------------------------------------------------------
+// MIN_COLLATERAL override reaches the balance-refresh floor gate
+// ---------------------------------------------------------------------------
 
-describe("buildContext — RPC with MIN_COLLATERAL override", () => {
+describe("buildContext — MIN_COLLATERAL override", () => {
 	// Verifies that the custom floor reaches balanceRefresh.floorWei (the
-	// request-path escrow floor gate) when RPC is active. The no-RPC
-	// MIN_COLLATERAL tests below can never exercise this path because
-	// balanceRefresh is null without RPC.
+	// request-path escrow floor gate) when RPC is active.
 	let dbCtx: TestContext;
 	let rpcStub: { url: string; close: () => Promise<void> };
 	let ctx: Awaited<ReturnType<typeof buildContext>>;
@@ -341,6 +182,7 @@ describe("buildContext — RPC with MIN_COLLATERAL override", () => {
 			ESCROW_ADDRESS: FAKE_ESCROW,
 			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
 			DEFAULT_GAS_PRICE: "1000000000",
+			OPERATOR_PRIVATE_KEY: TEST_OPERATOR_KEY,
 			MIN_COLLATERAL: "999000000000000000", // 0.999 ETH — distinct from any chain default
 		});
 
@@ -362,104 +204,13 @@ describe("buildContext — RPC with MIN_COLLATERAL override", () => {
 	});
 
 	// Deleting the `floorWei: rateLimits.floorWei` line inside the balanceRefresh
-	// object literal (context.ts ~line 218) would leave it 0n or undefined.
-	// The no-RPC MIN_COLLATERAL tests below cannot catch this because
-	// balanceRefresh is null when RPC is absent.
-	it("MIN_COLLATERAL override reaches balanceRefresh.floorWei (the request-path escrow floor gate)", () => {
+	// object literal would leave it 0n or undefined.
+	it("MIN_COLLATERAL override reaches balanceRefresh.floorWei and minCollateralWei", () => {
 		const CUSTOM = 999000000000000000n;
 		// context.ts: `floorWei: rateLimits.floorWei` in the balanceRefresh object.
-		// If that line read `0n` or `minCollateralFor(config.CHAIN_ID)` instead,
-		// this assertion would catch the drift.
-		expect(ctx.balanceRefresh?.floorWei).toBe(CUSTOM);
+		expect(ctx.balanceRefresh.floorWei).toBe(CUSTOM);
 		// Consistency: the rate-limit gate and the balance-refresh gate must agree.
 		expect(ctx.rateLimits.floorWei).toBe(CUSTOM);
 		expect(ctx.minCollateralWei).toBe(CUSTOM);
-	});
-});
-
-// ---------------------------------------------------------------------------
-
-describe("buildContext — MIN_COLLATERAL override", () => {
-	// Two sub-cases in a single describe so we only spin up one DB pair.
-	// Each case needs its own context, so they are built in separate `it` blocks
-	// inside the describe but we track cleanup handles manually.
-
-	let dbCtx1: TestContext;
-	let dbCtx2: TestContext;
-	const cleanup: Array<() => Promise<void>> = [];
-
-	afterAll(async () => {
-		for (const fn of cleanup) {
-			await fn();
-		}
-		await dbCtx1?.cleanup();
-		await dbCtx2?.cleanup();
-	});
-
-	it("MIN_COLLATERAL override replaces the chain default everywhere", async () => {
-		dbCtx1 = await createTestDb();
-		const CUSTOM_COLLATERAL = "999000000000000000"; // 0.999 ETH — distinct from any chain default
-
-		const config = parseConfig({
-			DATABASE_URL: dbCtx1.url,
-			CHAIN_ID: "1",
-			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
-			MIN_COLLATERAL: CUSTOM_COLLATERAL,
-		});
-
-		const ctx = await buildContext(config, logger);
-		cleanup.push(async () => {
-			await ctx.queues.validation.close();
-			await ctx.queues.validateProposal.close();
-			await ctx.queues.retention.close();
-			await ctx.queues.penalty.close();
-			await ctx.queues.audit.close();
-			await ctx.queues.balanceRefresh.close();
-			ctx.redis.disconnect();
-			ctx.requestRedis.disconnect();
-			await ctx.dbClient.end();
-		});
-
-		// context.ts: `BigInt(config.MIN_COLLATERAL)` — MIN_COLLATERAL is always
-		// present (required or defaulted). If this line were removed or defaulted
-		// to 0n, the assertion would fail.
-		expect(ctx.minCollateralWei).toBe(BigInt(CUSTOM_COLLATERAL));
-
-		// context.ts: `rateLimitsFromConfig(config, minCollateralWei)`
-		// If minCollateralWei were not passed through, floorWei would differ.
-		expect(ctx.rateLimits.floorWei).toBe(BigInt(CUSTOM_COLLATERAL));
-	});
-
-	it("without MIN_COLLATERAL override the chain default is used everywhere", async () => {
-		dbCtx2 = await createTestDb();
-
-		const config = parseConfig({
-			DATABASE_URL: dbCtx2.url,
-			CHAIN_ID: "1",
-			TRAMPOLINE_FACTORY: FAKE_TRAMPOLINE_FACTORY,
-			// No MIN_COLLATERAL
-		});
-
-		const ctx = await buildContext(config, logger);
-		cleanup.push(async () => {
-			await ctx.queues.validation.close();
-			await ctx.queues.validateProposal.close();
-			await ctx.queues.retention.close();
-			await ctx.queues.penalty.close();
-			await ctx.queues.audit.close();
-			await ctx.queues.balanceRefresh.close();
-			ctx.redis.disconnect();
-			ctx.requestRedis.disconnect();
-			await ctx.dbClient.end();
-		});
-
-		// MIN_COLLATERAL defaults to "10000000000000000" in the Zod schema.
-		// context.ts: `BigInt(config.MIN_COLLATERAL)` — if that line were removed
-		// or hardcoded to 0n the assertions below would catch the drift.
-		expect(ctx.minCollateralWei).toBe(10n ** 16n);
-
-		// Both consumers must see the same value — if one were hardcoded to a
-		// different number this would catch the drift.
-		expect(ctx.rateLimits.floorWei).toBe(10n ** 16n);
 	});
 });

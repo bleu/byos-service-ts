@@ -22,9 +22,10 @@ export interface FetchOrder {
  * Classify an error thrown by `OrderBookApi` into an `OrderbookError`.
  *
  * - 404 → terminal (order/token not found)
- * - 5xx → retryable transient
- * - other 4xx → terminal (bad request, we should not retry)
- * - network/connection failure → retryable transient
+ * - 429 → transient (rate-limited; SDK exhausts its retries before surfacing)
+ * - 5xx → transient (server error)
+ * - other 4xx → transient (unexpected; defer rather than permanently reject)
+ * - network/connection failure → transient
  */
 export function classifyOrderbookError(err: unknown, context: string): OrderbookError {
 	if (err instanceof OrderBookApiError) {
@@ -32,11 +33,10 @@ export function classifyOrderbookError(err: unknown, context: string): Orderbook
 		if (status === 404) {
 			return { kind: "notFound" };
 		}
-		if (status >= 500) {
-			return { kind: "transient", message: `${context} ${status}: server error` };
-		}
-		// 4xx non-404: bad request, auth failure, etc. — terminal
-		return { kind: "notFound" };
+		// All non-404 HTTP errors are transient: 429 (rate-limited), 5xx (server
+		// error), and unexpected 4xx all warrant a retry rather than a permanent
+		// rejection of an otherwise-valid proposal.
+		return { kind: "transient", message: `${context} ${status}` };
 	}
 
 	// Network-level error (connection refused, timeout, DNS failure, etc.)

@@ -23,16 +23,13 @@ export const configSchema = z.object({
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 
-	// Chain connectivity (RPC_URL is the primary knob; the rest resolve from the chain)
-	RPC_URL: z.string().optional(),
+	// Chain connectivity
+	RPC_URL: z.string(),
 	/** Overrides the orderbook URL from `orderbookUrlFor`. Useful for barn/staging. */
 	ORDERBOOK_URL: z.string().optional(),
-	/** Escrow contract address for this deployment. Required when RPC_URL is set;
-	 * set once per chain by the operator who deployed the contract. */
-	ESCROW_ADDRESS: z
-		.string()
-		.regex(addressPattern, "Must be a valid 0x-prefixed address")
-		.optional(),
+	/** Escrow contract address for this deployment. Set once per chain by the
+	 * operator who deployed the contract. */
+	ESCROW_ADDRESS: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
 	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()
@@ -45,7 +42,7 @@ export const configSchema = z.object({
 		.string()
 		.regex(/^\d+$/, "Must be a decimal wei amount")
 		.default("10000000000000000"),
-	DEFAULT_GAS_PRICE: z.string().optional(),
+	DEFAULT_GAS_PRICE: z.string(),
 
 	// Timing
 	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
@@ -92,7 +89,7 @@ export const configSchema = z.object({
 	BALANCE_REFRESH_BATCH_SIZE: z.coerce.number().int().positive().default(50),
 
 	// Operator (Track A penalty loop)
-	OPERATOR_PRIVATE_KEY: z.string().optional(),
+	OPERATOR_PRIVATE_KEY: z.string(),
 
 	// Logging
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
@@ -102,42 +99,12 @@ export const configSchema = z.object({
 		.default("false"),
 });
 
-/**
- * Mirrors the Rust CLI's requires_all: a half-configured chain connection
- * must fail startup, not boot with a missing value.
- *
- * ESCROW_ADDRESS is required with RPC_URL: there is no per-chain lookup table
- * for BYOS-specific contracts — the operator sets the address for the chain
- * they deployed to.
- */
-const RPC_COMPANIONS = ["ESCROW_ADDRESS", "DEFAULT_GAS_PRICE"] as const;
-
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
-	if (cfg.RPC_URL) {
-		for (const key of RPC_COMPANIONS) {
-			if (!cfg[key]) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: [key],
-					message: "required when RPC_URL is set",
-				});
-			}
-		}
-	}
-
 	if (cfg.RATE_MIN_PER_WINDOW > cfg.RATE_MAX_PER_WINDOW) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
 			path: ["RATE_MIN_PER_WINDOW"],
 			message: "must not exceed RATE_MAX_PER_WINDOW",
-		});
-	}
-
-	if (!cfg.RPC_URL && cfg.OPERATOR_PRIVATE_KEY) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			path: ["OPERATOR_PRIVATE_KEY"],
-			message: "requires RPC_URL",
 		});
 	}
 });
