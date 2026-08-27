@@ -5,9 +5,15 @@ export {
 	type QuoteResult,
 	type RouteProvider,
 } from "./provider.js";
-export { FyndProvider, type FyndProviderConfig } from "./fynd-provider.js";
+export {
+	FyndConfigurationError,
+	FyndProvider,
+	type FyndProviderConfig,
+} from "./fynd-provider.js";
 export { RequestBudget } from "./request-budget.js";
 export { randomNonce } from "./nonce.js";
+export { ByosClient, ByosRateLimitError, type ProposalMetadata } from "./byos-client.js";
+export { OrderbookClient, type OrderbookOrder } from "./orderbook-client.js";
 export {
 	buildProposalFromRoute,
 	type ProposalOrder,

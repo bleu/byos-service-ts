@@ -14,6 +14,7 @@
 		"test:db": "vitest run --project db",
 		"test:redis": "vitest run --project redis",
 		"test:integration": "vitest run --project integration",
+		"test:docker": "docker compose --profile fynd-subsolver config --quiet",
 		"test:onchain": "vitest run --project onchain",
 		"test:e2e": "vitest run --project e2e --no-file-parallelism",
 		"test:watch": "vitest",

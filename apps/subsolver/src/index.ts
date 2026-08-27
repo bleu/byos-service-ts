@@ -1,14 +1,15 @@
 import "dotenv/config";
 import { byosDomain } from "@byos/common";
 import {
+	FyndConfigurationError,
 	FyndProvider,
 	buildProposalFromRoute,
+	prioritizeCandidates,
 	quoteBatch,
 	RequestBudget,
 	randomNonce,
-	toCandidateOrder,
 } from "@byos/subsolver-core";
-import { FyndClient } from "@kayibal/fynd-client";
+import { FyndClient, FyndError } from "@kayibal/fynd-client";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -24,6 +25,23 @@ interface Live {
 	id: number;
 	validUntil: bigint;
 	lastSubmitted: bigint;
+}
+
+const delay = (milliseconds: number) =>
+	new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+/** Retry transport/warm-up failures, but fail fast on an invalid Fynd setup. */
+async function waitForFyndStartup(fynd: FyndProvider, logger: pino.Logger): Promise<void> {
+	while (true) {
+		try {
+			await fynd.initialize();
+			return;
+		} catch (error) {
+			if (error instanceof FyndConfigurationError) throw error;
+			logger.warn({ err: error }, "waiting for Fynd sidecar info endpoint");
+			await delay(2_000);
+		}
+	}
 }
 
 class Subsolver {
@@ -159,27 +177,35 @@ class Subsolver {
 
 	private async submitFyndRoutes(orders: readonly Order[], now: bigint): Promise<void> {
 		const byUid = new Map(orders.map((order) => [order.uid.toLowerCase(), order]));
-		const candidates = orders.flatMap((order) => {
-			if (order.kind !== "sell") return [];
-			const fullSellAmount = order.fullSellAmount ?? order.sellAmount;
-			const fullBuyAmount = order.fullBuyAmount ?? order.buyAmount;
-			const candidate = toCandidateOrder({
-				uid: order.uid,
-				chainId: this.config.toml.chainId,
-				sellToken: order.sellToken,
-				buyToken: order.buyToken,
-				fullSellAmount,
-				fullBuyAmount,
-				executedSellAmount: fullSellAmount - order.sellAmount,
-			});
-			return candidate ? [candidate] : [];
-		});
+		const newOrderUids = new Set(
+			orders
+				.filter((order) => !this.live.has(order.uid.toLowerCase()))
+				.map((order) => order.uid.toLowerCase()),
+		);
+		const candidates = prioritizeCandidates(
+			orders
+				.filter((order) => order.kind === "sell")
+				.map((order) => {
+					const fullSellAmount = order.fullSellAmount ?? order.sellAmount;
+					return {
+						uid: order.uid,
+						chainId: this.config.toml.chainId,
+						sellToken: order.sellToken,
+						buyToken: order.buyToken,
+						fullSellAmount,
+						fullBuyAmount: order.fullBuyAmount ?? order.buyAmount,
+						executedSellAmount: fullSellAmount - order.sellAmount,
+						estimatedNativeSurplus: order.estimatedNativeSurplus,
+					};
+				}),
+			(orderUid) => !newOrderUids.has(orderUid.toLowerCase()),
+		).map((ranked) => ranked.candidate);
 		const results = await quoteBatch(this.fynd!, candidates, this.config.fyndQuoteConcurrency);
 		for (const result of results) {
 			const order = byUid.get(result.order.uid.toLowerCase());
 			if (!order) continue;
 			if (result.error) {
-				this.logger.warn({ err: result.error, orderUid: order.uid }, "Fynd quote failed");
+				this.logFyndQuoteError(result.error, order.uid);
 				continue;
 			}
 			if (!result.route) continue;
@@ -210,6 +236,22 @@ class Subsolver {
 				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
 			}
 		}
+	}
+
+	private logFyndQuoteError(error: unknown, orderUid: Hex): void {
+		if (error instanceof FyndError) {
+			if (error.code === "NO_ROUTE_FOUND" || error.code === "INSUFFICIENT_LIQUIDITY") {
+				this.logger.debug({ code: error.code, orderUid }, "Fynd has no usable route");
+				return;
+			}
+			if (error.isRetryable()) {
+				this.logger.warn({ err: error, code: error.code, orderUid }, "Fynd transient quote error");
+				return;
+			}
+			this.logger.error({ err: error, code: error.code, orderUid }, "Fynd invalid quote request");
+			return;
+		}
+		this.logger.warn({ err: error, orderUid }, "unexpected Fynd quote error");
 	}
 
 	private async holdsLiveProposal(orderUid: Hex): Promise<boolean> {
@@ -323,7 +365,7 @@ async function main() {
 					maxQuoteAgeSeconds: config.fyndMaxQuoteAgeSeconds,
 				})
 			: null;
-	if (fynd) await fynd.initialize();
+	if (fynd) await waitForFyndStartup(fynd, logger);
 
 	// Subsolver
 	const subsolver = new Subsolver(

@@ -15,6 +15,7 @@ export interface Order {
 	/** The auction's original amounts, used to calculate a partial remaining fill. */
 	fullSellAmount?: bigint;
 	fullBuyAmount?: bigint;
+	estimatedNativeSurplus?: bigint;
 }
 
 /** Parameters for building a routed proposal. */

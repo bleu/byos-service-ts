@@ -20,6 +20,9 @@ export interface FyndProviderConfig {
 	now?: () => number;
 }
 
+/** A permanent startup mismatch; retrying the sidecar cannot repair it. */
+export class FyndConfigurationError extends Error {}
+
 /** BSC-only Fynd adapter. It quotes; the shared pipeline signs and submits. */
 export class FyndProvider implements RouteProvider {
 	readonly name = "fynd";
@@ -40,7 +43,9 @@ export class FyndProvider implements RouteProvider {
 	 */
 	async initialize(): Promise<void> {
 		if (this.config.chainId !== 56) {
-			throw new Error(`Fynd is only supported on BSC (chain 56), got ${this.config.chainId}`);
+			throw new FyndConfigurationError(
+				`Fynd is only supported on BSC (chain 56), got ${this.config.chainId}`,
+			);
 		}
 		const info = await this.config.client.info();
 		this.assertBscRouter(info);
@@ -81,11 +86,13 @@ export class FyndProvider implements RouteProvider {
 		info: InstanceInfo,
 	): asserts info is InstanceInfo & { routerAddress: Address } {
 		if (info.chainId !== this.config.chainId) {
-			throw new Error(
+			throw new FyndConfigurationError(
 				`Fynd sidecar chain ${info.chainId} does not match configured chain ${this.config.chainId}`,
 			);
 		}
-		if (info.routerAddress == null) throw new Error("Fynd sidecar did not report a router address");
+		if (info.routerAddress == null) {
+			throw new FyndConfigurationError("Fynd sidecar did not report a router address");
+		}
 	}
 
 	private toRoute(order: CandidateOrder, router: Address, quote: Quote): ProviderRoute | null {
