@@ -1,5 +1,5 @@
 {
-	"name": "@byos/subsolver",
+	"name": "@byos/fynd-subsolver",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
@@ -12,6 +12,7 @@
 	"dependencies": {
 		"@byos/common": "workspace:*",
 		"@byos/subsolver-core": "workspace:^",
+		"@kayibal/fynd-client": "0.99.17",
 		"dotenv": "^16.0.0",
 		"pino": "^9.0.0",
 		"smol-toml": "^1.7.1",

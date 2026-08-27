@@ -73,7 +73,7 @@ importers:
         specifier: ^5.8.0
         version: 5.9.3
 
-  apps/subsolver:
+  apps/fynd-subsolver:
     dependencies:
       '@byos/common':
         specifier: workspace:*
@@ -84,6 +84,43 @@ importers:
       '@kayibal/fynd-client':
         specifier: 0.99.17
         version: 0.99.17(typescript@5.9.3)(zod@3.25.76)
+      dotenv:
+        specifier: ^16.0.0
+        version: 16.6.1
+      pino:
+        specifier: ^9.0.0
+        version: 9.14.0
+      smol-toml:
+        specifier: ^1.7.1
+        version: 1.7.1
+      viem:
+        specifier: ^2.0.0
+        version: 2.55.11(typescript@5.9.3)(zod@3.25.76)
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      pino-pretty:
+        specifier: ^13.1.3
+        version: 13.1.3
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.25)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  apps/subsolver:
+    dependencies:
+      '@byos/common':
+        specifier: workspace:*
+        version: link:../../packages/common
+      '@byos/subsolver-core':
+        specifier: workspace:^
+        version: link:../../packages/subsolver-core
       dotenv:
         specifier: ^16.0.0
         version: 16.6.1

@@ -47,6 +47,33 @@ describe("FyndProvider", () => {
 		);
 	});
 
+	it("caches validated sidecar info across readiness checks and quotes", async () => {
+		let infoCalls = 0;
+		const provider = new FyndProvider({
+			client: {
+				...client,
+				info: async () => {
+					infoCalls += 1;
+					return client.info();
+				},
+			},
+			chainId: 56,
+			trampoline: "0x0000000000000000000000000000000000000005",
+			settlement: "0x0000000000000000000000000000000000000004",
+		});
+		await provider.ready();
+		await provider.ready();
+		await provider.quote({
+			uid: "0x01",
+			chainId: 56,
+			sellToken: "0x0000000000000000000000000000000000000001",
+			buyToken: "0x0000000000000000000000000000000000000002",
+			remainingSell: 100n,
+			scaledLimitBuy: 100n,
+		});
+		expect(infoCalls).toBe(1);
+	});
+
 	it("skips native-token, same-token, and zero-size orders without calling Fynd", async () => {
 		let calls = 0;
 		const provider = new FyndProvider({

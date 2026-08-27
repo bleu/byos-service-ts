@@ -29,6 +29,7 @@ export class FyndProvider implements RouteProvider {
 	private readonly slippageBps: number;
 	private readonly maxQuoteAgeSeconds: number;
 	private readonly now: () => number;
+	private info: (InstanceInfo & { routerAddress: Address }) | undefined;
 
 	constructor(private readonly config: FyndProviderConfig) {
 		this.slippageBps = config.slippageBps ?? 50;
@@ -47,8 +48,7 @@ export class FyndProvider implements RouteProvider {
 				`Fynd is only supported on BSC (chain 56), got ${this.config.chainId}`,
 			);
 		}
-		const info = await this.config.client.info();
-		this.assertBscRouter(info);
+		if (!this.info) this.info = this.checkedInfo(await this.config.client.info());
 	}
 
 	async ready(): Promise<boolean> {
@@ -66,8 +66,11 @@ export class FyndProvider implements RouteProvider {
 			order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()
 		)
 			return null;
-		const info = await this.config.client.info();
-		this.assertBscRouter(info);
+		let info = this.info;
+		if (!info) {
+			info = this.checkedInfo(await this.config.client.info());
+			this.info = info;
+		}
 		const quote = await this.config.client.quote({
 			order: {
 				tokenIn: order.sellToken,
@@ -93,6 +96,11 @@ export class FyndProvider implements RouteProvider {
 		if (info.routerAddress == null) {
 			throw new FyndConfigurationError("Fynd sidecar did not report a router address");
 		}
+	}
+
+	private checkedInfo(info: InstanceInfo): InstanceInfo & { routerAddress: Address } {
+		this.assertBscRouter(info);
+		return info;
 	}
 
 	private toRoute(order: CandidateOrder, router: Address, quote: Quote): ProviderRoute | null {
