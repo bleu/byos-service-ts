@@ -58,6 +58,7 @@ export function createSolveRoute(config: SolveConfig) {
 			auctionGasPrice = BigInt(auction.effectiveGasPrice);
 			if (auctionGasPrice <= U64_MAX) {
 				config.gasPriceRef.value = auctionGasPrice;
+				await store.publishAuctionGasPrice(config.db, auctionGasPrice);
 			}
 		} catch {
 			// If it doesn't parse, leave previous value

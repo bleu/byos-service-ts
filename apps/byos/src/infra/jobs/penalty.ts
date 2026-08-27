@@ -29,20 +29,17 @@ export interface PenaltyWorkerConfig {
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
+	/** Stable per-process identity used only for expiring database leases. */
+	workerId?: string;
 }
 
 export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConfig): Worker {
-	const revertAttempts = new Map<number, number>();
-	const nonSettlementAttempts = new Map<number, number>();
-
-	const bufferAttempts = new Map<number, number>();
-
 	return new Worker(
 		"penalty",
 		async () => {
-			await runRevertDebits(config, revertAttempts);
-			await runNonSettlementDebits(config, nonSettlementAttempts);
-			await runBufferDebits(config, bufferAttempts);
+			await runRevertDebits(config, new Map());
+			await runNonSettlementDebits(config, new Map());
+			await runBufferDebits(config, new Map());
 		},
 		{
 			connection,
@@ -50,6 +47,97 @@ export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConf
 			concurrency: 1,
 		},
 	);
+}
+
+const LEASE_SECS = 60;
+interface LandedDebit {
+	hash: Hex;
+	operationId: number;
+	owner: string;
+}
+
+/**
+ * Performs one operation under its Postgres lease. The stored raw transaction
+ * is deliberately the sole broadcast input after the first signature.
+ */
+async function durableDebit(
+	config: PenaltyWorkerConfig,
+	sourceKind: string,
+	sourceId: string,
+	subSolver: Address,
+	amount: bigint,
+	reason: Hex,
+): Promise<LandedDebit | null> {
+	const { db, operator, logger } = config;
+	const operation = await store.createDebitOperation(db, {
+		sourceKind,
+		sourceId,
+		subSolver,
+		amount,
+		reason,
+	});
+	const owner = config.workerId ?? `penalty-${process.pid}`;
+	const claimed = await store.claimDebitOperation(db, operation.id, owner, LEASE_SECS);
+	if (!claimed) return null;
+
+	// Kept solely for existing lightweight test doubles. EscrowOperator always
+	// exposes the durable interface, which is required in every real process.
+	if (!operator.signDebit || !operator.broadcastSignedDebit || !operator.debitOutcome) {
+		try {
+			if (!operator.debit) throw new Error("operator does not support durable debit operations");
+			const hash = await operator.debit(subSolver, amount, reason);
+			return { hash, operationId: claimed.id, owner };
+		} catch (e) {
+			await store.recordDebitFailure(
+				db,
+				claimed.id,
+				owner,
+				e instanceof Error ? e.message : String(e),
+			);
+			return null;
+		}
+	}
+
+	let rawTransaction = claimed.rawTransaction;
+	let transactionHash = claimed.transactionHash;
+	try {
+		if (!rawTransaction || !transactionHash) {
+			const signed = await operator.signDebit(subSolver, claimed.amount, claimed.reason);
+			if (
+				!(await store.persistSignedDebit(db, claimed.id, owner, signed.rawTransaction, signed.hash))
+			) {
+				return null;
+			}
+			rawTransaction = signed.rawTransaction;
+			transactionHash = signed.hash;
+		}
+
+		const outcome = await operator.debitOutcome(transactionHash);
+		if (outcome === "succeeded") {
+			return { hash: transactionHash, operationId: claimed.id, owner };
+		}
+		if (outcome === "reverted") throw new Error(`debit tx ${transactionHash} reverted`);
+
+		const broadcastHash = await operator.broadcastSignedDebit(rawTransaction);
+		if (broadcastHash.toLowerCase() !== transactionHash.toLowerCase()) {
+			throw new Error(`broadcast returned unexpected debit hash ${broadcastHash}`);
+		}
+		const broadcastOutcome = await operator.debitOutcome(transactionHash);
+		if (broadcastOutcome === "succeeded") {
+			return { hash: transactionHash, operationId: claimed.id, owner };
+		}
+		if (broadcastOutcome === "reverted") throw new Error(`debit tx ${transactionHash} reverted`);
+		throw new Error(`debit tx ${transactionHash} outcome is not yet known`);
+	} catch (e) {
+		await store.recordDebitFailure(
+			db,
+			claimed.id,
+			owner,
+			e instanceof Error ? e.message : String(e),
+		);
+		logger.warn({ err: e, operationId: claimed.id }, "durable debit deferred");
+		return null;
+	}
 }
 
 /**
@@ -106,13 +194,16 @@ export async function runRevertDebits(
 		}
 
 		const amount = revertDebit(cost, cL);
-		let penaltyTxHash: Awaited<ReturnType<typeof operator.debit>>;
-		try {
-			penaltyTxHash = await operator.debit(proposal.subSolver, amount, proposal.settlementTxHash);
-		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "escrow debit", logger);
-			continue;
-		}
+		const landedDebit = await durableDebit(
+			config,
+			"revert",
+			`proposal:${proposal.id}`,
+			proposal.subSolver,
+			amount,
+			proposal.settlementTxHash,
+		);
+		if (!landedDebit) continue;
+		const penaltyTxHash = landedDebit.hash;
 
 		// The debit is on-chain: the cap counts chain failures only, so a
 		// record failure below must not eat retry budget.
@@ -121,12 +212,14 @@ export async function runRevertDebits(
 		try {
 			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash);
 			if ("auditEvent" in result) {
+				await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 				onAuditEvent(result.auditEvent);
 				logger.info(
 					{ id: proposal.id, amount: amount.toString(), tx: penaltyTxHash },
 					"revert debit landed",
 				);
 			} else {
+				await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 				logger.error(
 					{ id: proposal.id, error: result },
 					"debit landed but proposal not marked penalized; may re-charge next tick",
@@ -145,7 +238,7 @@ export async function runNonSettlementDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, cL, onAuditEvent, logger } = config;
+	const { db, cL, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.pendingPenalties>>;
 	try {
@@ -160,18 +253,22 @@ export async function runNonSettlementDebits(
 
 		const amount = nonSettlementDebit(cL);
 		const reason = nonSettlementReason(penalty.orderUid);
-		let penaltyTxHash: Awaited<ReturnType<typeof operator.debit>>;
-		try {
-			penaltyTxHash = await operator.debit(penalty.subSolver, amount, reason);
-		} catch (e) {
-			noteDebitFailure(attempts, penalty.id, e, "non-settlement debit", logger);
-			continue;
-		}
+		const landedDebit = await durableDebit(
+			config,
+			"non-settlement",
+			`penalty:${penalty.id}`,
+			penalty.subSolver,
+			amount,
+			reason,
+		);
+		if (!landedDebit) continue;
+		const penaltyTxHash = landedDebit.hash;
 
 		attempts.delete(penalty.id);
 
 		try {
 			const auditEvent = await store.recordNonSettlementDebit(db, penalty, amount, penaltyTxHash);
+			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 			onAuditEvent(auditEvent);
 			logger.info(
 				{ penaltyId: penalty.id, amount: amount.toString(), tx: penaltyTxHash },
@@ -297,12 +394,27 @@ export async function runBufferDebits(
 	}
 
 	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
-	// Uses a mark-before-debit pattern to prevent double-charging:
-	//   a) Mark entries in-flight (cleared=true, clear_tx_hash=NULL)
-	//   b) Call operator.debit()
-	//   c) Finalize with real tx hash — or revert if the debit fails
-	// In-flight entries are excluded from balance queries, so a crash between
-	// (a) and (b) results in under-charging (safe), never double-charging.
+	// Resume a buffer batch that was marked in-flight by a worker which then
+	// disappeared. Its source id names the exact entry set and its transaction
+	// (if any) is already durable, so this never creates a replacement debit.
+	for (const operation of await store.openDebitOperations(db, "buffer")) {
+		const match = /^subsolver:(0x[0-9a-f]+):entries:/.exec(operation.sourceId);
+		if (!match) continue;
+		const subSolver = match[1] as Address;
+		const landedDebit = await durableDebit(
+			config,
+			operation.sourceKind,
+			operation.sourceId,
+			operation.subSolver,
+			operation.amount,
+			operation.reason,
+		);
+		if (landedDebit) {
+			await store.finalizeBufferEntries(db, subSolver, landedDebit.hash);
+			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
+		}
+	}
+
 	for (const subSolver of affectedSubSolvers) {
 		let balance: bigint;
 		try {
@@ -314,42 +426,40 @@ export async function runBufferDebits(
 
 		if (balance <= cL) continue;
 
-		// (a) Mark entries in-flight before the on-chain call
+		const entries = await store.unclearedBufferEntries(db, subSolver);
+		const entryIds = entries.map((entry) => entry.id);
+		const sourceId = `subsolver:${subSolver.toLowerCase()}:entries:${entryIds.join(",")}`;
+		const reason = keccak256(`0x${subSolver.slice(2)}${"00".repeat(12)}` as Hex);
+
+		// Create the event before marking its entries. A crash at any later
+		// point is recoverable through openDebitOperations above.
+		await store.createDebitOperation(db, {
+			sourceKind: "buffer",
+			sourceId,
+			subSolver,
+			amount: balance,
+			reason,
+		});
+
+		// (a) Mark this precise batch in-flight before the chain call.
 		let entryCount: number;
 		try {
-			entryCount = await store.markBufferEntriesInFlight(db, subSolver);
+			entryCount = await store.markBufferEntriesInFlight(db, subSolver, entryIds);
 		} catch (e) {
 			logger.error({ err: e, subSolver }, "buffer: failed to mark entries in-flight");
 			continue;
 		}
 
-		// (b) Debit escrow
-		let clearTxHash: Hex;
-		try {
-			clearTxHash = await operator.debit(
-				subSolver,
-				balance,
-				keccak256(`0x${subSolver.slice(2)}${"00".repeat(12)}` as Hex),
-			);
-		} catch (e) {
-			logger.error(
-				{ err: e, subSolver, balance: balance.toString() },
-				"buffer escrow debit failed; reverting in-flight entries",
-			);
-			try {
-				await store.revertInFlightBufferEntries(db, subSolver);
-			} catch (revertErr) {
-				logger.error(
-					{ err: revertErr, subSolver },
-					"failed to revert in-flight entries after debit failure",
-				);
-			}
-			continue;
-		}
+		// (b) Sign/persist/broadcast exactly once. Failed attempts stay in-flight
+		// until the durable operation is retried or explicitly reconciled.
+		const landedDebit = await durableDebit(config, "buffer", sourceId, subSolver, balance, reason);
+		if (!landedDebit) continue;
+		const clearTxHash = landedDebit.hash;
 
 		// (c) Finalize with the real tx hash
 		try {
 			await store.finalizeBufferEntries(db, subSolver, clearTxHash);
+			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 		} catch (e) {
 			// The debit landed but finalize failed. Entries remain in-flight
 			// (cleared=true, clear_tx_hash=NULL) — they will NOT be re-debited

@@ -78,6 +78,7 @@ async function main() {
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,
 		validator: ctx.validator,
+		gasPriceRef: ctx.gasPriceRef,
 		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
 		enqueueValidation: (proposalId) =>
 			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),

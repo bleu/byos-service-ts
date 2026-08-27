@@ -84,6 +84,82 @@ function config(operator: DebitEscrow, events: AuditEvent[] = []) {
 }
 
 describe("revert debits", () => {
+	it("a successor rebroadcasts the persisted debit bytes without signing a second charge", async () => {
+		const { id, tx } = await settleFailedProposal();
+		const raw = `0x${"12".repeat(96)}` as Hex;
+		const debitHash = `0x${"34".repeat(32)}` as Hex;
+		let signCalls = 0;
+		const broadcasts: Hex[] = [];
+		let landed = false;
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: debitHash };
+			},
+			async broadcastSignedDebit(bytes) {
+				broadcasts.push(bytes);
+				landed = broadcasts.length === 2;
+				return debitHash;
+			},
+			async debitOutcome() {
+				return landed ? "succeeded" : null;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
+		};
+
+		// The first worker broadcasts successfully but crashes before it can
+		// establish the receipt. Its lease and retry state survive the handover.
+		await runRevertDebits({ ...config(operator), workerId: "replica-a" }, new Map());
+		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+
+		await runRevertDebits({ ...config(operator), workerId: "replica-b" }, new Map());
+		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		expect(signCalls).toBe(1);
+		expect(broadcasts).toEqual([raw, raw]);
+		expect((await store.get(ctx.db, id))?.penaltyTxHash).toBe(debitHash);
+		expect(tx).toBeDefined();
+	});
+
+	it("parks a durable operation after ten failures even when each tick has a new worker", async () => {
+		const { id } = await settleFailedProposal();
+		const raw = `0x${"56".repeat(96)}` as Hex;
+		const debitHash = `0x${"78".repeat(32)}` as Hex;
+		let signCalls = 0;
+		let broadcasts = 0;
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: debitHash };
+			},
+			async broadcastSignedDebit() {
+				broadcasts++;
+				return debitHash;
+			},
+			async debitOutcome() {
+				return null;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
+		};
+
+		for (let tick = 0; tick < 12; tick++) {
+			await runRevertDebits({ ...config(operator), workerId: `replica-${tick}` }, new Map());
+		}
+
+		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect(signCalls).toBe(1);
+		expect(broadcasts).toBe(10);
+	});
+
 	it("debits a settleFailed proposal and marks it penalized", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const calls: { subSolver: Address; amount: bigint; reason: Hex }[] = [];
@@ -599,7 +675,7 @@ describe("buffer debits", () => {
 		expect(secondDebitCount).toBe(0);
 	});
 
-	it("reverts in-flight entries when the on-chain debit fails", async () => {
+	it("recovers an in-flight buffer debit without rebuilding the charge", async () => {
 		const isolatedSolver = "0xdead000000000000000000000000000000000002" as Address;
 		const maxBuy = ETHER;
 		const minBuy = ETHER / 2n;
@@ -637,15 +713,13 @@ describe("buffer debits", () => {
 			},
 		};
 
-		// First tick: entry is recorded, debit fails, entries are reverted
+		// First tick: entry is recorded and the durable operation is retained.
 		await runBufferDebits(config(failingOperator), new Map());
 
-		// Entries should be back to uncleared (not stuck in-flight)
+		// In-flight entries stay excluded: a retry must recover the same debit
+		// operation, not construct a replacement charge from the balance.
 		const uncleared = await store.unclearedBufferEntries(ctx.db, isolatedSolver);
-		expect(uncleared.length).toBeGreaterThanOrEqual(1);
-		const entry = uncleared.find((e) => e.proposalId === id);
-		expect(entry).toBeDefined();
-		expect(entry?.cleared).toBe(false);
+		expect(uncleared.find((e) => e.proposalId === id)).toBeUndefined();
 
 		// Second tick with a working operator: should successfully debit
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];

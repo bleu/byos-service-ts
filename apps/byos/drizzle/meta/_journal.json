@@ -29,6 +29,20 @@
 			"when": 1786896000000,
 			"tag": "0003_buffer_entries",
 			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "7",
+			"when": 1787676600000,
+			"tag": "0004_service_state",
+			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "7",
+			"when": 1787676601000,
+			"tag": "0005_debit_operations",
+			"breakpoints": true
 		}
 	]
 }
