@@ -59,7 +59,6 @@ function rowToProposal(row: ProposalRow): Proposal {
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
 		penaltyTxHash: (row.penaltyTxHash as Hex) ?? null,
 		pendingCancellation: row.pendingCancellation,
-		supersededByProposalId: row.supersededByProposalId,
 	};
 }
 
@@ -112,7 +111,6 @@ function proposalValues(proposal: Omit<Proposal, "id">) {
 		trampoline: proposal.trampoline?.toLowerCase() ?? null,
 		settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
 		penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
-		supersededByProposalId: proposal.supersededByProposalId,
 	};
 }
 
@@ -248,7 +246,7 @@ export async function resolveVerdict(
 	id: number,
 	verdict: Verdict,
 ): Promise<
-	| { status: Status; auditEvent: AuditEvent | null; supersessionAuditEvents: AuditEvent[] }
+	| { status: Status; auditEvent: AuditEvent | null; replacementAuditEvents: AuditEvent[] }
 	| StoreError
 > {
 	// Use raw SQL for SELECT ... FOR UPDATE inside a transaction
@@ -361,8 +359,7 @@ export async function resolveVerdict(
 			await tx
 				.update(proposals)
 				.set({
-					status: "superseded" as Status,
-					supersededByProposalId: id,
+					status: "cancelled" as Status,
 					statusChangedAt: sql`now()`,
 				})
 				.where(
@@ -374,7 +371,7 @@ export async function resolveVerdict(
 					),
 				);
 		}
-		const supersessionAuditEvents =
+		const replacementAuditEvents =
 			verdict.kind === "accept"
 				? group
 						.filter(
@@ -390,7 +387,7 @@ export async function resolveVerdict(
 								subSolver: locked.subSolver as Address,
 								orderUid: locked.orderUid,
 								from: proposal.status as Status,
-								to: "superseded" as Status,
+								to: "cancelled" as Status,
 								rejectionReason: null,
 								settlementTxHash: null,
 							},
@@ -413,7 +410,7 @@ export async function resolveVerdict(
 				}
 			: null;
 
-		return { status: toStatus, auditEvent, supersessionAuditEvents };
+		return { status: toStatus, auditEvent, replacementAuditEvents };
 	});
 
 	return result;
@@ -502,7 +499,6 @@ export async function applySettlementOutcome(
 			.select({
 				status: proposals.status,
 				pendingCancellation: proposals.pendingCancellation,
-				supersededByProposalId: proposals.supersededByProposalId,
 			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
@@ -519,27 +515,23 @@ export async function applySettlementOutcome(
 
 		switch (outcome.kind) {
 			case "started":
-				if (from === "active" || from === "superseded") toStatus = "executing";
+				if (from === "active") toStatus = "executing";
 				break;
 			case "succeeded":
-				if (from === "active" || from === "executing" || from === "superseded") {
+				if (from === "active" || from === "executing") {
 					toStatus = "settled";
 					txHash = outcome.txHash;
 				}
 				break;
 			case "reverted":
-				if (from === "active" || from === "executing" || from === "superseded") {
+				if (from === "active" || from === "executing") {
 					toStatus = "settleFailed";
 					txHash = outcome.txHash;
 				}
 				break;
 			case "abandoned":
 				if (from === "executing") {
-					toStatus = locked.pendingCancellation
-						? "cancelled"
-						: locked.supersededByProposalId != null
-							? "superseded"
-							: "active";
+					toStatus = locked.pendingCancellation ? "cancelled" : "active";
 					insertPenalty = true;
 				}
 				break;
@@ -649,25 +641,6 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 			orderUid: proposals.orderUid,
 		});
 
-	const resuperseded = await db
-		.update(proposals)
-		.set({
-			status: "superseded" as Status,
-			statusChangedAt: sql`now()`,
-		})
-		.where(
-			and(
-				staleCondition,
-				eq(proposals.pendingCancellation, false),
-				sql`${proposals.supersededByProposalId} IS NOT NULL`,
-			),
-		)
-		.returning({
-			id: proposals.id,
-			subSolver: proposals.subSolver,
-			orderUid: proposals.orderUid,
-		});
-
 	const released = await db
 		.update(proposals)
 		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
@@ -688,19 +661,6 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 				orderUid: r.orderUid,
 				from: "executing" as Status,
 				to: "active" as Status,
-				rejectionReason: null,
-				settlementTxHash: null,
-			},
-		})),
-		...resuperseded.map((r) => ({
-			occurredAt: new Date(),
-			kind: {
-				type: "statusChanged" as const,
-				proposalId: r.id,
-				subSolver: r.subSolver as Address,
-				orderUid: r.orderUid,
-				from: "executing" as Status,
-				to: "superseded" as Status,
 				rejectionReason: null,
 				settlementTxHash: null,
 			},
@@ -941,7 +901,6 @@ export async function solutionProposals(
 			settlementTxHash: proposals.settlementTxHash,
 			penaltyTxHash: proposals.penaltyTxHash,
 			pendingCancellation: proposals.pendingCancellation,
-			supersededByProposalId: proposals.supersededByProposalId,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

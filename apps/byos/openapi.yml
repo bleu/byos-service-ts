@@ -418,10 +418,6 @@ components:
         - `penalized` — that debit landed; see `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
         - `cancelled` — cancelled by a signed `DELETE`.
-        - `superseded` — a newer validated proposal from the same sub-solver
-          replaced this route for the order. It may still receive a delayed
-          settlement outcome and expires at `validUntil`.
-
         All states except `submitted`, `active`, `executing`, and
         `settleFailed` are terminal.
       type: string
@@ -436,7 +432,6 @@ components:
         - penalized
         - simFailed
         - cancelled
-        - superseded
     RejectionReason:
       description: |
         Why the background validator rejected a proposal:
@@ -611,10 +606,6 @@ components:
           $ref: "#/components/schemas/UnixTimestamp"
         status:
           $ref: "#/components/schemas/ProposalStatus"
-        supersededByProposalId:
-          description: Present when this proposal was replaced by a newer active proposal.
-          allOf:
-            - $ref: "#/components/schemas/ProposalId"
     ListProposalsResponse:
       type: object
       required:

@@ -105,7 +105,7 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 	// Sweep 2: Snapshot live proposals, expire and enqueue the rest
 	let live: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
-		live = await store.snapshotByStatuses(db, ["submitted", "active", "superseded"]);
+		live = await store.snapshotByStatuses(db, ["submitted", "active"]);
 	} catch (e) {
 		logger.error({ err: e }, "failed to snapshot live proposals");
 		return;
@@ -167,7 +167,7 @@ export async function runProposalValidation(
 		if (result.auditEvent) {
 			onAuditEvent(result.auditEvent);
 		}
-		for (const event of result.supersessionAuditEvents) {
+		for (const event of result.replacementAuditEvents) {
 			onAuditEvent(event);
 		}
 	} catch (e) {

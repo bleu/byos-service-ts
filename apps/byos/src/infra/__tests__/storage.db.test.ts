@@ -47,7 +47,6 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
-		supersededByProposalId: null,
 		...overrides,
 	};
 }
@@ -145,10 +144,11 @@ describe("proposal store", () => {
 		}
 	});
 
-	it("activating the newest proposal supersedes older live proposals for its sub-solver and order", async () => {
+	it("activating the newest proposal cancels older live proposals for its sub-solver and order", async () => {
 		const orderUid = `0x${"f1".repeat(56)}`;
 		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 		await store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null });
+		const { id: submittedId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 
 		const result = await store.resolveVerdict(ctx.db, newerId, {
@@ -156,16 +156,18 @@ describe("proposal store", () => {
 			simulation: null,
 		});
 
-		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
-		expect((await store.get(ctx.db, olderId))?.supersededByProposalId).toBe(newerId);
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
+		expect((await store.get(ctx.db, submittedId))?.status).toBe("cancelled");
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 		if ("status" in result) {
-			expect(result.supersessionAuditEvents).toHaveLength(1);
-			expect(result.supersessionAuditEvents[0]?.kind).toMatchObject({
+			expect(result.replacementAuditEvents).toHaveLength(2);
+			expect(result.replacementAuditEvents).toContainEqual(expect.objectContaining({
+			kind: expect.objectContaining({
 				type: "statusChanged",
 				from: "active",
-				to: "superseded",
-			});
+				to: "cancelled",
+			}),
+		}));
 		}
 	});
 
@@ -179,11 +181,11 @@ describe("proposal store", () => {
 			store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null }),
 		]);
 
-		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 	});
 
-	it("never supersedes an executing proposal when a replacement activates", async () => {
+	it("never cancels an executing proposal when a replacement activates", async () => {
 		const orderUid = `0x${"f3".repeat(56)}`;
 		const { id: executingId } = await store.insert(
 			ctx.db,
@@ -197,76 +199,18 @@ describe("proposal store", () => {
 		expect((await store.get(ctx.db, replacementId))?.status).toBe("active");
 	});
 
-	it("accepts delayed terminal outcomes for superseded proposals", async () => {
-		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const { id: abandonedId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const abandoned = (await store.get(ctx.db, abandonedId))!;
-		await store.applySettlementOutcome(ctx.db, abandoned, { kind: "started" });
-		const executing = (await store.get(ctx.db, abandonedId))!;
-		await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
-		expect((await store.get(ctx.db, abandonedId))?.status).toBe("superseded");
-
-		const { id: successId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const success = (await store.get(ctx.db, successId))!;
-		await store.applySettlementOutcome(ctx.db, success, {
-			kind: "succeeded",
-			txHash: `0x${"11".repeat(32)}` as Hex,
-		});
-		expect((await store.get(ctx.db, successId))?.status).toBe("settled");
-
-		const { id: revertId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const reverted = (await store.get(ctx.db, revertId))!;
-		await store.applySettlementOutcome(ctx.db, reverted, {
-			kind: "reverted",
-			txHash: `0x${"12".repeat(32)}` as Hex,
-		});
-		expect((await store.get(ctx.db, revertId))?.status).toBe("settleFailed");
-	});
-
-	it("keeps superseded proposals out of solve reads and expires them", async () => {
-		const orderUid = `0x${"f4".repeat(56)}`;
-		const { id: supersededId } = await store.insert(
-			ctx.db,
-			sampleProposal({ orderUid, status: "superseded" }),
-		);
-		const { id: activeId } = await store.insert(
-			ctx.db,
-			sampleProposal({ orderUid, status: "active" }),
-		);
-
-		expect((await store.listByOrderUid(ctx.db, orderUid)).map((proposal) => proposal.id)).toEqual([
-			activeId,
-		]);
-		const superseded = (await store.get(ctx.db, supersededId))!;
-		await store.transition(ctx.db, superseded, "expired");
-		expect((await store.get(ctx.db, supersededId))?.status).toBe("expired");
-	});
-
-	it("restores a timed-out superseded execution to superseded", async () => {
-		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const { id } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "executing", supersededByProposalId: replacementId }),
-		);
+	it("restores a timed-out execution to active", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
 		await ctx.db.execute(
 			sql`UPDATE proposals SET status_changed_at = now() - interval '61 seconds' WHERE id = ${id}`,
 		);
 
 		const events = await store.releaseStaleExecuting(ctx.db, 60);
 
-		expect((await store.get(ctx.db, id))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
 		expect(events).toContainEqual(
 			expect.objectContaining({
-				kind: expect.objectContaining({ proposalId: id, to: "superseded" }),
+				kind: expect.objectContaining({ proposalId: id, to: "active" }),
 			}),
 		);
 	});

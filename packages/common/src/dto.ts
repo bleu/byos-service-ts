@@ -69,7 +69,6 @@ export const Status = {
 	Penalized: "penalized",
 	SimFailed: "simFailed",
 	Cancelled: "cancelled",
-	Superseded: "superseded",
 } as const;
 
 export type Status = (typeof Status)[keyof typeof Status];
@@ -85,7 +84,6 @@ export const statusSchema = z.enum([
 	Status.Penalized,
 	Status.SimFailed,
 	Status.Cancelled,
-	Status.Superseded,
 ]);
 
 /**

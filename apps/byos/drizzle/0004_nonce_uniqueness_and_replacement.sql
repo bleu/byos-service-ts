@@ -1,5 +1,3 @@
-ALTER TABLE "proposals" ADD COLUMN "superseded_by_proposal_id" bigint;--> statement-breakpoint
-ALTER TABLE "proposals" ADD CONSTRAINT "proposals_superseded_by_proposal_id_proposals_id_fk" FOREIGN KEY ("superseded_by_proposal_id") REFERENCES "public"."proposals"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 WITH newest_active AS (
   SELECT DISTINCT ON (sub_solver, order_uid) id, sub_solver, order_uid
   FROM "proposals"
@@ -7,7 +5,7 @@ WITH newest_active AS (
   ORDER BY sub_solver, order_uid, id DESC
 )
 UPDATE "proposals" AS old
-SET status = 'superseded', superseded_by_proposal_id = newest_active.id
+SET status = 'cancelled', status_changed_at = now()
 FROM newest_active
 WHERE old.sub_solver = newest_active.sub_solver
   AND old.order_uid = newest_active.order_uid

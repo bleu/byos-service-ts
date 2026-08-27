@@ -67,9 +67,6 @@ export function proposalToGetResponse(p: Proposal) {
 		quoteBuyAmount: p.quoteBuyAmount.toString(),
 		validUntil: p.validUntil.toString(),
 		status: p.status,
-		...(p.supersededByProposalId != null
-			? { supersededByProposalId: p.supersededByProposalId }
-			: {}),
 		...(p.rejectionReason ? { rejectionReason: p.rejectionReason } : {}),
 		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
 		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
@@ -85,9 +82,6 @@ export function proposalToMetadata(p: Proposal) {
 		orderUid: p.orderUid,
 		validUntil: p.validUntil.toString(),
 		status: p.status,
-		...(p.supersededByProposalId != null
-			? { supersededByProposalId: p.supersededByProposalId }
-			: {}),
 	};
 }
 

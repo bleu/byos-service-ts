@@ -38,7 +38,6 @@ export const proposals = pgTable(
 		settlementTxHash: text("settlement_tx_hash"),
 		penaltyTxHash: text("penalty_tx_hash"),
 		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
-		supersededByProposalId: bigint("superseded_by_proposal_id", { mode: "number" }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
 	},
