@@ -4,7 +4,7 @@ import type { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
-import type { Address, Hex } from "viem";
+import type { Address, Chain, Hex, PublicClient, Transport } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { type Config, rateLimitsFromConfig } from "./config.js";
@@ -58,6 +58,15 @@ export interface AppContext {
 	balanceRefresh: BalanceRefreshConfig;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
+}
+
+/**
+ * Creates the one public client shared by validation, balance refresh, and
+ * settlement observation. Batching only coalesces reads issued together; it
+ * never waits to collect more work.
+ */
+export function createSharedPublicClient(chain: Chain, transport: Transport): PublicClient {
+	return createPublicClient({ chain, transport, batch: { multicall: { wait: 0 } } });
 }
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
@@ -128,7 +137,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// The chain is what lets viem resolve Multicall3 for the batched
 	// balance reads; without it every multicall throws before it reaches
 	// the RPC.
-	const publicClient = createPublicClient({ chain, transport });
+	const publicClient = createSharedPublicClient(chain, transport);
 
 	// Fail-fast RPC check
 	try {
