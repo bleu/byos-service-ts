@@ -1,5 +1,7 @@
 import type { SettlementInteraction } from "@byos/common";
 import { type CowOrder, OrderKind, SigningScheme } from "@byos/common";
+import type { SupportedChainId } from "@cowprotocol/cow-sdk";
+import { OrderBookApi, OrderBookApiError } from "@cowprotocol/cow-sdk";
 import type { Address, Hex } from "viem";
 import type { OrderRecord } from "../domain/order.js";
 
@@ -14,41 +16,37 @@ export interface FetchOrder {
 	nativePrice(token: Address): Promise<bigint>;
 }
 
-// --- DTO types ---
+// --- Error mapping ---
 
-interface InteractionDto {
-	target: string;
-	value: string;
-	callData: string;
+/**
+ * Classify an error thrown by `OrderBookApi` into an `OrderbookError`.
+ *
+ * - 404 → terminal (order/token not found)
+ * - 429 → transient (rate-limited; SDK exhausts its retries before surfacing)
+ * - 5xx → transient (server error)
+ * - other 4xx → transient (unexpected; defer rather than permanently reject)
+ * - network/connection failure → transient
+ */
+export function classifyOrderbookError(err: unknown, context: string): OrderbookError {
+	if (err instanceof OrderBookApiError) {
+		const status = err.response.status;
+		if (status === 404) {
+			return { kind: "notFound" };
+		}
+		// All non-404 HTTP errors are transient: 429 (rate-limited), 5xx (server
+		// error), and unexpected 4xx all warrant a retry rather than a permanent
+		// rejection of an otherwise-valid proposal.
+		return { kind: "transient", message: `${context} ${status}` };
+	}
+
+	// Network-level error (connection refused, timeout, DNS failure, etc.)
+	return { kind: "transient", message: `${context} unreachable: ${err}` };
 }
 
-interface OrderInteractionsDto {
-	pre?: InteractionDto[];
-	post?: InteractionDto[];
-}
+// --- DTO conversion ---
 
-interface OrderDto {
-	receiver?: string | null;
-	sellToken: string;
-	buyToken: string;
-	sellAmount: string;
-	buyAmount: string;
-	feeAmount: string;
-	validTo: number;
-	appData: string;
-	kind: string;
-	partiallyFillable: boolean;
-	sellTokenBalance: string;
-	buyTokenBalance: string;
-	signingScheme: string;
-	signature: string;
-	interactions?: OrderInteractionsDto;
-}
-
-// --- Client ---
-
-const CACHE_CAPACITY = 10_000;
 const ETHER = 10n ** 18n;
+const CACHE_CAPACITY = 10_000;
 
 // Unknown enum values throw transient rather than coercing: the Rust DTO's
 // closed serde enums fail deserialization, so the validator defers instead of
@@ -77,49 +75,69 @@ function mapSigningScheme(scheme: string): SigningScheme {
 	}
 }
 
-function dtoToInteraction(dto: InteractionDto): SettlementInteraction {
-	return {
-		target: dto.target as Address,
-		value: BigInt(dto.value),
-		callData: dto.callData as Hex,
-	};
-}
-
-function dtoToOrderRecord(dto: OrderDto): OrderRecord {
-	const erc20Balances = dto.sellTokenBalance === "erc20" && dto.buyTokenBalance === "erc20";
+function sdkOrderToRecord(sdkOrder: Awaited<ReturnType<OrderBookApi["getOrder"]>>): OrderRecord {
+	const erc20Balances =
+		sdkOrder.sellTokenBalance === "erc20" && sdkOrder.buyTokenBalance === "erc20";
 
 	const order: CowOrder = {
-		sellToken: dto.sellToken as Address,
-		buyToken: dto.buyToken as Address,
-		receiver: (dto.receiver ?? "0x0000000000000000000000000000000000000000") as Address,
-		sellAmount: BigInt(dto.sellAmount),
-		buyAmount: BigInt(dto.buyAmount),
-		validTo: dto.validTo,
-		appData: dto.appData as Hex,
-		feeAmount: BigInt(dto.feeAmount),
-		kind: mapKind(dto.kind),
-		partiallyFillable: dto.partiallyFillable,
-		signingScheme: mapSigningScheme(dto.signingScheme),
-		signature: dto.signature as Hex,
+		sellToken: sdkOrder.sellToken as Address,
+		buyToken: sdkOrder.buyToken as Address,
+		receiver: (sdkOrder.receiver ?? "0x0000000000000000000000000000000000000000") as Address,
+		sellAmount: BigInt(sdkOrder.sellAmount),
+		buyAmount: BigInt(sdkOrder.buyAmount),
+		validTo: sdkOrder.validTo,
+		appData: sdkOrder.appData as Hex,
+		feeAmount: BigInt(sdkOrder.feeAmount),
+		kind: mapKind(sdkOrder.kind),
+		partiallyFillable: sdkOrder.partiallyFillable,
+		signingScheme: mapSigningScheme(sdkOrder.signingScheme),
+		signature: sdkOrder.signature as Hex,
 	};
 
-	return {
-		order,
-		preInteractions: (dto.interactions?.pre ?? []).map(dtoToInteraction),
-		postInteractions: (dto.interactions?.post ?? []).map(dtoToInteraction),
-		erc20Balances,
-	};
+	const preInteractions = (sdkOrder.interactions?.pre ?? []).map(
+		(i): SettlementInteraction => ({
+			target: i.target as Address,
+			value: BigInt(i.value),
+			callData: i.callData as Hex,
+		}),
+	);
+
+	const postInteractions = (sdkOrder.interactions?.post ?? []).map(
+		(i): SettlementInteraction => ({
+			target: i.target as Address,
+			value: BigInt(i.value),
+			callData: i.callData as Hex,
+		}),
+	);
+
+	return { order, preInteractions, postInteractions, erc20Balances };
 }
 
+// --- Client ---
+
+/**
+ * Wraps `OrderBookApi` from the cow-sdk with:
+ * - Our `OrderbookError` union (retryable/terminal classification)
+ * - An order cache bounded by capacity (COW-1198: prevents memory growth when
+ *   the same order is fetched repeatedly across validation ticks)
+ */
 export class OrderbookClient implements FetchOrder {
 	private cache = new Map<string, OrderRecord>();
-	private baseUrl: string;
+	private readonly api: OrderBookApi;
 
 	constructor(
-		baseUrl: string,
+		chainId: SupportedChainId,
+		baseUrlOverride?: string,
 		private readonly cacheCapacity: number = CACHE_CAPACITY,
 	) {
-		this.baseUrl = baseUrl.replace(/\/+$/, "");
+		if (baseUrlOverride) {
+			// Build a per-chain map: only our chain's slot matters, but the type
+			// requires all chains. Cast is safe — sdk only reads baseUrls[chainId].
+			const allUrls = { [chainId]: baseUrlOverride } as Record<SupportedChainId, string>;
+			this.api = new OrderBookApi({ chainId, baseUrls: allUrls });
+		} else {
+			this.api = new OrderBookApi({ chainId });
+		}
 	}
 
 	private remember(uid: string, record: OrderRecord): void {
@@ -130,65 +148,42 @@ export class OrderbookClient implements FetchOrder {
 		this.cache.set(key, record);
 	}
 
-	/** A network failure is a transient orderbook error, not a raw fetch error. */
-	private async get(url: string): Promise<Response> {
-		try {
-			return await fetch(url);
-		} catch (e) {
-			throw { kind: "transient", message: `orderbook unreachable: ${e}` } satisfies OrderbookError;
-		}
-	}
-
 	async order(uid: string): Promise<OrderRecord> {
 		const key = uid.toLowerCase();
 		const cached = this.cache.get(key);
 		if (cached) return cached;
 
-		const normalizedUid = uid.startsWith("0x") ? uid : `0x${uid}`;
-		const url = `${this.baseUrl}/api/v1/orders/${normalizedUid}`;
-
-		const response = await this.get(url);
-
-		if (response.status === 404) {
-			throw { kind: "notFound" } satisfies OrderbookError;
-		}
-		if (!response.ok) {
-			throw {
-				kind: "transient",
-				message: `orderbook ${response.status}: ${await response.text()}`,
-			} satisfies OrderbookError;
+		let sdkOrder: Awaited<ReturnType<OrderBookApi["getOrder"]>>;
+		try {
+			sdkOrder = await this.api.getOrder(uid);
+		} catch (err) {
+			throw classifyOrderbookError(err, "orderbook");
 		}
 
-		const dto = (await response.json()) as OrderDto;
-		const record = dtoToOrderRecord(dto);
+		// sdkOrderToRecord may throw OrderbookError (mapKind / mapSigningScheme)
+		const record = sdkOrderToRecord(sdkOrder);
 
 		this.remember(uid, record);
 		return record;
 	}
 
 	async nativePrice(token: Address): Promise<bigint> {
-		const url = `${this.baseUrl}/api/v1/token/${token}/native_price`;
-		const response = await this.get(url);
-
-		if (response.status === 404) {
-			throw { kind: "notFound" } satisfies OrderbookError;
-		}
-		if (!response.ok) {
-			throw {
-				kind: "transient",
-				message: `orderbook price ${response.status}`,
-			} satisfies OrderbookError;
+		let result: { price?: number };
+		try {
+			result = await this.api.getNativePrice(token);
+		} catch (err) {
+			throw classifyOrderbookError(err, "orderbook price");
 		}
 
-		const dto = (await response.json()) as { price: number };
-		if (!Number.isFinite(dto.price) || dto.price < 0) {
+		const price = result.price;
+		if (price === undefined || !Number.isFinite(price) || price < 0) {
 			throw {
 				kind: "transient",
-				message: `unusable native price ${dto.price}`,
+				message: `unusable native price ${price}`,
 			} satisfies OrderbookError;
 		}
 
 		// Convert to reference semantics: multiply by 1e18
-		return BigInt(Math.floor(dto.price * Number(ETHER)));
+		return BigInt(Math.floor(price * Number(ETHER)));
 	}
 }

@@ -1,11 +1,12 @@
 import {
+	COW_PROTOCOL_SETTLEMENT_CONTRACT_ADDRESS,
 	type EvmChainInfo,
 	getChainInfo,
 	isEvmChainInfo,
 	isSupportedChain,
-	SupportedChainId,
+	ORDER_BOOK_PROD_CONFIG,
 } from "@cowprotocol/cow-sdk";
-import { type Chain, defineChain } from "viem";
+import { type Address, type Chain, defineChain } from "viem";
 import { foundry } from "viem/chains";
 
 /**
@@ -98,56 +99,59 @@ export function isSupportedEvmChain(chainId: number): boolean {
 }
 
 /**
- * Minimum escrow collateral per chain, in escrow-token wei.
+ * CoW Protocol settlement contract address per chain, from the sdk.
  *
- * TODO(COW-1265): unmeasured placeholders, deliberately identical across
- * chains. Differentiating them is the point — settlement gas differs by orders
- * of magnitude between mainnet and an L2, so the collateral that makes a
- * sub-solver worth trusting differs too. Treat every number here as a guess
- * until real traffic and real gas prices say otherwise.
+ * The sdk carries the same address on every EVM chain CoW settles on — it is
+ * an immutable singleton — but is keyed per chain so a future divergence (e.g.
+ * a V2 deployed only on a new chain) arrives as a sdk bump rather than a silent
+ * wrong address.
  *
- * Exhaustive over `SupportedChainId` on purpose: adding a chain to the sdk
- * becomes a compile error here rather than a silent zero. `null` is the way to
- * say "BYOS does not operate here", not an oversight.
+ * Throws for chains where CoW has no settlement contract (Solana, local anvil).
+ * The caller should prefer `COW_PROTOCOL_SETTLEMENT_ADDRESS` override before
+ * falling through here.
  */
-const MIN_COLLATERAL_WEI: Record<SupportedChainId, bigint | null> = {
-	[SupportedChainId.MAINNET]: 10n ** 16n,
-	[SupportedChainId.BNB]: 10n ** 16n,
-	[SupportedChainId.GNOSIS_CHAIN]: 10n ** 16n,
-	[SupportedChainId.POLYGON]: 10n ** 16n,
-	[SupportedChainId.BASE]: 10n ** 16n,
-	[SupportedChainId.PLASMA]: 10n ** 16n,
-	[SupportedChainId.ARBITRUM_ONE]: 10n ** 16n,
-	[SupportedChainId.AVALANCHE]: 10n ** 16n,
-	[SupportedChainId.INK]: 10n ** 16n,
-	[SupportedChainId.LINEA]: 10n ** 16n,
-	[SupportedChainId.SEPOLIA]: 10n ** 16n,
-	// Non-EVM: no escrow contract, no trampoline, no EIP-712 proposals.
-	[SupportedChainId.SOLANA]: null,
-};
-
-/** Anvil, matching LOCAL_CHAIN above. */
-const LOCAL_MIN_COLLATERAL_WEI = 10n ** 16n;
-
-/**
- * Default minimum escrow collateral for a chain. `MIN_COLLATERAL` overrides it
- * where a deployment needs to.
- *
- * Feeds three things, only one of which is a rate limit: the validator's
- * accept/reject threshold, the Track A penalty parameter `c_l`, and the
- * request-path escrow floor gate.
- */
-export function minCollateralFor(chainId: number): bigint {
-	if (chainId === foundry.id) return LOCAL_MIN_COLLATERAL_WEI;
+export function settlementAddressFor(chainId: number): Address {
+	if (chainId === foundry.id) return LOCAL_SETTLEMENT_ADDRESS;
 
 	if (!isSupportedChain(chainId)) {
 		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
 	}
 
-	const min = MIN_COLLATERAL_WEI[chainId];
-	if (min === null) {
-		throw new Error(`chain ${chainId} has no escrow collateral — BYOS does not operate there`);
+	const address = COW_PROTOCOL_SETTLEMENT_CONTRACT_ADDRESS[chainId];
+	if (!address) {
+		throw new Error(`chain ${chainId} has no CoW settlement contract`);
 	}
 
-	return min;
+	return address as Address;
 }
+
+/**
+ * CoW Protocol orderbook API base URL per chain, from the sdk.
+ *
+ * Points to production (`api.cow.fi`). A barn/staging override belongs in the
+ * caller's env var, not here: barn is an operational concern, not a chain
+ * property.
+ *
+ * Throws for Solana and local anvil (no hosted orderbook for either).
+ */
+export function orderbookUrlFor(chainId: number): string {
+	if (chainId === foundry.id) return LOCAL_ORDERBOOK_URL;
+
+	if (!isSupportedChain(chainId)) {
+		throw new Error(`chain ${chainId} is not supported by CoW Protocol`);
+	}
+
+	const url = ORDER_BOOK_PROD_CONFIG[chainId];
+	if (!url) {
+		throw new Error(`chain ${chainId} has no CoW orderbook URL`);
+	}
+
+	return url;
+}
+
+/** Anvil orderbook URL for the offline CoW stack used in local dev and e2e. */
+const LOCAL_ORDERBOOK_URL = "http://localhost:8080";
+
+/** Anvil settlement address — the same as the mainnet singleton, baked into
+ * the offline-mode fork by e2e-stack.sh. */
+const LOCAL_SETTLEMENT_ADDRESS: Address = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";

@@ -8,6 +8,16 @@ export interface GasPriceRef {
 	value: bigint;
 }
 
+/**
+ * Returns the `gasUsed` values for all in-flight proposals of a sub-solver,
+ * excluding the proposal currently being validated. `null` means the proposal
+ * has not been simulated yet (gas estimate unknown).
+ */
+export type FetchInflightGasUsed = (
+	subSolver: Address,
+	excludeId: number,
+) => Promise<(bigint | null)[]>;
+
 export class EscrowValidator implements ValidateProposal {
 	private cache = new Map<string, bigint>();
 
@@ -16,10 +26,16 @@ export class EscrowValidator implements ValidateProposal {
 		private readonly escrowAddress: Address,
 		private readonly minCollateral: bigint,
 		private readonly gasPriceRef: GasPriceRef,
+		private readonly fetchInflightGasUsed: FetchInflightGasUsed | null = null,
 	) {}
 
-	private threshold(): bigint {
-		return ESCROW_GAS_ESTIMATION * this.gasPriceRef.value + this.minCollateral;
+	/**
+	 * Per-proposal cost floor: conservative gas estimate × gas price + min collateral.
+	 * Used both as the single-proposal gate and as each in-flight proposal's
+	 * contribution when its gas estimate is unknown.
+	 */
+	private threshold(gasEstimate: bigint = ESCROW_GAS_ESTIMATION): bigint {
+		return gasEstimate * this.gasPriceRef.value + this.minCollateral;
 	}
 
 	beginTick(): void {
@@ -42,15 +58,37 @@ export class EscrowValidator implements ValidateProposal {
 		return balance;
 	}
 
+	/**
+	 * Computes the cumulative exposure for all in-flight proposals of a
+	 * sub-solver (excluding the one being validated).
+	 * Each proposal contributes: gasEstimate * gasPrice + minCollateral.
+	 * Proposals without a gas estimate contribute minCollateral only (gasEstimate = 0n).
+	 */
+	private async cumulativeExposure(subSolver: Address, excludeId: number): Promise<bigint> {
+		if (!this.fetchInflightGasUsed) return 0n;
+		const gasUsedList = await this.fetchInflightGasUsed(subSolver, excludeId);
+		return gasUsedList.reduce<bigint>((sum, gas) => sum + this.threshold(gas ?? 0n), 0n);
+	}
+
 	async validate(proposal: Proposal): Promise<Verdict | null> {
 		try {
 			const balance = await this.getBalance(proposal.subSolver);
-			if (balance >= this.threshold()) {
-				return { kind: "accept", simulation: null };
+
+			// Gate 1: the proposal alone must not exceed the balance floor.
+			if (balance < this.threshold()) {
+				return { kind: "reject", reason: "InsufficientEscrow" };
 			}
-			return { kind: "reject", reason: "InsufficientEscrow" };
+
+			// Gate 2: adding this proposal's cost to all in-flight proposals must
+			// not exceed the effective balance.
+			const exposure = await this.cumulativeExposure(proposal.subSolver, proposal.id);
+			if (exposure + this.threshold() > balance) {
+				return { kind: "reject", reason: "ExposureCapExceeded" };
+			}
+
+			return { kind: "accept", simulation: null };
 		} catch {
-			// All RPC errors → defer (retry next tick)
+			// All RPC/DB errors → defer (retry next tick)
 			return null;
 		}
 	}

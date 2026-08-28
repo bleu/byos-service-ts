@@ -109,6 +109,7 @@ export function isTerminalStatus(status: Status): boolean {
 
 export const RejectionReason = {
 	InsufficientEscrow: "InsufficientEscrow",
+	ExposureCapExceeded: "ExposureCapExceeded",
 	UnsupportedOrder: "UnsupportedOrder",
 	AmountMismatch: "AmountMismatch",
 	TokenMismatch: "TokenMismatch",
@@ -120,6 +121,7 @@ export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionRea
 
 export const rejectionReasonSchema = z.enum([
 	RejectionReason.InsufficientEscrow,
+	RejectionReason.ExposureCapExceeded,
 	RejectionReason.UnsupportedOrder,
 	RejectionReason.AmountMismatch,
 	RejectionReason.TokenMismatch,
