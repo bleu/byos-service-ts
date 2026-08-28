@@ -493,12 +493,23 @@ export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
-): Promise<{ auditEvent: AuditEvent | null; insertedPenalty: boolean } | StoreError> {
+): Promise<
+	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
+	| StoreError
+> {
 	const result = await db.transaction(async (tx) => {
+		// Settlement success and validation both change eligibility for the same
+		// replacement group, so they must serialize on the same advisory lock.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${proposal.subSolver.toLowerCase()} || ':' || ${proposal.orderUid.toLowerCase()})::bigint)`,
+		);
+
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
 				pendingCancellation: proposals.pendingCancellation,
+				subSolver: proposals.subSolver,
+				orderUid: proposals.orderUid,
 			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
@@ -538,7 +549,7 @@ export async function applySettlementOutcome(
 		}
 
 		if (!toStatus) {
-			return { auditEvent: null, insertedPenalty: false };
+			return { auditEvent: null, cancelledAuditEvents: [], insertedPenalty: false };
 		}
 
 		await tx
@@ -559,6 +570,34 @@ export async function applySettlementOutcome(
 			});
 		}
 
+		const cancelled =
+			outcome.kind === "succeeded"
+				? await tx
+						.select({ id: proposals.id, status: proposals.status })
+						.from(proposals)
+						.where(
+							and(
+								eq(proposals.subSolver, locked.subSolver),
+								eq(proposals.orderUid, locked.orderUid),
+								sql`${proposals.id} <> ${proposal.id}`,
+								inArray(proposals.status, ["submitted", "active"]),
+							),
+						)
+						.for("update")
+				: [];
+
+		if (cancelled.length > 0) {
+			await tx
+				.update(proposals)
+				.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
+				.where(
+					inArray(
+						proposals.id,
+						cancelled.map((sibling) => sibling.id),
+					),
+				);
+		}
+
 		const auditEvent: AuditEvent = {
 			occurredAt: new Date(),
 			kind: {
@@ -573,7 +612,23 @@ export async function applySettlementOutcome(
 			},
 		};
 
-		return { auditEvent, insertedPenalty: insertPenalty };
+		return {
+			auditEvent,
+			cancelledAuditEvents: cancelled.map((sibling) => ({
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged" as const,
+					proposalId: sibling.id,
+					subSolver: locked.subSolver as Address,
+					orderUid: locked.orderUid,
+					from: sibling.status as Status,
+					to: "cancelled" as Status,
+					rejectionReason: null,
+					settlementTxHash: null,
+				},
+			})),
+			insertedPenalty: insertPenalty,
+		};
 	});
 
 	return result;
