@@ -62,4 +62,28 @@ describe("debit operations", () => {
 
 		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("needs_reconciliation");
 	});
+
+	it("an operator resume resets a parked operation's retry budget", async () => {
+		const operation = await store.createDebitOperation(ctx.db, {
+			sourceKind: "revert",
+			sourceId: "proposal:45",
+			subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7",
+			amount: 10n,
+			reason: `0x${"dd".repeat(32)}`,
+		});
+
+		for (let attempt = 0; attempt < 10; attempt++) {
+			await store.claimDebitOperation(ctx.db, operation.id, "replica-a", 60);
+			await store.recordDebitFailure(ctx.db, operation.id, "replica-a", "RPC unavailable");
+		}
+		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("needs_reconciliation");
+
+		expect(await store.resumeDebitOperation(ctx.db, operation.id)).toBe(true);
+		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("retrying");
+		expect(await store.resumeDebitOperation(ctx.db, operation.id)).toBe(false);
+
+		await store.claimDebitOperation(ctx.db, operation.id, "replica-b", 60);
+		await store.recordDebitFailure(ctx.db, operation.id, "replica-b", "RPC unavailable");
+		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("retrying");
+	});
 });

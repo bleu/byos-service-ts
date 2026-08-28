@@ -13,6 +13,7 @@
 		"build": "tsup",
 		"dev": "tsup --watch --onSuccess 'node dist/index.js'",
 		"start": "node dist/index.js",
+		"debit:resume": "node dist/resume-debit.js",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate"
 	},
