@@ -161,13 +161,15 @@ describe("proposal store", () => {
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 		if ("status" in result) {
 			expect(result.replacementAuditEvents).toHaveLength(2);
-			expect(result.replacementAuditEvents).toContainEqual(expect.objectContaining({
-			kind: expect.objectContaining({
-				type: "statusChanged",
-				from: "active",
-				to: "cancelled",
-			}),
-		}));
+			expect(result.replacementAuditEvents).toContainEqual(
+				expect.objectContaining({
+					kind: expect.objectContaining({
+						type: "statusChanged",
+						from: "active",
+						to: "cancelled",
+					}),
+				}),
+			);
 		}
 	});
 
