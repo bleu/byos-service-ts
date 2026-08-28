@@ -29,8 +29,8 @@ export interface PenaltyWorkerConfig {
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
-	/** Stable per-process identity used only for expiring database leases. */
-	workerId?: string;
+	/** Unique process-instance identity used only for expiring database leases. */
+	workerId: string;
 }
 
 export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConfig): Worker {
@@ -56,6 +56,24 @@ interface LandedDebit {
 	owner: string;
 }
 
+interface BufferBatch {
+	subSolver: Address;
+	entryIds: number[];
+}
+
+/** The source key is the durable link between one buffer debit and its exact ledger rows. */
+function bufferBatchFromSourceId(sourceId: string): BufferBatch | null {
+	const match = /^subsolver:(0x[0-9a-f]{40}):entries:([1-9][0-9]*(?:,[1-9][0-9]*)*)$/.exec(
+		sourceId,
+	);
+	const subSolver = match?.[1];
+	const encodedEntryIds = match?.[2];
+	if (!subSolver || !encodedEntryIds) return null;
+	const entryIds = encodedEntryIds.split(",").map(Number);
+	if (entryIds.some((id) => !Number.isSafeInteger(id))) return null;
+	return { subSolver: subSolver as Address, entryIds };
+}
+
 /**
  * Performs one operation under its Postgres lease. The stored raw transaction
  * is deliberately the sole broadcast input after the first signature.
@@ -76,7 +94,7 @@ async function durableDebit(
 		amount,
 		reason,
 	});
-	const owner = config.workerId ?? `penalty-${process.pid}`;
+	const owner = config.workerId;
 	const claimed = await store.claimDebitOperation(db, operation.id, owner, LEASE_SECS);
 	if (!claimed) return null;
 
@@ -398,9 +416,22 @@ export async function runBufferDebits(
 	// disappeared. Its source id names the exact entry set and its transaction
 	// (if any) is already durable, so this never creates a replacement debit.
 	for (const operation of await store.openDebitOperations(db, "buffer")) {
-		const match = /^subsolver:(0x[0-9a-f]+):entries:/.exec(operation.sourceId);
-		if (!match) continue;
-		const subSolver = match[1] as Address;
+		const batch = bufferBatchFromSourceId(operation.sourceId);
+		if (!batch) {
+			logger.error({ operationId: operation.id }, "buffer: invalid durable operation source key");
+			continue;
+		}
+		try {
+			// A crash may have happened after creating the operation but before
+			// marking its rows. Recovery always repairs that gap before a debit.
+			await store.markBufferEntriesInFlight(db, batch.subSolver, batch.entryIds);
+		} catch (e) {
+			logger.error(
+				{ err: e, operationId: operation.id },
+				"buffer: failed to recover in-flight entries",
+			);
+			continue;
+		}
 		const landedDebit = await durableDebit(
 			config,
 			operation.sourceKind,
@@ -410,7 +441,7 @@ export async function runBufferDebits(
 			operation.reason,
 		);
 		if (landedDebit) {
-			await store.finalizeBufferEntries(db, subSolver, landedDebit.hash);
+			await store.finalizeBufferEntries(db, batch.subSolver, batch.entryIds, landedDebit.hash);
 			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 		}
 	}
@@ -458,7 +489,7 @@ export async function runBufferDebits(
 
 		// (c) Finalize with the real tx hash
 		try {
-			await store.finalizeBufferEntries(db, subSolver, clearTxHash);
+			await store.finalizeBufferEntries(db, subSolver, entryIds, clearTxHash);
 			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 		} catch (e) {
 			// The debit landed but finalize failed. Entries remain in-flight

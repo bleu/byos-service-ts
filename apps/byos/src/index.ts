@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import pino from "pino";
@@ -109,6 +110,7 @@ async function main() {
 				db: ctx.db,
 				operator: ctx.operator,
 				cL: ctx.minCollateralWei,
+				workerId: `penalty-${randomUUID()}`,
 				onAuditEvent: ctx.onAuditEvent,
 				logger: logger.child({ worker: "penalty" }),
 			})

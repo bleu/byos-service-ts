@@ -227,6 +227,24 @@ export async function debitOperationStatus(db: Db, id: number): Promise<string |
 	return operation?.status ?? null;
 }
 
+/** Returns a reconciliation-paused operation to the durable retry loop. */
+export async function resumeDebitOperation(db: Db, id: number): Promise<boolean> {
+	const [operation] = await db
+		.update(debitOperations)
+		.set({
+			status: "retrying",
+			attemptCount: 0,
+			lastError: null,
+			nextRetryAt: sql`now()`,
+			leaseOwner: null,
+			leaseExpiresAt: null,
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(debitOperations.id, id), eq(debitOperations.status, "needs_reconciliation")))
+		.returning({ id: debitOperations.id });
+	return operation !== undefined;
+}
+
 /** Operations needing automatic recovery; reconciliation-paused rows stay untouched. */
 export async function openDebitOperations(db: Db, sourceKind: string): Promise<DebitOperation[]> {
 	const rows = await db
@@ -1106,8 +1124,10 @@ export async function markBufferEntriesInFlight(
 export async function finalizeBufferEntries(
 	db: Db,
 	subSolver: Address,
+	entryIds: number[],
 	clearTxHash: Hex,
 ): Promise<number> {
+	if (entryIds.length === 0) return 0;
 	const result = await db
 		.update(bufferEntries)
 		.set({ clearTxHash: clearTxHash.toLowerCase() })
@@ -1115,6 +1135,7 @@ export async function finalizeBufferEntries(
 			and(
 				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
 				eq(bufferEntries.cleared, true),
+				inArray(bufferEntries.id, entryIds),
 				sql`clear_tx_hash IS NULL`,
 			),
 		)

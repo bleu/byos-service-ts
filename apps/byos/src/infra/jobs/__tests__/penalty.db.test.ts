@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
+import { bufferEntries } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -76,6 +78,7 @@ function config(operator: DebitEscrow, events: AuditEvent[] = []) {
 		db: ctx.db,
 		operator,
 		cL: C_L,
+		workerId: "test-worker",
 		onAuditEvent: (event: AuditEvent) => {
 			events.push(event);
 		},
@@ -84,13 +87,23 @@ function config(operator: DebitEscrow, events: AuditEvent[] = []) {
 }
 
 describe("revert debits", () => {
-	it("a successor rebroadcasts the persisted debit bytes without signing a second charge", async () => {
+	it("a successor claims an expired lease and broadcasts persisted debit bytes without signing", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const raw = `0x${"12".repeat(96)}` as Hex;
 		const debitHash = `0x${"34".repeat(32)}` as Hex;
 		let signCalls = 0;
 		const broadcasts: Hex[] = [];
 		let landed = false;
+		const proposal = await store.get(ctx.db, id);
+		const operation = await store.createDebitOperation(ctx.db, {
+			sourceKind: "revert",
+			sourceId: `proposal:${id}`,
+			subSolver: proposal?.subSolver as Address,
+			amount: 500n + C_L,
+			reason: tx,
+		});
+		await store.claimDebitOperation(ctx.db, operation.id, "replica-a", 0);
+		await store.persistSignedDebit(ctx.db, operation.id, "replica-a", raw, debitHash);
 		const operator: DebitEscrow = {
 			async settlementCost() {
 				return 500n;
@@ -101,7 +114,7 @@ describe("revert debits", () => {
 			},
 			async broadcastSignedDebit(bytes) {
 				broadcasts.push(bytes);
-				landed = broadcasts.length === 2;
+				landed = true;
 				return debitHash;
 			},
 			async debitOutcome() {
@@ -112,15 +125,12 @@ describe("revert debits", () => {
 			},
 		};
 
-		// The first worker broadcasts successfully but crashes before it can
-		// establish the receipt. Its lease and retry state survive the handover.
-		await runRevertDebits({ ...config(operator), workerId: "replica-a" }, new Map());
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
-
+		// Replica A persisted the only signed transaction then crashed. Its
+		// zero-second lease is expired, so replica B must use those same bytes.
 		await runRevertDebits({ ...config(operator), workerId: "replica-b" }, new Map());
 		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
-		expect(signCalls).toBe(1);
-		expect(broadcasts).toEqual([raw, raw]);
+		expect(signCalls).toBe(0);
+		expect(broadcasts).toEqual([raw]);
 		expect((await store.get(ctx.db, id))?.penaltyTxHash).toBe(debitHash);
 		expect(tx).toBeDefined();
 	});
@@ -653,26 +663,45 @@ describe("buffer debits", () => {
 		});
 		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
 
-		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const raw = `0x${"ab".repeat(96)}` as Hex;
+		let signCalls = 0;
+		let broadcasts = 0;
+		let landed = false;
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: CLEAR_TX };
+			},
+			async broadcastSignedDebit() {
+				broadcasts++;
+				landed = true;
+				return CLEAR_TX;
+			},
+			async debitOutcome() {
+				return landed ? "succeeded" : null;
+			},
+			async readExecutedDelta(txHash) {
+				if (txHash.toLowerCase() === tx.toLowerCase()) return delivered;
+				throw new Error("unknown tx");
+			},
+		};
 
-		// First tick: records entry AND slashes (balance > c_L)
-		const op1 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runBufferDebits(config(op1), new Map());
+		const finalize = vi
+			.spyOn(store, "finalizeBufferEntries")
+			.mockRejectedValueOnce(new Error("database unavailable"));
+		try {
+			await runBufferDebits(config(operator), new Map());
+		} finally {
+			finalize.mockRestore();
+		}
+		expect(broadcasts).toBe(1);
 
-		const firstDebitCount = debitCalls.filter(
-			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
-		).length;
-		expect(firstDebitCount).toBe(1);
-
-		// Second tick: entries are already cleared, so no new debit
-		debitCalls.length = 0;
-		const op2 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runBufferDebits(config(op2), new Map());
-
-		const secondDebitCount = debitCalls.filter(
-			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
-		).length;
-		expect(secondDebitCount).toBe(0);
+		await runBufferDebits(config(operator), new Map());
+		expect(signCalls).toBe(1);
+		expect(broadcasts).toBe(1);
 	});
 
 	it("recovers an in-flight buffer debit without rebuilding the charge", async () => {
@@ -730,5 +759,71 @@ describe("buffer debits", () => {
 			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
 		);
 		expect(debits.length).toBe(1);
+	});
+
+	it("recovers a buffer operation created before its entries were marked in-flight", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000003" as Address;
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
+		const entryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: id,
+			orderUid: base.orderUid,
+			buyToken: base.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: (C_L + 1n).toString(),
+		});
+		await store.createDebitOperation(ctx.db, {
+			sourceKind: "buffer",
+			sourceId: `subsolver:${isolatedSolver}:entries:${entryId}`,
+			subSolver: isolatedSolver,
+			amount: C_L + 1n,
+			reason: `0x${"00".repeat(32)}`,
+		});
+
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		await runBufferDebits(config(bufferOperator(new Map(), debitCalls)), new Map());
+
+		const [entry] = await ctx.db
+			.select({ cleared: bufferEntries.cleared, clearTxHash: bufferEntries.clearTxHash })
+			.from(bufferEntries)
+			.where(eq(bufferEntries.id, entryId));
+		expect(entry).toEqual({ cleared: true, clearTxHash: CLEAR_TX });
+		expect(debitCalls).toContainEqual({ subSolver: isolatedSolver, amount: C_L + 1n });
+	});
+
+	it("finalizes only the buffer entries belonging to the durable operation", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000004" as Address;
+		const base = sampleProposal();
+		const secondBase = sampleProposal();
+		const first = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
+		const second = await store.insert(ctx.db, { ...secondBase, subSolver: isolatedSolver });
+		const firstEntryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: first.id,
+			orderUid: base.orderUid,
+			buyToken: base.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: "1",
+		});
+		const secondEntryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: second.id,
+			orderUid: secondBase.orderUid,
+			buyToken: secondBase.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: "1",
+		});
+		await store.markBufferEntriesInFlight(ctx.db, isolatedSolver, [firstEntryId, secondEntryId]);
+
+		expect(
+			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [firstEntryId], CLEAR_TX),
+		).toBe(1);
+		expect(
+			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [secondEntryId], PENALTY_TX),
+		).toBe(1);
 	});
 });
