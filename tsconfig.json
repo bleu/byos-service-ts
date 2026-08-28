@@ -4,7 +4,7 @@
 		{ "path": "packages/common" },
 		{ "path": "packages/subsolver-core" },
 		{ "path": "apps/byos" },
-		{ "path": "apps/subsolver" },
+		{ "path": "apps/baseline-subsolver" },
 		{ "path": "apps/fynd-subsolver" }
 	]
 }

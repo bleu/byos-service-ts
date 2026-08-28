@@ -9,7 +9,7 @@ Domain vocabulary and the normative specification are in `docs/shared/` (a Git s
 | Package | What it is |
 |---|---|
 | `apps/byos` | The BYOS service: proposal API, solver engine, background workers (validation, retention, penalty, audit) |
-| `apps/subsolver` | Reference sub-solver client and e2e-test counterpart |
+| `apps/baseline-subsolver` | Baseline reference sub-solver client and e2e-test counterpart |
 | `packages/common` | Shared contract ABIs, EIP-712 encoding, DTOs, trampoline encoding |
 | `tests/integration` | API integration tests (in-process, no running service needed) |
 | `tests/e2e` | End-to-end tests (Anvil + full CoW Protocol stack in Docker) |

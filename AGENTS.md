@@ -17,7 +17,7 @@ The normative BYOS specification lives in `docs/shared/` (a Git submodule pointi
 ```
 CONTEXT.md              Domain language and architecture map — read first
 apps/byos/              The BYOS service (proposal API, solver engine, workers)
-apps/subsolver/         Reference sub-solver client
+apps/baseline-subsolver/ Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
 tests/integration/      API integration tests (in-process, mocked blockchain)
 tests/e2e/              End-to-end tests (Anvil + full CoW stack)

@@ -19,13 +19,16 @@ export class EscrowOperator {
 
 	/** Submits an escrow debit transaction and waits for confirmation. */
 	async debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex> {
+		const account = this.walletClient.account;
+		if (!account) throw new Error("escrow operator wallet has no account");
+
 		const hash = await this.walletClient.writeContract({
 			address: this.escrowAddress,
 			abi: EscrowAbi,
 			functionName: "debit",
 			args: [subSolver, amount, reason],
 			chain: this.walletClient.chain,
-			account: this.walletClient.account!,
+			account,
 		});
 
 		const receipt = await this.publicClient.waitForTransactionReceipt({

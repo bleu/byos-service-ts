@@ -1,3 +1,4 @@
+import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -16,6 +17,12 @@ beforeAll(async () => {
 afterAll(async () => {
 	await app.ctx.cleanup();
 });
+
+async function getProposal(id: number): Promise<Proposal> {
+	const proposal = await store.get(app.ctx.db, id);
+	if (!proposal) throw new Error(`proposal ${id} missing`);
+	return proposal;
+}
 
 describe("cancel edge cases", () => {
 	it("double cancel returns 409 with terminal status description", async () => {
@@ -46,9 +53,9 @@ describe("cancel edge cases", () => {
 		const { id } = await response.json();
 
 		// Drive proposal to executing: submitted → active → executing
-		const submitted = (await store.get(app.ctx.db, id))!;
+		const submitted = await getProposal(id);
 		await store.transition(app.ctx.db, submitted, "active");
-		const active = (await store.get(app.ctx.db, id))!;
+		const active = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
 
 		const sig = await cancelSignatureHeader(id);
@@ -67,9 +74,9 @@ describe("cancel edge cases", () => {
 		const { id } = await response.json();
 
 		// Drive to executing
-		const submitted = (await store.get(app.ctx.db, id))!;
+		const submitted = await getProposal(id);
 		await store.transition(app.ctx.db, submitted, "active");
-		const active = (await store.get(app.ctx.db, id))!;
+		const active = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
 
 		// Cancel while executing (deferred)
@@ -81,7 +88,7 @@ describe("cancel edge cases", () => {
 		expect(cancelResp.status).toBe(202);
 
 		// Settlement abandoned → should transition to cancelled, not active
-		const executing = (await store.get(app.ctx.db, id))!;
+		const executing = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, executing, { kind: "abandoned" });
 
 		const final = await store.get(app.ctx.db, id);

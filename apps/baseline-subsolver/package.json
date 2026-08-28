@@ -1,5 +1,5 @@
 {
-	"name": "@byos/subsolver",
+	"name": "@byos/baseline-subsolver",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",

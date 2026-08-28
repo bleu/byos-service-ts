@@ -302,7 +302,9 @@ export async function signEip2612Permit(
 	value: bigint,
 	deadline: bigint,
 ): Promise<Hex> {
-	const owner = walletClient.account!.address;
+	const account = walletClient.account;
+	if (!account) throw new Error("wallet client has no account");
+	const owner = account.address;
 
 	const nonce = await publicClient.readContract({
 		address: tokenAddress,

@@ -1,6 +1,6 @@
 # Reference sub-solver
 
-`apps/subsolver` is the baseline Uniswap V2 reference sub-solver. It uses
+`apps/baseline-subsolver` is the baseline Uniswap V2 reference sub-solver. It uses
 `@byos/subsolver-core` for shared BYOS and orderbook clients.
 
 Each sub-solver identity needs its own `SUBSOLVER_PRIVATE_KEY`, Trampoline,

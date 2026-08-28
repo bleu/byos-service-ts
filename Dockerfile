@@ -6,7 +6,7 @@ RUN corepack enable pnpm
 # Copy workspace manifests first for layer caching
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/byos/package.json apps/byos/
-COPY apps/subsolver/package.json apps/subsolver/
+COPY apps/baseline-subsolver/package.json apps/baseline-subsolver/
 COPY apps/fynd-subsolver/package.json apps/fynd-subsolver/
 COPY packages/common/package.json packages/common/
 COPY packages/subsolver-core/package.json packages/subsolver-core/
@@ -35,9 +35,9 @@ COPY --from=build /app/packages/common/dist packages/common/dist/
 COPY --from=build /app/packages/common/package.json packages/common/
 COPY --from=build /app/packages/common/node_modules packages/common/node_modules/
 # Baseline subsolver executable and reusable provider package.
-COPY --from=build /app/apps/subsolver/dist apps/subsolver/dist/
-COPY --from=build /app/apps/subsolver/package.json apps/subsolver/
-COPY --from=build /app/apps/subsolver/node_modules apps/subsolver/node_modules/
+COPY --from=build /app/apps/baseline-subsolver/dist apps/baseline-subsolver/dist/
+COPY --from=build /app/apps/baseline-subsolver/package.json apps/baseline-subsolver/
+COPY --from=build /app/apps/baseline-subsolver/node_modules apps/baseline-subsolver/node_modules/
 # Fynd subsolver executable.
 COPY --from=build /app/apps/fynd-subsolver/dist apps/fynd-subsolver/dist/
 COPY --from=build /app/apps/fynd-subsolver/package.json apps/fynd-subsolver/

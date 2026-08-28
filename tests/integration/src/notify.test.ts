@@ -1,3 +1,4 @@
+import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,6 +28,12 @@ async function postNotify(body: unknown): Promise<{ status: number; body: unknow
 		body: JSON.stringify(body),
 	});
 	return { status: resp.status, body: await resp.json() };
+}
+
+async function getProposal(id: number): Promise<Proposal> {
+	const proposal = await store.get(app.ctx.db, id);
+	if (!proposal) throw new Error(`proposal ${id} missing`);
+	return proposal;
 }
 
 async function seedActiveProposal(nonce: bigint): Promise<number> {
@@ -65,7 +72,7 @@ describe("/notify", () => {
 		await store.recordSolution(app.ctx.db, 100, 1, id);
 
 		// Move to executing
-		const proposal = (await store.get(app.ctx.db, id))!;
+		const proposal = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
 		// Notify success
@@ -85,7 +92,7 @@ describe("/notify", () => {
 		const id = await seedActiveProposal(301n);
 		await store.recordSolution(app.ctx.db, 101, 1, id);
 
-		const proposal = (await store.get(app.ctx.db, id))!;
+		const proposal = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
 		const txHash = `0x${"cc".repeat(32)}`;
@@ -161,7 +168,7 @@ describe("/notify", () => {
 	it("malformed transaction hash is rejected and nothing is persisted", async () => {
 		const id = await seedActiveProposal(303n);
 		await store.recordSolution(app.ctx.db, 103, 1, id);
-		const proposal = (await store.get(app.ctx.db, id))!;
+		const proposal = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
 		const { status } = await postNotify({

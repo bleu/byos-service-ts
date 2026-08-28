@@ -82,9 +82,9 @@ class Subsolver {
 
 		// Per-order proposal
 		for (let i = 0; i < candidates.length; i++) {
-			const order = candidates[i]!;
+			const order = candidates[i];
 			const reserve = reserves[i];
-			if (!reserve) continue;
+			if (!order || !reserve) continue;
 
 			try {
 				const result = await this.propose(order, reserve.reserveSell, reserve.reserveBuy, now);
