@@ -62,11 +62,11 @@ export interface AppContext {
 
 /**
  * Creates the one public client shared by validation, balance refresh, and
- * settlement observation. Batching only coalesces reads issued together; it
- * never waits to collect more work.
+ * settlement observation. A short collection window coalesces nearby reads
+ * without materially delaying the background work that issues them.
  */
 export function createSharedPublicClient(chain: Chain, transport: Transport): PublicClient {
-	return createPublicClient({ chain, transport, batch: { multicall: { wait: 0 } } });
+	return createPublicClient({ chain, transport, batch: { multicall: { wait: 100 } } });
 }
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
