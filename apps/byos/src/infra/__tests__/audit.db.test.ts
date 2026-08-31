@@ -113,4 +113,29 @@ describe("audit persistence", () => {
 
 		expect(rows.length).toBeGreaterThanOrEqual(1);
 	});
+
+	it("persists a nonce conflict against the original proposal", async () => {
+		const event: AuditEvent = {
+			occurredAt: new Date(),
+			kind: {
+				type: "nonceConflict",
+				proposalId: 4,
+				subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,
+				orderUid: `0x${"ab".repeat(56)}`,
+				incomingFingerprint: "signed-payload-fingerprint",
+			},
+		};
+
+		await insertAuditEvent(ctx.db, event);
+
+		const [row] = await ctx.db
+			.select()
+			.from(auditEvents)
+			.where(eq(auditEvents.eventType, "nonce_conflict"));
+		expect(row).toMatchObject({ proposalId: 4, eventType: "nonce_conflict" });
+		if (!row) throw new Error("nonce conflict audit event missing");
+		expect((row.payload as Record<string, unknown>).incomingFingerprint).toBe(
+			"signed-payload-fingerprint",
+		);
+	});
 });

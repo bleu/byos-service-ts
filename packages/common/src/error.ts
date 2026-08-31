@@ -7,6 +7,7 @@ export const Kind = {
 	ProposalLifetimeExceeded: "ProposalLifetimeExceeded",
 	ProposalNotFound: "ProposalNotFound",
 	ProposalNotCancellable: "ProposalNotCancellable",
+	NonceAlreadyUsed: "NonceAlreadyUsed",
 	BadRequest: "BadRequest",
 	RateLimited: "RateLimited",
 	ServiceUnavailable: "ServiceUnavailable",

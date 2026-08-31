@@ -86,8 +86,55 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 	return interactions.map((i) => ({
 		target: i.target.toLowerCase(),
 		value: i.value.toString(),
-		callData: i.callData,
+		callData: i.callData.toLowerCase(),
 	}));
+}
+
+function proposalValues(proposal: Omit<Proposal, "id">) {
+	return {
+		subSolver: proposal.subSolver.toLowerCase(),
+		orderUid: proposal.orderUid.toLowerCase(),
+		orderUidHash: proposal.orderUidHash.toLowerCase(),
+		sellAmount: proposal.sellAmount.toString(),
+		minBuyAmount: proposal.minBuyAmount.toString(),
+		quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+		sellToken: proposal.sellToken.toLowerCase(),
+		buyToken: proposal.buyToken.toLowerCase(),
+		interactions: interactionsToJson(proposal.interactions),
+		interactionsHash: proposal.interactionsHash.toLowerCase(),
+		validUntil: proposal.validUntil.toString(),
+		nonce: proposal.nonce.toString(),
+		signature: proposal.signature.toLowerCase(),
+		status: proposal.status,
+		rejectionReason: proposal.rejectionReason,
+		gasUsed: proposal.gasUsed != null ? Number(proposal.gasUsed) : null,
+		trampoline: proposal.trampoline?.toLowerCase() ?? null,
+		settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
+		penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
+	};
+}
+
+/**
+ * Canonical fingerprint of every field committed by the proposal signature.
+ * It is deliberately derived rather than persisted so replay checks cannot
+ * drift from the actual signed payload as the row shape evolves.
+ */
+export function signedProposalFingerprint(proposal: Omit<Proposal, "id"> | Proposal): string {
+	return JSON.stringify({
+		subSolver: proposal.subSolver.toLowerCase(),
+		orderUid: proposal.orderUid.toLowerCase(),
+		orderUidHash: proposal.orderUidHash.toLowerCase(),
+		sellToken: proposal.sellToken.toLowerCase(),
+		buyToken: proposal.buyToken.toLowerCase(),
+		sellAmount: proposal.sellAmount.toString(),
+		minBuyAmount: proposal.minBuyAmount.toString(),
+		quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+		interactions: interactionsToJson(proposal.interactions),
+		interactionsHash: proposal.interactionsHash.toLowerCase(),
+		validUntil: proposal.validUntil.toString(),
+		nonce: proposal.nonce.toString(),
+		signature: proposal.signature.toLowerCase(),
+	});
 }
 
 // --- Writes ---
@@ -98,27 +145,7 @@ export async function insert(
 ): Promise<{ id: number; auditEvent: AuditEvent }> {
 	const [row] = await db
 		.insert(proposals)
-		.values({
-			subSolver: proposal.subSolver.toLowerCase(),
-			orderUid: proposal.orderUid.toLowerCase(),
-			orderUidHash: proposal.orderUidHash.toLowerCase(),
-			sellAmount: proposal.sellAmount.toString(),
-			minBuyAmount: proposal.minBuyAmount.toString(),
-			quoteBuyAmount: proposal.quoteBuyAmount.toString(),
-			sellToken: proposal.sellToken.toLowerCase(),
-			buyToken: proposal.buyToken.toLowerCase(),
-			interactions: interactionsToJson(proposal.interactions),
-			interactionsHash: proposal.interactionsHash.toLowerCase(),
-			validUntil: proposal.validUntil.toString(),
-			nonce: proposal.nonce.toString(),
-			signature: proposal.signature,
-			status: proposal.status,
-			rejectionReason: proposal.rejectionReason,
-			gasUsed: proposal.gasUsed != null ? Number(proposal.gasUsed) : null,
-			trampoline: proposal.trampoline?.toLowerCase() ?? null,
-			settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
-			penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
-		})
+		.values(proposalValues(proposal))
 		.returning({ id: proposals.id });
 
 	// INSERT ... RETURNING always returns exactly one row
@@ -132,6 +159,49 @@ export async function insert(
 	};
 
 	return { id, auditEvent };
+}
+
+/**
+ * Atomically claims `(subSolver, nonce)`. A losing concurrent writer receives
+ * the durable row to classify as an exact replay or nonce conflict.
+ */
+export async function insertIfUnused(
+	db: Db,
+	proposal: Omit<Proposal, "id">,
+): Promise<{ id: number; auditEvent: AuditEvent } | { existing: Proposal }> {
+	const rows = await db
+		.insert(proposals)
+		.values(proposalValues(proposal))
+		.onConflictDoNothing({ target: [proposals.subSolver, proposals.nonce] })
+		.returning({ id: proposals.id });
+	const row = rows[0];
+	if (!row) {
+		const existing = await findBySubSolverAndNonce(db, proposal.subSolver, proposal.nonce);
+		if (!existing) throw new Error("nonce conflict returned no proposal");
+		return { existing };
+	}
+	const fullProposal: Proposal = { ...proposal, id: row.id };
+	return {
+		id: row.id,
+		auditEvent: { occurredAt: new Date(), kind: { type: "received", proposal: fullProposal } },
+	};
+}
+
+/** Returns the proposal that first consumed a nonce for a sub-solver. */
+export async function findBySubSolverAndNonce(
+	db: Db,
+	subSolver: Address,
+	nonce: bigint,
+): Promise<Proposal | null> {
+	const [row] = await db
+		.select()
+		.from(proposals)
+		.where(
+			and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.nonce, nonce.toString())),
+		)
+		.limit(1);
+
+	return row ? rowToProposal(row) : null;
 }
 
 export async function transition(
@@ -175,9 +245,31 @@ export async function resolveVerdict(
 	db: Db,
 	id: number,
 	verdict: Verdict,
-): Promise<{ status: Status; auditEvent: AuditEvent | null } | StoreError> {
+): Promise<
+	| { status: Status; auditEvent: AuditEvent | null; replacementAuditEvents: AuditEvent[] }
+	| StoreError
+> {
 	// Use raw SQL for SELECT ... FOR UPDATE inside a transaction
 	const result = await db.transaction(async (tx) => {
+		const [identity] = await tx
+			.select({
+				subSolver: proposals.subSolver,
+				orderUid: proposals.orderUid,
+			})
+			.from(proposals)
+			.where(eq(proposals.id, id));
+
+		if (!identity) {
+			return { kind: "notFound" as const, id };
+		}
+		// Every activation for a `(subSolver, orderUid)` group takes the same
+		// transaction-scoped advisory lock before it acquires row locks. Locking
+		// each proposal row first can deadlock two validators that start on
+		// different rows of one replacement group.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${identity.subSolver} || ':' || ${identity.orderUid})::bigint)`,
+		);
+
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
@@ -188,9 +280,7 @@ export async function resolveVerdict(
 			.where(eq(proposals.id, id))
 			.for("update");
 
-		if (!locked) {
-			return { kind: "notFound" as const, id };
-		}
+		if (!locked) return { kind: "notFound" as const, id };
 
 		// Decided under the lock, not from the caller's snapshot: a cancellation
 		// that landed while the validator was simulating must win, or the verdict
@@ -199,6 +289,17 @@ export async function resolveVerdict(
 		if (from !== "submitted" && from !== "active") {
 			return { kind: "staleTransition" as const, id, expected: "submitted|active", actual: from };
 		}
+
+		// Lock the complete replacement group before deciding whether this is
+		// still the newest eligible proposal. This prevents a slow validator for
+		// an older submission from reactivating it after a newer route won.
+		const group = await tx
+			.select({ id: proposals.id, status: proposals.status })
+			.from(proposals)
+			.where(
+				and(eq(proposals.subSolver, locked.subSolver), eq(proposals.orderUid, locked.orderUid)),
+			)
+			.for("update");
 
 		let toStatus: Status;
 		let rejectionReason: RejectionReason | null = null;
@@ -209,6 +310,19 @@ export async function resolveVerdict(
 
 		switch (verdict.kind) {
 			case "accept":
+				if (
+					group.some(
+						(proposal) =>
+							proposal.id > id && (proposal.status === "submitted" || proposal.status === "active"),
+					)
+				) {
+					return {
+						kind: "staleTransition" as const,
+						id,
+						expected: "newest submitted|active",
+						actual: from,
+					};
+				}
 				toStatus = "active";
 				if (verdict.simulation) {
 					gasUsed = Number(verdict.simulation.gasUsed);
@@ -241,6 +355,45 @@ export async function resolveVerdict(
 			})
 			.where(eq(proposals.id, id));
 
+		if (verdict.kind === "accept") {
+			await tx
+				.update(proposals)
+				.set({
+					status: "cancelled" as Status,
+					statusChangedAt: sql`now()`,
+				})
+				.where(
+					and(
+						eq(proposals.subSolver, locked.subSolver),
+						eq(proposals.orderUid, locked.orderUid),
+						sql`${proposals.id} < ${id}`,
+						inArray(proposals.status, ["submitted", "active"]),
+					),
+				);
+		}
+		const replacementAuditEvents =
+			verdict.kind === "accept"
+				? group
+						.filter(
+							(proposal) =>
+								proposal.id < id &&
+								(proposal.status === "submitted" || proposal.status === "active"),
+						)
+						.map((proposal) => ({
+							occurredAt: new Date(),
+							kind: {
+								type: "statusChanged" as const,
+								proposalId: proposal.id,
+								subSolver: locked.subSolver as Address,
+								orderUid: locked.orderUid,
+								from: proposal.status as Status,
+								to: "cancelled" as Status,
+								rejectionReason: null,
+								settlementTxHash: null,
+							},
+						}))
+				: [];
+
 		const auditEvent: AuditEvent | null = statusChanged
 			? {
 					occurredAt: new Date(),
@@ -257,7 +410,7 @@ export async function resolveVerdict(
 				}
 			: null;
 
-		return { status: toStatus, auditEvent };
+		return { status: toStatus, auditEvent, replacementAuditEvents };
 	});
 
 	return result;
@@ -340,12 +493,23 @@ export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
-): Promise<{ auditEvent: AuditEvent | null; insertedPenalty: boolean } | StoreError> {
+): Promise<
+	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
+	| StoreError
+> {
 	const result = await db.transaction(async (tx) => {
+		// Settlement success and validation both change eligibility for the same
+		// replacement group, so they must serialize on the same advisory lock.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${proposal.subSolver.toLowerCase()} || ':' || ${proposal.orderUid.toLowerCase()})::bigint)`,
+		);
+
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
 				pendingCancellation: proposals.pendingCancellation,
+				subSolver: proposals.subSolver,
+				orderUid: proposals.orderUid,
 			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
@@ -385,7 +549,7 @@ export async function applySettlementOutcome(
 		}
 
 		if (!toStatus) {
-			return { auditEvent: null, insertedPenalty: false };
+			return { auditEvent: null, cancelledAuditEvents: [], insertedPenalty: false };
 		}
 
 		await tx
@@ -406,6 +570,34 @@ export async function applySettlementOutcome(
 			});
 		}
 
+		const cancelled =
+			outcome.kind === "succeeded"
+				? await tx
+						.select({ id: proposals.id, status: proposals.status })
+						.from(proposals)
+						.where(
+							and(
+								eq(proposals.subSolver, locked.subSolver),
+								eq(proposals.orderUid, locked.orderUid),
+								sql`${proposals.id} <> ${proposal.id}`,
+								inArray(proposals.status, ["submitted", "active"]),
+							),
+						)
+						.for("update")
+				: [];
+
+		if (cancelled.length > 0) {
+			await tx
+				.update(proposals)
+				.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
+				.where(
+					inArray(
+						proposals.id,
+						cancelled.map((sibling) => sibling.id),
+					),
+				);
+		}
+
 		const auditEvent: AuditEvent = {
 			occurredAt: new Date(),
 			kind: {
@@ -420,7 +612,23 @@ export async function applySettlementOutcome(
 			},
 		};
 
-		return { auditEvent, insertedPenalty: insertPenalty };
+		return {
+			auditEvent,
+			cancelledAuditEvents: cancelled.map((sibling) => ({
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged" as const,
+					proposalId: sibling.id,
+					subSolver: locked.subSolver as Address,
+					orderUid: locked.orderUid,
+					from: sibling.status as Status,
+					to: "cancelled" as Status,
+					rejectionReason: null,
+					settlementTxHash: null,
+				},
+			})),
+			insertedPenalty: insertPenalty,
+		};
 	});
 
 	return result;
@@ -474,16 +682,6 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 		sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
 	);
 
-	const released = await db
-		.update(proposals)
-		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
-		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
-		.returning({
-			id: proposals.id,
-			subSolver: proposals.subSolver,
-			orderUid: proposals.orderUid,
-		});
-
 	const cancelled = await db
 		.update(proposals)
 		.set({
@@ -492,6 +690,16 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 			statusChangedAt: sql`now()`,
 		})
 		.where(and(staleCondition, eq(proposals.pendingCancellation, true)))
+		.returning({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		});
+
+	const released = await db
+		.update(proposals)
+		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
+		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
 		.returning({
 			id: proposals.id,
 			subSolver: proposals.subSolver,

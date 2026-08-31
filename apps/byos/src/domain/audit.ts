@@ -4,6 +4,13 @@ import type { Proposal } from "./proposal.js";
 
 export type AuditKind =
 	| { type: "received"; proposal: Proposal }
+	| {
+			type: "nonceConflict";
+			proposalId: number;
+			subSolver: Address;
+			orderUid: string;
+			incomingFingerprint: string;
+	  }
 	| { type: "cancelled"; proposalId: number; subSolver: Address; orderUid: string }
 	// Emitted when a sub-solver requests cancellation while the proposal is in
 	// an active auction settlement ("executing"). The proposal stays executing
@@ -63,6 +70,8 @@ export function eventType(kind: AuditKind): string {
 	switch (kind.type) {
 		case "received":
 			return "received";
+		case "nonceConflict":
+			return "nonce_conflict";
 		case "cancelled":
 			return "cancelled";
 		case "cancellationDeferred":
@@ -115,6 +124,8 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 				nonce: kind.proposal.nonce.toString(),
 				signature: kind.proposal.signature,
 			};
+		case "nonceConflict":
+			return { incomingFingerprint: kind.incomingFingerprint };
 		case "cancelled":
 			return {};
 		case "cancellationDeferred":

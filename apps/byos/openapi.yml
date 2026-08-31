@@ -456,7 +456,6 @@ components:
         - `penalized` — that debit landed; see `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
         - `cancelled` — cancelled by a signed `DELETE`.
-
         All states except `submitted`, `active`, `executing`, and
         `settleFailed` are terminal.
       type: string
@@ -637,6 +636,7 @@ components:
       required:
         - id
         - subSolver
+        - orderUid
         - validUntil
         - status
       properties:
@@ -644,6 +644,8 @@ components:
           $ref: "#/components/schemas/ProposalId"
         subSolver:
           $ref: "#/components/schemas/Address"
+        orderUid:
+          $ref: "#/components/schemas/OrderUid"
         validUntil:
           $ref: "#/components/schemas/UnixTimestamp"
         status:

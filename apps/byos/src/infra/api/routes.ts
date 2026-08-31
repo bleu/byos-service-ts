@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
@@ -97,8 +98,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.ProposalLifetimeExceeded);
 		}
 
-		// Insert as Submitted
-		const { id, auditEvent } = await store.insert(config.db, {
+		const proposal: Omit<Proposal, "id"> = {
 			subSolver,
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
@@ -119,10 +119,28 @@ export function createPublicRoutes(config: RoutesConfig) {
 			settlementTxHash: null,
 			penaltyTxHash: null,
 			pendingCancellation: false,
-		});
+		};
+		const fingerprint = store.signedProposalFingerprint(proposal);
+		const inserted = await store.insertIfUnused(config.db, proposal);
+		if ("existing" in inserted) {
+			if (store.signedProposalFingerprint(inserted.existing) === fingerprint) {
+				return c.json({ id: inserted.existing.id }, 202);
+			}
+			config.onAuditEvent({
+				occurredAt: new Date(),
+				kind: {
+					type: "nonceConflict",
+					proposalId: inserted.existing.id,
+					subSolver,
+					orderUid: inserted.existing.orderUid,
+					incomingFingerprint: fingerprint,
+				},
+			});
+			throw new AppError(Kind.NonceAlreadyUsed);
+		}
 
-		config.onAuditEvent(auditEvent);
-		return c.json({ id }, 202);
+		config.onAuditEvent(inserted.auditEvent);
+		return c.json({ id: inserted.id }, 202);
 	});
 
 	// GET /proposal/:id — Get single proposal (owner-scoped)

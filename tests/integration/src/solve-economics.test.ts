@@ -383,6 +383,7 @@ describe("/solve economics", () => {
 			trampoline: TRAMPOLINE,
 			interactions: route,
 			signature,
+			nonce: 999n,
 		});
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000", "900", "0"));
@@ -402,7 +403,7 @@ describe("/solve economics", () => {
 				minBuyAmount: 950n,
 				quoteBuyAmount: 950n,
 				validUntil: 2n ** 40n,
-				nonce: 1n,
+				nonce: 999n,
 			},
 			route,
 			signature,
