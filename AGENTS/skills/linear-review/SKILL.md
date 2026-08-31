@@ -27,15 +27,14 @@ For each candidate issue:
 1. Understand the issue and its requirements.
 2. Inspect the repository and relevant code.
 3. Decide whether the issue is within agentic scope (doesn't involve external communication, investigative issues, or any task that can be made just by humans). If the issue is not within agentic scope and is marked with "ready-for-agent", please add a "needs-requirements" label and a comment with the situation. Don't remove the previous flag.
-4. If the issue is agent-related and is not well-specified, add a label "needs-requirements" and add a comment in the task regarding what requirements are needed
-5. For all the issues that you consider agentic-related and well specified, but are not with the `ready-for-agent` label, explicitly ask the user if you can add that task in the `ready-for-agent` category before proceeding. For the tasks the user allower, add it into your current list of well-specified tasks. 
-6. With a list of well-specified tasks in hand, you will confirm with the user in the prompt what are the tasks you intend to work, with a short summary for each one. Before spawning any implementation subagents, present the user with the list of selected tasks and ask for explicit confirmation. Do not spawn implementation or reviewer subagents before confirmation.
-7. With a list of specified tasks to work on, you will create a plan to implement them. You will understand what tasks depend on each other, which ones need to be done first, or last, and which one can be done independent of the others.
-8. For each agentic task well-specified, you will:
+4. For all the issues that you consider agentic-related and well specified, but are not with the `ready-for-agent` label, explicitly ask the user if you can add that task in the `ready-for-agent` category before proceeding. For the tasks the user allower, add it into your current list of well-specified tasks. 
+5. With a list of well-specified tasks in hand, you will confirm with the user in the prompt what are the tasks you intend to work, with a short summary for each one. Before spawning any implementation subagents, present the user with the list of selected tasks and ask for explicit confirmation. Do not spawn implementation or reviewer subagents before confirmation.
+6. With a list of specified tasks to work on, you will create a plan to implement them. You will understand what tasks depend on each other, which ones need to be done first, or last, and which one can be done independent of the others.
+7. For each agentic task well-specified, you will:
   a. spawn a subagent to work on it. This agent will be responsabile for checkouting to a new branch, addressing the issue, ensure the CI will pass and open a draft PR against the branch that make more sense in that situation (given step 6) 
-  b. spawn a reviewer subagent. The reviewer will be responsible to (i) create tests to check if the new work is correctly implemented: it needs to be skeptical, and it will be critical against the step (a) agent implementation. If the tests dont pass, it will criticially think if they are not passing because of a bad implementation or because the test is wrong. If the implementation is wrong, it will fix the implementation and ensure again CI pass. (ii) review the code implementation: review the code in terms of potential security breach being created, operational bottlenecks (in terms of optimization, execution efficiency) that are being created, and potential simplifications on the code. Classify each of them in high, medium, or low criticity. Only address the ones with high and medium criticity, and discard the others. (iii) update PR description and make it ready to review. If something was addressed in step (ii), ensure CI pass again.
+  b. spawn a reviewer subagent. The reviewer will be responsible to (i) create tests to check if the new work is correctly implemented: it needs to be skeptical, and it will be critical against the step (a) agent implementation. If the tests dont pass, it will criticially think if they are not passing because of a bad implementation or because the test is wrong. If the implementation is wrong, it will fix the implementation and ensure again CI pass. (ii) review the code implementation: review the code in terms of potential security breach being created, operational bottlenecks (in terms of optimization, execution efficiency) that are being created, and potential simplifications on the code. Classify each of them in high, medium, or low criticity. Only address the ones with high and medium criticity, and discard the others. (iii) update PR description and make it ready to review. If something was addressed in step (ii), ensure CI pass again (iv) in the end, check code quality and if it is consistent with repo patterns (v) ensure the PR message is as short and straightforward as possible, don't flood the PR description with internal reviews steps.
   
-Note: this spawning of agents will be sequential, and not in parallel
+Note: this spawning of agents will be sequential when a task need to be done after the other and may be in parallel (with worktrees) when they are independent. Always make sure to close the worktrees after finishing work there.
 
 ## Issue selection
 
@@ -98,7 +97,6 @@ While implementing:
 - Follow existing project conventions.
 - Add or update tests where appropriate.
 - Do not make product decisions.
-- Do not refactor unrelated code.
 
 ## Validation
 
@@ -116,32 +114,21 @@ If tests fail:
 
 ## Pull request
 
-When implementation is complete and validation passes:
+Template for reference:
+- Context (optional, not needed for features): the problem or reason behind the PR
+- Implementation: how this PR solves the issue
+- How to test (list of commands or routines to test if it works)
 
-1. Create a branch associated with the Linear issue.
-2. Commit the changes.
-3. Push the branch.
-4. Open a PR.
-5. Reference the Linear issue in the PR.
-6. Add a concise summary of the implementation and validation performed.
+Keep texts short and straightforward, with a high-level plain english explanation.
 
-Do not merge the PR.
+Do not let unchecked test plans unless only humans can test them.
 
-## Scope discipline
-
-The Linear issue is the source of truth.
-
-If you discover unrelated work that should be done:
-
-- Do not include it in the current implementation.
-- If appropriate, create a separate Linear issue.
-- Leave the current PR focused on the original task.
+Do not merge any PRs.
 
 ## Safety
 
 Never:
 
-- Merge a PR.
 - Close an issue because the implementation is complete.
 - Invent requirements.
 - Make irreversible changes without explicit authorization.
