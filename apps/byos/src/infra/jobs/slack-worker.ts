@@ -6,29 +6,37 @@ export interface SlackNotificationPayload {
 	text: string;
 }
 
-/** Posts a message to the configured Slack webhook URL. */
-async function postToSlack(webhookUrl: string, text: string): Promise<void> {
-	const res = await fetch(webhookUrl, {
+/** Posts a message to a Slack channel via the Web API. */
+export async function postToSlack(token: string, channel: string, text: string): Promise<void> {
+	const res = await fetch("https://slack.com/api/chat.postMessage", {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ text }),
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${token}`,
+		},
+		body: JSON.stringify({ channel, text }),
 	});
 	if (!res.ok) {
-		throw new Error(`Slack webhook returned ${res.status}: ${await res.text()}`);
+		throw new Error(`Slack API returned ${res.status}: ${await res.text()}`);
+	}
+	const data = (await res.json()) as { ok: boolean; error?: string };
+	if (!data.ok) {
+		throw new Error(`Slack API error: ${data.error}`);
 	}
 }
 
 /** Creates a BullMQ worker that sends Slack notifications. */
 export function createSlackWorker(
 	connection: Redis,
-	webhookUrl: string,
+	token: string,
+	channel: string,
 	logger: Logger,
 ): Worker {
 	return new Worker(
 		"slack-notification",
 		async (job) => {
 			const { text } = job.data as SlackNotificationPayload;
-			await postToSlack(webhookUrl, text);
+			await postToSlack(token, channel, text);
 		},
 		{
 			connection,

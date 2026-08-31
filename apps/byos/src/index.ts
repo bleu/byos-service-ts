@@ -94,9 +94,10 @@ async function main() {
 	}
 
 	// 6. Start BullMQ workers
-	const slackWorker = config.SLACK_WEBHOOK_URL
-		? createSlackWorker(ctx.redis, config.SLACK_WEBHOOK_URL, logger)
-		: null;
+	const slackWorker =
+		config.SLACK_TOKEN && config.SLACK_CHANNEL
+			? createSlackWorker(ctx.redis, config.SLACK_TOKEN, config.SLACK_CHANNEL, logger)
+			: null;
 
 	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, {
 		slackQueue: slackWorker ? ctx.queues.slackNotification : undefined,
@@ -152,7 +153,7 @@ async function main() {
 	].filter(Boolean) as import("bullmq").Worker[];
 
 	// Startup Slack notification (direct, not queued — queue may not be drained yet)
-	if (config.SLACK_WEBHOOK_URL) {
+	if (config.SLACK_TOKEN && config.SLACK_CHANNEL) {
 		enqueueSlackNotification(
 			ctx.queues.slackNotification,
 			`🚀 BYOS service started (chain ${config.CHAIN_ID})`,

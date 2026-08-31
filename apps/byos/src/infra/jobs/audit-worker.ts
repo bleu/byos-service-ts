@@ -33,7 +33,7 @@ const KNOWN_SUBSOLVERS_KEY = "byos:known-subsolvers";
  * Builds a Slack message for an audit event, or returns null if no
  * notification should be sent for this event type.
  */
-async function buildNotification(
+export async function buildNotification(
 	redis: Redis,
 	kind: AuditKind,
 ): Promise<string | null> {
