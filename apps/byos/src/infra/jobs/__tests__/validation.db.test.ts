@@ -19,6 +19,7 @@ afterAll(async () => {
 });
 
 const logger = pino({ level: "silent" });
+let nonceCounter = 0n;
 
 function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposal, "id"> {
 	return {
@@ -33,7 +34,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		interactions: [],
 		interactionsHash: `0x${"dd".repeat(32)}` as Hex,
 		validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600),
-		nonce: 1n,
+		nonce: nonceCounter++,
 		signature: `0x${"ee".repeat(65)}` as Hex,
 		status: "submitted",
 		rejectionReason: null,

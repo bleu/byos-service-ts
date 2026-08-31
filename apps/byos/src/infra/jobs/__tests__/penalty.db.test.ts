@@ -28,6 +28,7 @@ const C_L = 10_000_000_000_000_000n;
 const PENALTY_TX: Hex = `0x${"77".repeat(32)}`;
 
 let uidCounter = 0;
+let nonceCounter = 0n;
 
 function sampleProposal(): Omit<Proposal, "id"> {
 	const uid = (uidCounter++).toString(16).padStart(2, "0");
@@ -43,7 +44,7 @@ function sampleProposal(): Omit<Proposal, "id"> {
 		interactions: [],
 		interactionsHash: `0x${"dd".repeat(32)}` as Hex,
 		validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600),
-		nonce: 1n,
+		nonce: nonceCounter++,
 		signature: `0x${"ee".repeat(65)}` as Hex,
 		status: "submitted",
 		rejectionReason: null,

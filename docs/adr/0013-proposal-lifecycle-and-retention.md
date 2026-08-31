@@ -30,6 +30,22 @@ At `/solve` time we don't yet know we won. The window between the autopilot pick
 
 If the order was actually consumed (our tx landed but the notification was lost, or the order was filled externally), the next re-simulation reverts and the proposal dies as `SimFailed`. Re-simulation is the truth-teller. The executing timeout (default 5 minutes) covers lost notifications and restarts mid-settlement.
 
+### Why replacement cancels older live proposals
+
+Spec: docs/shared/design-document.md#proposal-lifecycle
+
+Routes are immutable, so refreshing is a new signed proposal. The older route
+must remain eligible until the replacement passes validation; then one
+transaction activates the new route and marks older Submitted or Active routes
+as `Cancelled`. `Executing` is deliberately left alone because the driver may
+still report its outcome. An abandoned execution returns to `Active`; the
+replacement flow never changes an executing proposal.
+
+The unique `(subSolver, nonce)` constraint makes retries safe. The complete
+signed payload is canonically fingerprinted at ingestion: an exact replay
+returns the existing id without a new audit event, while different content is a
+conflict attached to the original proposal's audit trail.
+
 ### Why simulation stops at the first revert
 
 A once-reverted proposal offered to `/solve` risks an on-chain revert and a penalty for the sub-solver, which is strictly worse than resubmitting. Transient transport errors still defer rather than fail. Resubmission is the sub-solver's "I still believe in this route" signal.
