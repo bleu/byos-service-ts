@@ -3,7 +3,9 @@ import {
 	bigint,
 	bigserial,
 	boolean,
+	check,
 	index,
+	integer,
 	jsonb,
 	pgTable,
 	primaryKey,
@@ -11,6 +13,51 @@ import {
 	timestamp,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+// --- service state ---
+
+/**
+ * Singleton state shared by every active BYOS replica.  The primary key
+ * deliberately fixes the table to one row rather than relying on callers to
+ * agree on a magic key.
+ */
+export const serviceState = pgTable(
+	"service_state",
+	{
+		id: integer().primaryKey().default(1),
+		latestAuctionGasPrice: text("latest_auction_gas_price"),
+		latestAuctionGasPriceAt: timestamp("latest_auction_gas_price_at", { withTimezone: true }),
+	},
+	(table) => [check("service_state_singleton", sql`${table.id} = 1`)],
+);
+
+// --- debit operations ---
+
+export const debitOperations = pgTable(
+	"debit_operations",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		sourceKind: text("source_kind").notNull(),
+		sourceId: text("source_id").notNull(),
+		subSolver: text("sub_solver").notNull(),
+		amount: text().notNull(),
+		reason: text().notNull(),
+		status: text().notNull().default("ready"),
+		leaseOwner: text("lease_owner"),
+		leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+		attemptCount: bigint("attempt_count", { mode: "number" }).notNull().default(0),
+		lastError: text("last_error"),
+		nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+		rawTransaction: text("raw_transaction"),
+		transactionHash: text("transaction_hash"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("debit_operations_source_idx").on(table.sourceKind, table.sourceId),
+		index("debit_operations_source_kind_status_idx").on(table.sourceKind, table.status),
+	],
+);
 
 // --- proposals ---
 

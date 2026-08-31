@@ -17,6 +17,7 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 - [0013 — Proposal Lifecycle and Retention](0013-proposal-lifecycle-and-retention.md): 10-state lifecycle, retention sweep, executing timeout backstop
 - [0014 — Contract Artifact Provenance](0014-contract-artifact-provenance.md): Vendored ABIs from byos-contracts submodule
 - [0015 — Rate Limiting](0015-rate-limiting.md): Cloudflare edge per-IP filter, escrow-tiered per-signer sliding window, cached escrow floor gate
+- [0016 — Active-Active Replicas and Durable Debits](0016-active-active-replicas-and-durable-debits.md): shared gas price and crash-safe escrow debit recovery
 
 ### TypeScript-specific ADRs
 
