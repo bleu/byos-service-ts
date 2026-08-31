@@ -17,3 +17,5 @@ CREATE TABLE IF NOT EXISTS "debit_operations" (
 	"updated_at" timestamp with time zone NOT NULL DEFAULT now()
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "debit_operations_source_idx" ON "debit_operations" USING btree ("source_kind", "source_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "debit_operations_source_kind_status_idx" ON "debit_operations" USING btree ("source_kind", "status");

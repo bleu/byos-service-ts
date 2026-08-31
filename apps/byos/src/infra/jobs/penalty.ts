@@ -34,12 +34,13 @@ export interface PenaltyWorkerConfig {
 }
 
 export function createPenaltyWorker(connection: Redis, config: PenaltyWorkerConfig): Worker {
+	const attempts = new Map<number, number>();
 	return new Worker(
 		"penalty",
 		async () => {
-			await runRevertDebits(config, new Map());
-			await runNonSettlementDebits(config, new Map());
-			await runBufferDebits(config, new Map());
+			await runRevertDebits(config, attempts);
+			await runNonSettlementDebits(config, attempts);
+			await runBufferDebits(config, attempts);
 		},
 		{
 			connection,
@@ -97,24 +98,6 @@ async function durableDebit(
 	const owner = config.workerId;
 	const claimed = await store.claimDebitOperation(db, operation.id, owner, LEASE_SECS);
 	if (!claimed) return null;
-
-	// Kept solely for existing lightweight test doubles. EscrowOperator always
-	// exposes the durable interface, which is required in every real process.
-	if (!operator.signDebit || !operator.broadcastSignedDebit || !operator.debitOutcome) {
-		try {
-			if (!operator.debit) throw new Error("operator does not support durable debit operations");
-			const hash = await operator.debit(subSolver, amount, reason);
-			return { hash, operationId: claimed.id, owner };
-		} catch (e) {
-			await store.recordDebitFailure(
-				db,
-				claimed.id,
-				owner,
-				e instanceof Error ? e.message : String(e),
-			);
-			return null;
-		}
-	}
 
 	let rawTransaction = claimed.rawTransaction;
 	let transactionHash = claimed.transactionHash;

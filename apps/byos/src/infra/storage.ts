@@ -38,15 +38,15 @@ export async function publishAuctionGasPrice(db: Db, gasPrice: bigint): Promise<
 	await db
 		.insert(serviceState)
 		.values({
-			id: true,
+			id: 1,
 			latestAuctionGasPrice: gasPrice.toString(),
-			latestAuctionGasPriceAt: new Date(),
+			latestAuctionGasPriceAt: sql`now()`,
 		})
 		.onConflictDoUpdate({
 			target: serviceState.id,
 			set: {
 				latestAuctionGasPrice: gasPrice.toString(),
-				latestAuctionGasPriceAt: new Date(),
+				latestAuctionGasPriceAt: sql`now()`,
 			},
 		});
 }
@@ -56,7 +56,7 @@ export async function latestAuctionGasPrice(db: Db, fallback: bigint): Promise<b
 	const [state] = await db
 		.select({ gasPrice: serviceState.latestAuctionGasPrice })
 		.from(serviceState)
-		.where(eq(serviceState.id, true));
+		.where(eq(serviceState.id, 1));
 
 	return state?.gasPrice === null || state?.gasPrice === undefined
 		? fallback
@@ -199,24 +199,19 @@ export async function recordDebitFailure(
 	owner: string,
 	error: string,
 ): Promise<void> {
-	const [operation] = await db
-		.select({ attemptCount: debitOperations.attemptCount })
-		.from(debitOperations)
-		.where(and(eq(debitOperations.id, id), eq(debitOperations.leaseOwner, owner)));
-	if (!operation) return;
-	const attempts = operation.attemptCount + 1;
 	await db
 		.update(debitOperations)
 		.set({
-			attemptCount: attempts,
+			attemptCount: sql`${debitOperations.attemptCount} + 1`,
 			lastError: error,
-			status: attempts >= 10 ? "needs_reconciliation" : "retrying",
-			nextRetryAt: attempts >= 10 ? null : sql`now()`,
+			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'retrying' END`,
+			nextRetryAt: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN NULL ELSE now() END`,
 			leaseOwner: null,
 			leaseExpiresAt: null,
 			updatedAt: sql`now()`,
 		})
-		.where(and(eq(debitOperations.id, id), eq(debitOperations.leaseOwner, owner)));
+		.where(and(eq(debitOperations.id, id), eq(debitOperations.leaseOwner, owner)))
+		.returning({ attemptCount: debitOperations.attemptCount });
 }
 
 export async function debitOperationStatus(db: Db, id: number): Promise<string | null> {

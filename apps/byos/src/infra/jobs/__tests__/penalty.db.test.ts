@@ -73,16 +73,46 @@ async function settleFailedProposal(): Promise<{ id: number; tx: Hex }> {
 	return { id, tx };
 }
 
-function config(operator: DebitEscrow, events: AuditEvent[] = []) {
+function config(operator: DebitEscrow | LegacyDebitEscrow, events: AuditEvent[] = []) {
 	return {
 		db: ctx.db,
-		operator,
+		operator: "debit" in operator ? durableTestOperator(operator) : operator,
 		cL: C_L,
 		workerId: "test-worker",
 		onAuditEvent: (event: AuditEvent) => {
 			events.push(event);
 		},
 		logger,
+	};
+}
+
+type LegacyDebitEscrow = Omit<
+	DebitEscrow,
+	"signDebit" | "broadcastSignedDebit" | "debitOutcome"
+> & {
+	debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
+	testDebitHash?: Hex;
+};
+
+function durableTestOperator(operator: LegacyDebitEscrow): DebitEscrow {
+	const hash = operator.testDebitHash ?? PENALTY_TX;
+	const rawTransaction = `0x${"ab".repeat(96)}` as Hex;
+	let landed = false;
+
+	return {
+		settlementCost: operator.settlementCost,
+		readExecutedDelta: operator.readExecutedDelta,
+		async signDebit(subSolver, amount, reason) {
+			await operator.debit(subSolver, amount, reason);
+			landed = true;
+			return { rawTransaction, hash };
+		},
+		async broadcastSignedDebit() {
+			return hash;
+		},
+		async debitOutcome() {
+			return landed ? "succeeded" : null;
+		},
 	};
 }
 
@@ -173,7 +203,7 @@ describe("revert debits", () => {
 	it("debits a settleFailed proposal and marks it penalized", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const calls: { subSolver: Address; amount: bigint; reason: Hex }[] = [];
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -201,7 +231,7 @@ describe("revert debits", () => {
 	it("keeps a proposal settleFailed across failed ticks until a debit lands", async () => {
 		const { id, tx } = await settleFailedProposal();
 		let debitCalls = 0;
-		const flaky: DebitEscrow = {
+		const flaky: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -230,7 +260,7 @@ describe("revert debits", () => {
 	it("gives up on a permanently failing revert debit after the attempt cap", async () => {
 		const { id, tx } = await settleFailedProposal();
 		let debitCalls = 0;
-		const dead: DebitEscrow = {
+		const dead: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -257,7 +287,7 @@ describe("revert debits", () => {
 		const { tx } = await settleFailedProposal();
 		let costCalls = 0;
 		let debitCalls = 0;
-		const unpriceable: DebitEscrow = {
+		const unpriceable: LegacyDebitEscrow = {
 			async settlementCost(txHash) {
 				if (txHash !== tx) return 500n;
 				costCalls++;
@@ -290,7 +320,7 @@ describe("revert debits", () => {
 		const active = await store.get(ctx.db, id);
 		await store.transition(ctx.db, active as Proposal, "settleFailed");
 
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -319,7 +349,7 @@ describe("revert debits", () => {
 
 	it("does not count a record failure against the debit attempt cap", async () => {
 		const { id, tx } = await settleFailedProposal();
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -369,7 +399,7 @@ describe("non-settlement debits", () => {
 	it("debits a queued penalty at 0.1 c_l exactly once", async () => {
 		const proposalId = await queuedPenalty();
 		const calls: bigint[] = [];
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -395,7 +425,7 @@ describe("non-settlement debits", () => {
 	it("gives up on a permanently failing non-settlement debit after the cap", async () => {
 		await queuedPenalty();
 		let debitCalls = 0;
-		const dead: DebitEscrow = {
+		const dead: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -456,8 +486,9 @@ describe("buffer debits", () => {
 	function bufferOperator(
 		deltaByTx: Map<string, bigint>,
 		debitCalls: Array<{ subSolver: Address; amount: bigint }> = [],
-	): DebitEscrow {
+	): LegacyDebitEscrow {
 		return {
+			testDebitHash: CLEAR_TX,
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -729,7 +760,7 @@ describe("buffer debits", () => {
 		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
 
 		// Operator that reads delta fine but fails on debit
-		const failingOperator: DebitEscrow = {
+		const failingOperator: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},

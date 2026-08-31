@@ -4,17 +4,15 @@ import type { Address, Hex } from "viem";
 export interface DebitEscrow {
 	settlementCost(txHash: Hex): Promise<bigint>;
 	/** Sign without broadcasting. The worker durably records these exact bytes first. */
-	signDebit?: (
+	signDebit: (
 		subSolver: Address,
 		amount: bigint,
 		reason: Hex,
 	) => Promise<{ rawTransaction: Hex; hash: Hex }>;
 	/** Broadcast previously persisted bytes; callers must never construct a replacement transaction. */
-	broadcastSignedDebit?: (rawTransaction: Hex) => Promise<Hex>;
+	broadcastSignedDebit: (rawTransaction: Hex) => Promise<Hex>;
 	/** Returns null while the node cannot yet establish an outcome. */
-	debitOutcome?: (hash: Hex) => Promise<"succeeded" | "reverted" | null>;
-	/** @deprecated Test-double compatibility only; production uses the durable methods above. */
-	debit?(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
+	debitOutcome: (hash: Hex) => Promise<"succeeded" | "reverted" | null>;
 	readExecutedDelta(txHash: Hex, orderUidHash: Hex): Promise<bigint>;
 }
 

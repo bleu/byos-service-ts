@@ -3,7 +3,9 @@ import {
 	bigint,
 	bigserial,
 	boolean,
+	check,
 	index,
+	integer,
 	jsonb,
 	pgTable,
 	primaryKey,
@@ -19,11 +21,15 @@ import {
  * deliberately fixes the table to one row rather than relying on callers to
  * agree on a magic key.
  */
-export const serviceState = pgTable("service_state", {
-	id: boolean().primaryKey().default(true),
-	latestAuctionGasPrice: text("latest_auction_gas_price"),
-	latestAuctionGasPriceAt: timestamp("latest_auction_gas_price_at", { withTimezone: true }),
-});
+export const serviceState = pgTable(
+	"service_state",
+	{
+		id: integer().primaryKey().default(1),
+		latestAuctionGasPrice: text("latest_auction_gas_price"),
+		latestAuctionGasPriceAt: timestamp("latest_auction_gas_price_at", { withTimezone: true }),
+	},
+	(table) => [check("service_state_singleton", sql`${table.id} = 1`)],
+);
 
 // --- debit operations ---
 
@@ -47,7 +53,10 @@ export const debitOperations = pgTable(
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
-	(table) => [uniqueIndex("debit_operations_source_idx").on(table.sourceKind, table.sourceId)],
+	(table) => [
+		uniqueIndex("debit_operations_source_idx").on(table.sourceKind, table.sourceId),
+		index("debit_operations_source_kind_status_idx").on(table.sourceKind, table.status),
+	],
 );
 
 // --- proposals ---
