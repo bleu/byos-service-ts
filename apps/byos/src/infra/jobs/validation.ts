@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import type { ValidateProposal } from "../../domain/validator.js";
+import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 
 /**
@@ -17,6 +18,7 @@ const VALIDATION_CONCURRENCY = 8;
 export interface ValidationTickConfig {
 	db: Db;
 	validator: ValidateProposal;
+	gasPriceRef?: GasPriceRef;
 	executingTimeoutSecs: number;
 	enqueueValidation: (proposalId: number) => Promise<void>;
 	onAuditEvent: (event: AuditEvent) => void;
@@ -82,7 +84,26 @@ export async function enqueueProposalValidation(queue: Queue, proposalId: number
 }
 
 export async function runValidationTick(config: ValidationTickConfig): Promise<void> {
-	const { db, validator, executingTimeoutSecs, enqueueValidation, onAuditEvent, logger } = config;
+	const {
+		db,
+		validator,
+		gasPriceRef,
+		executingTimeoutSecs,
+		enqueueValidation,
+		onAuditEvent,
+		logger,
+	} = config;
+
+	// Auction input arrives on whichever replica served /solve. Refresh once
+	// per shared tick so every replica validates against the same threshold,
+	// without adding a database read to each proposal validation.
+	if (gasPriceRef) {
+		try {
+			gasPriceRef.value = await store.latestAuctionGasPrice(db, gasPriceRef.value);
+		} catch (e) {
+			logger.warn({ err: e }, "failed to refresh shared auction gas price");
+		}
+	}
 
 	// Signal start of tick (clears caches)
 	if ("beginTick" in validator && typeof validator.beginTick === "function") {
@@ -105,7 +126,7 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 	// Sweep 2: Snapshot live proposals, expire and enqueue the rest
 	let live: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
-		live = await store.snapshotByStatuses(db, ["submitted", "active", "superseded"]);
+		live = await store.snapshotByStatuses(db, ["submitted", "active"]);
 	} catch (e) {
 		logger.error({ err: e }, "failed to snapshot live proposals");
 		return;
@@ -167,7 +188,7 @@ export async function runProposalValidation(
 		if (result.auditEvent) {
 			onAuditEvent(result.auditEvent);
 		}
-		for (const event of result.supersessionAuditEvents) {
+		for (const event of result.replacementAuditEvents) {
 			onAuditEvent(event);
 		}
 	} catch (e) {

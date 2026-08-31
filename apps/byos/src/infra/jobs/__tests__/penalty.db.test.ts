@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
+import { bufferEntries } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -72,11 +74,12 @@ async function settleFailedProposal(): Promise<{ id: number; tx: Hex }> {
 	return { id, tx };
 }
 
-function config(operator: DebitEscrow, events: AuditEvent[] = []) {
+function config(operator: DebitEscrow | LegacyDebitEscrow, events: AuditEvent[] = []) {
 	return {
 		db: ctx.db,
-		operator,
+		operator: "debit" in operator ? durableTestOperator(operator) : operator,
 		cL: C_L,
+		workerId: "test-worker",
 		onAuditEvent: (event: AuditEvent) => {
 			events.push(event);
 		},
@@ -84,11 +87,124 @@ function config(operator: DebitEscrow, events: AuditEvent[] = []) {
 	};
 }
 
+type LegacyDebitEscrow = Omit<
+	DebitEscrow,
+	"signDebit" | "broadcastSignedDebit" | "debitOutcome"
+> & {
+	debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
+	testDebitHash?: Hex;
+};
+
+function durableTestOperator(operator: LegacyDebitEscrow): DebitEscrow {
+	const hash = operator.testDebitHash ?? PENALTY_TX;
+	const rawTransaction = `0x${"ab".repeat(96)}` as Hex;
+	let landed = false;
+
+	return {
+		settlementCost: operator.settlementCost,
+		readExecutedDelta: operator.readExecutedDelta,
+		async signDebit(subSolver, amount, reason) {
+			await operator.debit(subSolver, amount, reason);
+			landed = true;
+			return { rawTransaction, hash };
+		},
+		async broadcastSignedDebit() {
+			return hash;
+		},
+		async debitOutcome() {
+			return landed ? "succeeded" : null;
+		},
+	};
+}
+
 describe("revert debits", () => {
+	it("a successor claims an expired lease and broadcasts persisted debit bytes without signing", async () => {
+		const { id, tx } = await settleFailedProposal();
+		const raw = `0x${"12".repeat(96)}` as Hex;
+		const debitHash = `0x${"34".repeat(32)}` as Hex;
+		let signCalls = 0;
+		const broadcasts: Hex[] = [];
+		let landed = false;
+		const proposal = await store.get(ctx.db, id);
+		const operation = await store.createDebitOperation(ctx.db, {
+			sourceKind: "revert",
+			sourceId: `proposal:${id}`,
+			subSolver: proposal?.subSolver as Address,
+			amount: 500n + C_L,
+			reason: tx,
+		});
+		await store.claimDebitOperation(ctx.db, operation.id, "replica-a", 0);
+		await store.persistSignedDebit(ctx.db, operation.id, "replica-a", raw, debitHash);
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: debitHash };
+			},
+			async broadcastSignedDebit(bytes) {
+				broadcasts.push(bytes);
+				landed = true;
+				return debitHash;
+			},
+			async debitOutcome() {
+				return landed ? "succeeded" : null;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
+		};
+
+		// Replica A persisted the only signed transaction then crashed. Its
+		// zero-second lease is expired, so replica B must use those same bytes.
+		await runRevertDebits({ ...config(operator), workerId: "replica-b" }, new Map());
+		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		expect(signCalls).toBe(0);
+		expect(broadcasts).toEqual([raw]);
+		expect((await store.get(ctx.db, id))?.penaltyTxHash).toBe(debitHash);
+		expect(tx).toBeDefined();
+	});
+
+	it("parks a durable operation after ten failures even when each tick has a new worker", async () => {
+		const { id } = await settleFailedProposal();
+		const raw = `0x${"56".repeat(96)}` as Hex;
+		const debitHash = `0x${"78".repeat(32)}` as Hex;
+		let signCalls = 0;
+		let broadcasts = 0;
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: debitHash };
+			},
+			async broadcastSignedDebit() {
+				broadcasts++;
+				return debitHash;
+			},
+			async debitOutcome() {
+				return null;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
+		};
+
+		for (let tick = 0; tick < 12; tick++) {
+			await runRevertDebits({ ...config(operator), workerId: `replica-${tick}` }, new Map());
+		}
+
+		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect(signCalls).toBe(1);
+		expect(broadcasts).toBe(10);
+	});
+
 	it("debits a settleFailed proposal and marks it penalized", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const calls: { subSolver: Address; amount: bigint; reason: Hex }[] = [];
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -116,7 +232,7 @@ describe("revert debits", () => {
 	it("keeps a proposal settleFailed across failed ticks until a debit lands", async () => {
 		const { id, tx } = await settleFailedProposal();
 		let debitCalls = 0;
-		const flaky: DebitEscrow = {
+		const flaky: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -145,7 +261,7 @@ describe("revert debits", () => {
 	it("gives up on a permanently failing revert debit after the attempt cap", async () => {
 		const { id, tx } = await settleFailedProposal();
 		let debitCalls = 0;
-		const dead: DebitEscrow = {
+		const dead: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -172,7 +288,7 @@ describe("revert debits", () => {
 		const { tx } = await settleFailedProposal();
 		let costCalls = 0;
 		let debitCalls = 0;
-		const unpriceable: DebitEscrow = {
+		const unpriceable: LegacyDebitEscrow = {
 			async settlementCost(txHash) {
 				if (txHash !== tx) return 500n;
 				costCalls++;
@@ -205,7 +321,7 @@ describe("revert debits", () => {
 		const active = await store.get(ctx.db, id);
 		await store.transition(ctx.db, active as Proposal, "settleFailed");
 
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -234,7 +350,7 @@ describe("revert debits", () => {
 
 	it("does not count a record failure against the debit attempt cap", async () => {
 		const { id, tx } = await settleFailedProposal();
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				return 500n;
 			},
@@ -284,7 +400,7 @@ describe("non-settlement debits", () => {
 	it("debits a queued penalty at 0.1 c_l exactly once", async () => {
 		const proposalId = await queuedPenalty();
 		const calls: bigint[] = [];
-		const operator: DebitEscrow = {
+		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -310,7 +426,7 @@ describe("non-settlement debits", () => {
 	it("gives up on a permanently failing non-settlement debit after the cap", async () => {
 		await queuedPenalty();
 		let debitCalls = 0;
-		const dead: DebitEscrow = {
+		const dead: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -371,8 +487,9 @@ describe("buffer debits", () => {
 	function bufferOperator(
 		deltaByTx: Map<string, bigint>,
 		debitCalls: Array<{ subSolver: Address; amount: bigint }> = [],
-	): DebitEscrow {
+	): LegacyDebitEscrow {
 		return {
+			testDebitHash: CLEAR_TX,
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -578,29 +695,48 @@ describe("buffer debits", () => {
 		});
 		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
 
-		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		const raw = `0x${"ab".repeat(96)}` as Hex;
+		let signCalls = 0;
+		let broadcasts = 0;
+		let landed = false;
+		const operator: DebitEscrow = {
+			async settlementCost() {
+				throw new Error("not used");
+			},
+			async signDebit() {
+				signCalls++;
+				return { rawTransaction: raw, hash: CLEAR_TX };
+			},
+			async broadcastSignedDebit() {
+				broadcasts++;
+				landed = true;
+				return CLEAR_TX;
+			},
+			async debitOutcome() {
+				return landed ? "succeeded" : null;
+			},
+			async readExecutedDelta(txHash) {
+				if (txHash.toLowerCase() === tx.toLowerCase()) return delivered;
+				throw new Error("unknown tx");
+			},
+		};
 
-		// First tick: records entry AND slashes (balance > c_L)
-		const op1 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runBufferDebits(config(op1), new Map());
+		const finalize = vi
+			.spyOn(store, "finalizeBufferEntries")
+			.mockRejectedValueOnce(new Error("database unavailable"));
+		try {
+			await runBufferDebits(config(operator), new Map());
+		} finally {
+			finalize.mockRestore();
+		}
+		expect(broadcasts).toBe(1);
 
-		const firstDebitCount = debitCalls.filter(
-			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
-		).length;
-		expect(firstDebitCount).toBe(1);
-
-		// Second tick: entries are already cleared, so no new debit
-		debitCalls.length = 0;
-		const op2 = bufferOperator(new Map([[tx.toLowerCase(), delivered]]), debitCalls);
-		await runBufferDebits(config(op2), new Map());
-
-		const secondDebitCount = debitCalls.filter(
-			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
-		).length;
-		expect(secondDebitCount).toBe(0);
+		await runBufferDebits(config(operator), new Map());
+		expect(signCalls).toBe(1);
+		expect(broadcasts).toBe(1);
 	});
 
-	it("reverts in-flight entries when the on-chain debit fails", async () => {
+	it("recovers an in-flight buffer debit without rebuilding the charge", async () => {
 		const isolatedSolver = "0xdead000000000000000000000000000000000002" as Address;
 		const maxBuy = ETHER;
 		const minBuy = ETHER / 2n;
@@ -625,7 +761,7 @@ describe("buffer debits", () => {
 		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
 
 		// Operator that reads delta fine but fails on debit
-		const failingOperator: DebitEscrow = {
+		const failingOperator: LegacyDebitEscrow = {
 			async settlementCost() {
 				throw new Error("not used");
 			},
@@ -638,15 +774,13 @@ describe("buffer debits", () => {
 			},
 		};
 
-		// First tick: entry is recorded, debit fails, entries are reverted
+		// First tick: entry is recorded and the durable operation is retained.
 		await runBufferDebits(config(failingOperator), new Map());
 
-		// Entries should be back to uncleared (not stuck in-flight)
+		// In-flight entries stay excluded: a retry must recover the same debit
+		// operation, not construct a replacement charge from the balance.
 		const uncleared = await store.unclearedBufferEntries(ctx.db, isolatedSolver);
-		expect(uncleared.length).toBeGreaterThanOrEqual(1);
-		const entry = uncleared.find((e) => e.proposalId === id);
-		expect(entry).toBeDefined();
-		expect(entry?.cleared).toBe(false);
+		expect(uncleared.find((e) => e.proposalId === id)).toBeUndefined();
 
 		// Second tick with a working operator: should successfully debit
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
@@ -657,5 +791,71 @@ describe("buffer debits", () => {
 			(c) => c.subSolver.toLowerCase() === isolatedSolver.toLowerCase(),
 		);
 		expect(debits.length).toBe(1);
+	});
+
+	it("recovers a buffer operation created before its entries were marked in-flight", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000003" as Address;
+		const base = sampleProposal();
+		const { id } = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
+		const entryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: id,
+			orderUid: base.orderUid,
+			buyToken: base.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: (C_L + 1n).toString(),
+		});
+		await store.createDebitOperation(ctx.db, {
+			sourceKind: "buffer",
+			sourceId: `subsolver:${isolatedSolver}:entries:${entryId}`,
+			subSolver: isolatedSolver,
+			amount: C_L + 1n,
+			reason: `0x${"00".repeat(32)}`,
+		});
+
+		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
+		await runBufferDebits(config(bufferOperator(new Map(), debitCalls)), new Map());
+
+		const [entry] = await ctx.db
+			.select({ cleared: bufferEntries.cleared, clearTxHash: bufferEntries.clearTxHash })
+			.from(bufferEntries)
+			.where(eq(bufferEntries.id, entryId));
+		expect(entry).toEqual({ cleared: true, clearTxHash: CLEAR_TX });
+		expect(debitCalls).toContainEqual({ subSolver: isolatedSolver, amount: C_L + 1n });
+	});
+
+	it("finalizes only the buffer entries belonging to the durable operation", async () => {
+		const isolatedSolver = "0xdead000000000000000000000000000000000004" as Address;
+		const base = sampleProposal();
+		const secondBase = sampleProposal();
+		const first = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
+		const second = await store.insert(ctx.db, { ...secondBase, subSolver: isolatedSolver });
+		const firstEntryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: first.id,
+			orderUid: base.orderUid,
+			buyToken: base.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: "1",
+		});
+		const secondEntryId = await store.insertBufferEntry(ctx.db, {
+			subSolver: isolatedSolver,
+			proposalId: second.id,
+			orderUid: secondBase.orderUid,
+			buyToken: secondBase.buyToken,
+			delta: "1",
+			gap: "1",
+			nativeTokenAmount: "1",
+		});
+		await store.markBufferEntriesInFlight(ctx.db, isolatedSolver, [firstEntryId, secondEntryId]);
+
+		expect(
+			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [firstEntryId], CLEAR_TX),
+		).toBe(1);
+		expect(
+			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [secondEntryId], PENALTY_TX),
+		).toBe(1);
 	});
 });

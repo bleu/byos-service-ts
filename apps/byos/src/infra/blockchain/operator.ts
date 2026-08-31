@@ -1,6 +1,6 @@
 import { EscrowAbi, TrampolineAbi } from "@byos/common";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import { decodeEventLog } from "viem";
+import { decodeEventLog, encodeFunctionData, keccak256 } from "viem";
 
 const CONFIRMATION_TIMEOUT = 120_000; // 120 seconds
 
@@ -17,30 +17,55 @@ export class EscrowOperator {
 		return receipt.gasUsed * receipt.effectiveGasPrice;
 	}
 
-	/** Submits an escrow debit transaction and waits for confirmation. */
+	/** Compatibility wrapper for callers not yet migrated to durable operations. */
 	async debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex> {
-		const account = this.walletClient.account;
-		if (!account) throw new Error("escrow operator wallet has no account");
-
-		const hash = await this.walletClient.writeContract({
-			address: this.escrowAddress,
-			abi: EscrowAbi,
-			functionName: "debit",
-			args: [subSolver, amount, reason],
-			chain: this.walletClient.chain,
-			account,
-		});
-
+		const signed = await this.signDebit(subSolver, amount, reason);
+		const hash = await this.broadcastSignedDebit(signed.rawTransaction);
 		const receipt = await this.publicClient.waitForTransactionReceipt({
 			hash,
 			timeout: CONFIRMATION_TIMEOUT,
 		});
-
-		if (receipt.status === "reverted") {
-			throw new Error(`debit tx ${hash} reverted`);
-		}
-
+		if (receipt.status === "reverted") throw new Error(`debit tx ${hash} reverted`);
 		return hash;
+	}
+
+	/** Produces stable bytes which callers must persist before broadcasting. */
+	async signDebit(
+		subSolver: Address,
+		amount: bigint,
+		reason: Hex,
+	): Promise<{ rawTransaction: Hex; hash: Hex }> {
+		const account = this.walletClient.account;
+		if (!account?.signTransaction) throw new Error("escrow operator cannot sign transactions");
+		const data = encodeFunctionData({
+			abi: EscrowAbi,
+			functionName: "debit",
+			args: [subSolver, amount, reason],
+		});
+		const request = await this.walletClient.prepareTransactionRequest({
+			account,
+			chain: this.walletClient.chain,
+			to: this.escrowAddress,
+			data,
+		});
+		const { account: _requestAccount, chain: _requestChain, ...transaction } = request;
+		const rawTransaction = await account.signTransaction(
+			transaction as Parameters<typeof account.signTransaction>[0],
+		);
+		return { rawTransaction, hash: keccak256(rawTransaction) };
+	}
+
+	async broadcastSignedDebit(rawTransaction: Hex): Promise<Hex> {
+		return this.publicClient.sendRawTransaction({ serializedTransaction: rawTransaction });
+	}
+
+	async debitOutcome(hash: Hex): Promise<"succeeded" | "reverted" | null> {
+		try {
+			const receipt = await this.publicClient.getTransactionReceipt({ hash });
+			return receipt.status === "success" ? "succeeded" : "reverted";
+		} catch {
+			return null;
+		}
 	}
 
 	/** Reads the delivered delta from the Executed event in a settlement tx receipt. */

@@ -121,24 +121,6 @@ export function createPublicRoutes(config: RoutesConfig) {
 			pendingCancellation: false,
 		};
 		const fingerprint = store.signedProposalFingerprint(proposal);
-		const existing = await store.findBySubSolverAndNonce(config.db, subSolver, parsed.nonce);
-		if (existing) {
-			if (store.signedProposalFingerprint(existing) === fingerprint) {
-				return c.json({ id: existing.id }, 202);
-			}
-			config.onAuditEvent({
-				occurredAt: new Date(),
-				kind: {
-					type: "nonceConflict",
-					proposalId: existing.id,
-					subSolver,
-					orderUid: existing.orderUid,
-					incomingFingerprint: fingerprint,
-				},
-			});
-			throw new AppError(Kind.NonceAlreadyUsed);
-		}
-
 		const inserted = await store.insertIfUnused(config.db, proposal);
 		if ("existing" in inserted) {
 			if (store.signedProposalFingerprint(inserted.existing) === fingerprint) {

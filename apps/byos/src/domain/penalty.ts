@@ -3,7 +3,16 @@ import type { Address, Hex } from "viem";
 /** The chain edge the penalty loop drives — Rust's DebitEscrow trait. */
 export interface DebitEscrow {
 	settlementCost(txHash: Hex): Promise<bigint>;
-	debit(subSolver: Address, amount: bigint, reason: Hex): Promise<Hex>;
+	/** Sign without broadcasting. The worker durably records these exact bytes first. */
+	signDebit: (
+		subSolver: Address,
+		amount: bigint,
+		reason: Hex,
+	) => Promise<{ rawTransaction: Hex; hash: Hex }>;
+	/** Broadcast previously persisted bytes; callers must never construct a replacement transaction. */
+	broadcastSignedDebit: (rawTransaction: Hex) => Promise<Hex>;
+	/** Returns null while the node cannot yet establish an outcome. */
+	debitOutcome: (hash: Hex) => Promise<"succeeded" | "reverted" | null>;
 	readExecutedDelta(txHash: Hex, orderUidHash: Hex): Promise<bigint>;
 }
 

@@ -34,14 +34,21 @@
 			"idx": 4,
 			"version": "7",
 			"when": 1787780800000,
-			"tag": "0004_nonce_uniqueness_and_supersession",
+			"tag": "0004_nonce_uniqueness_and_replacement",
 			"breakpoints": true
 		},
 		{
 			"idx": 5,
 			"version": "7",
-			"when": 1787940000000,
-			"tag": "0005_supersession_reference_retention",
+			"when": 1787780801000,
+			"tag": "0005_service_state",
+			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "7",
+			"when": 1787780802000,
+			"tag": "0006_debit_operations",
 			"breakpoints": true
 		}
 	]

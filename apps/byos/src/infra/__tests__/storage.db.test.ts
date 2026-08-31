@@ -47,15 +47,8 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
-		supersededByProposalId: null,
 		...overrides,
 	};
-}
-
-async function getProposal(id: number): Promise<Proposal> {
-	const proposal = await store.get(ctx.db, id);
-	if (!proposal) throw new Error(`proposal ${id} missing`);
-	return proposal;
 }
 
 describe("proposal store", () => {
@@ -94,7 +87,7 @@ describe("proposal store", () => {
 
 	it("transitions status with CAS", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
-		const proposal = await getProposal(id);
+		const proposal = (await store.get(ctx.db, id))!;
 
 		const result = await store.transition(ctx.db, proposal, "active");
 		expect("auditEvent" in result).toBe(true);
@@ -105,7 +98,7 @@ describe("proposal store", () => {
 
 	it("stale transition fails", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
-		const proposal = await getProposal(id);
+		const proposal = (await store.get(ctx.db, id))!;
 
 		// First transition succeeds
 		await store.transition(ctx.db, proposal, "active");
@@ -151,10 +144,11 @@ describe("proposal store", () => {
 		}
 	});
 
-	it("activating the newest proposal supersedes older live proposals for its sub-solver and order", async () => {
+	it("activating the newest proposal cancels older live proposals for its sub-solver and order", async () => {
 		const orderUid = `0x${"f1".repeat(56)}`;
 		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 		await store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null });
+		const { id: submittedId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 
 		const result = await store.resolveVerdict(ctx.db, newerId, {
@@ -162,16 +156,20 @@ describe("proposal store", () => {
 			simulation: null,
 		});
 
-		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
-		expect((await store.get(ctx.db, olderId))?.supersededByProposalId).toBe(newerId);
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
+		expect((await store.get(ctx.db, submittedId))?.status).toBe("cancelled");
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 		if ("status" in result) {
-			expect(result.supersessionAuditEvents).toHaveLength(1);
-			expect(result.supersessionAuditEvents[0]?.kind).toMatchObject({
-				type: "statusChanged",
-				from: "active",
-				to: "superseded",
-			});
+			expect(result.replacementAuditEvents).toHaveLength(2);
+			expect(result.replacementAuditEvents).toContainEqual(
+				expect.objectContaining({
+					kind: expect.objectContaining({
+						type: "statusChanged",
+						from: "active",
+						to: "cancelled",
+					}),
+				}),
+			);
 		}
 	});
 
@@ -185,11 +183,11 @@ describe("proposal store", () => {
 			store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null }),
 		]);
 
-		expect((await store.get(ctx.db, olderId))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
 		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
 	});
 
-	it("never supersedes an executing proposal when a replacement activates", async () => {
+	it("never cancels an executing proposal when a replacement activates", async () => {
 		const orderUid = `0x${"f3".repeat(56)}`;
 		const { id: executingId } = await store.insert(
 			ctx.db,
@@ -203,90 +201,50 @@ describe("proposal store", () => {
 		expect((await store.get(ctx.db, replacementId))?.status).toBe("active");
 	});
 
-	it("accepts delayed terminal outcomes for superseded proposals", async () => {
-		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const { id: abandonedId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const abandoned = await getProposal(abandonedId);
-		await store.applySettlementOutcome(ctx.db, abandoned, { kind: "started" });
-		const executing = await getProposal(abandonedId);
-		await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
-		expect((await store.get(ctx.db, abandonedId))?.status).toBe("superseded");
-
-		const { id: successId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const success = await getProposal(successId);
-		await store.applySettlementOutcome(ctx.db, success, {
-			kind: "succeeded",
-			txHash: `0x${"11".repeat(32)}` as Hex,
-		});
-		expect((await store.get(ctx.db, successId))?.status).toBe("settled");
-
-		const { id: revertId } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "superseded", supersededByProposalId: replacementId }),
-		);
-		const reverted = await getProposal(revertId);
-		await store.applySettlementOutcome(ctx.db, reverted, {
-			kind: "reverted",
-			txHash: `0x${"12".repeat(32)}` as Hex,
-		});
-		expect((await store.get(ctx.db, revertId))?.status).toBe("settleFailed");
-	});
-
-	it("keeps superseded proposals out of solve reads and expires them", async () => {
-		const orderUid = `0x${"f4".repeat(56)}`;
-		const { id: supersededId } = await store.insert(
-			ctx.db,
-			sampleProposal({ orderUid, status: "superseded" }),
-		);
-		const { id: activeId } = await store.insert(
-			ctx.db,
-			sampleProposal({ orderUid, status: "active" }),
-		);
-
-		expect((await store.listByOrderUid(ctx.db, orderUid)).map((proposal) => proposal.id)).toEqual([
-			activeId,
-		]);
-		const superseded = await getProposal(supersededId);
-		await store.transition(ctx.db, superseded, "expired");
-		expect((await store.get(ctx.db, supersededId))?.status).toBe("expired");
-	});
-
-	it("restores a timed-out superseded execution to superseded", async () => {
-		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const { id } = await store.insert(
-			ctx.db,
-			sampleProposal({ status: "executing", supersededByProposalId: replacementId }),
-		);
+	it("restores a timed-out execution to active", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
 		await ctx.db.execute(
 			sql`UPDATE proposals SET status_changed_at = now() - interval '61 seconds' WHERE id = ${id}`,
 		);
 
 		const events = await store.releaseStaleExecuting(ctx.db, 60);
 
-		expect((await store.get(ctx.db, id))?.status).toBe("superseded");
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
 		expect(events).toContainEqual(
 			expect.objectContaining({
-				kind: expect.objectContaining({ proposalId: id, to: "superseded" }),
+				kind: expect.objectContaining({ proposalId: id, to: "active" }),
 			}),
 		);
 	});
 
 	it("derives a fingerprint from all signed payload fields", async () => {
 		const proposal = sampleProposal();
-		const interaction = proposal.interactions[0];
-		if (!interaction) throw new Error("sample proposal has no interaction");
 		const differentRoute = {
 			...proposal,
-			interactions: [{ ...interaction, callData: "0xdeadbeef" as Hex }],
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xdeadbeef" as Hex }],
 		};
 		expect(store.signedProposalFingerprint(proposal)).not.toBe(
 			store.signedProposalFingerprint(differentRoute),
+		);
+	});
+
+	it("canonicalizes calldata casing in the signed payload fingerprint", async () => {
+		const proposal = sampleProposal({
+			interactions: [
+				{
+					target: "0x00000000000000000000000000000000000000cc" as Address,
+					value: 0n,
+					callData: "0xdeadbeef" as Hex,
+				},
+			],
+		});
+		const sameBytesDifferentCasing = {
+			...proposal,
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xDEADBEEF" as Hex }],
+		};
+
+		expect(store.signedProposalFingerprint(proposal)).toBe(
+			store.signedProposalFingerprint(sameBytesDifferentCasing),
 		);
 	});
 
@@ -348,7 +306,7 @@ describe("proposal store", () => {
 		const { id: id2 } = await store.insert(ctx.db, sampleProposal({ orderUid }));
 
 		// Make second one active
-		const p2 = await getProposal(id2);
+		const p2 = (await store.get(ctx.db, id2))!;
 		await store.transition(ctx.db, p2, "active");
 
 		const active = await store.listByOrderUid(ctx.db, orderUid);
@@ -367,9 +325,9 @@ describe("proposal store", () => {
 
 	it("applies settlement outcome (started)", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 
 		const result = await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 		expect("auditEvent" in result).toBe(true);
@@ -384,7 +342,7 @@ describe("proposal store", () => {
 	it("judges a settlement outcome against the committed status", async () => {
 		const txHash = `0x${"33".repeat(32)}` as Hex;
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const stale = await getProposal(id);
+		const stale = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, stale, "executing");
 
 		// `stale` still reads "active"; the row is already "executing".
@@ -405,7 +363,7 @@ describe("proposal store", () => {
 	it("charges a revert that arrives without a preceding settlementStarted", async () => {
 		const txHash = `0x${"44".repeat(32)}` as Hex;
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
-		const proposal = await getProposal(id);
+		const proposal = (await store.get(ctx.db, id))!;
 
 		const result = await store.applySettlementOutcome(ctx.db, proposal, {
 			kind: "reverted",
@@ -421,7 +379,7 @@ describe("proposal store", () => {
 
 	it("ignores an outcome illegal from the committed status", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "cancelled" }));
-		const proposal = await getProposal(id);
+		const proposal = (await store.get(ctx.db, id))!;
 
 		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "started" });
 
@@ -432,7 +390,7 @@ describe("proposal store", () => {
 
 	it("queues the non-settlement charge when an executing settlement is abandoned", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
-		const proposal = await getProposal(id);
+		const proposal = (await store.get(ctx.db, id))!;
 
 		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "abandoned" });
 
@@ -455,9 +413,9 @@ describe("proposal store", () => {
 	it("defers cancellation of executing proposal", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 
 		const result = await store.cancel(ctx.db, id, sub.subSolver);
@@ -471,9 +429,9 @@ describe("proposal store", () => {
 	it("deferred cancel is idempotent", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 
 		const r1 = await store.cancel(ctx.db, id, sub.subSolver);
@@ -485,15 +443,15 @@ describe("proposal store", () => {
 	it("abandoned with pendingCancellation transitions to cancelled", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 
 		// Set pending cancellation
 		await store.cancel(ctx.db, id, sub.subSolver);
 
-		const executing = await getProposal(id);
+		const executing = (await store.get(ctx.db, id))!;
 		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
 		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
 
@@ -505,12 +463,12 @@ describe("proposal store", () => {
 	it("abandoned without pendingCancellation transitions to active", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 
-		const executing = await getProposal(id);
+		const executing = (await store.get(ctx.db, id))!;
 		const result = await store.applySettlementOutcome(ctx.db, executing, { kind: "abandoned" });
 		expect("auditEvent" in result && result.insertedPenalty).toBe(true);
 
@@ -522,14 +480,14 @@ describe("proposal store", () => {
 	it("succeeded clears pendingCancellation", async () => {
 		const sub = sampleProposal();
 		const { id } = await store.insert(ctx.db, sub);
-		const p = await getProposal(id);
+		const p = (await store.get(ctx.db, id))!;
 		await store.transition(ctx.db, p, "active");
-		const active = await getProposal(id);
+		const active = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, active, { kind: "started" });
 
 		await store.cancel(ctx.db, id, sub.subSolver);
 
-		const executing = await getProposal(id);
+		const executing = (await store.get(ctx.db, id))!;
 		await store.applySettlementOutcome(ctx.db, executing, {
 			kind: "succeeded",
 			txHash: "0xabc123" as Hex,

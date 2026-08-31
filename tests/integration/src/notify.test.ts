@@ -88,6 +88,45 @@ describe("/notify", () => {
 		expect(updated?.status).toBe("settled");
 	});
 
+	it("success notification cancels the sub-solver's other live proposals for the order", async () => {
+		const id = await seedActiveProposal(304n);
+		const original = (await store.get(app.ctx.db, id))!;
+		const { id: _id, ...sibling } = original;
+		const { id: siblingId } = await store.insert(app.ctx.db, {
+			...sibling,
+			nonce: 305n,
+			status: "submitted",
+			pendingCancellation: false,
+		});
+		const { id: activeSiblingId } = await store.insert(app.ctx.db, {
+			...sibling,
+			nonce: 306n,
+			status: "active",
+			pendingCancellation: false,
+		});
+		await store.recordSolution(app.ctx.db, 104, 1, id);
+
+		await store.applySettlementOutcome(app.ctx.db, original, { kind: "started" });
+		await postNotify({
+			auctionId: "104",
+			solutionId: 1,
+			kind: "success",
+			transaction: `0x${"dd".repeat(32)}`,
+		});
+
+		expect((await store.get(app.ctx.db, id))?.status).toBe("settled");
+		expect((await store.get(app.ctx.db, siblingId))?.status).toBe("cancelled");
+		expect((await store.get(app.ctx.db, activeSiblingId))?.status).toBe("cancelled");
+		expect(
+			app.auditEvents.filter(
+				(event) =>
+					event.kind.type === "statusChanged" &&
+					(event.kind.proposalId === siblingId || event.kind.proposalId === activeSiblingId) &&
+					event.kind.to === "cancelled",
+			),
+		).toHaveLength(2);
+	});
+
 	it("revert notification transitions to settleFailed", async () => {
 		const id = await seedActiveProposal(301n);
 		await store.recordSolution(app.ctx.db, 101, 1, id);

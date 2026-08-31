@@ -79,6 +79,10 @@ function testRateLimits(overrides: TestAppOverrides) {
 		DATABASE_URL: "postgres://unused/e2e",
 		CHAIN_ID: String(CHAIN_ID),
 		TRAMPOLINE_FACTORY,
+		RPC_URL: "http://localhost:8545",
+		ESCROW_ADDRESS: "0x0000000000000000000000000000000000000001",
+		DEFAULT_GAS_PRICE: "1000000000",
+		OPERATOR_PRIVATE_KEY: `0x${"11".repeat(32)}`,
 	});
 
 	const limits = rateLimitsFromConfig(config, overrides.floorWei ?? 10n ** 16n);
@@ -215,7 +219,6 @@ export async function seedProposal(
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
-		supersededByProposalId: null,
 		...overrides,
 		orderUid,
 	};

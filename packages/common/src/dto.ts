@@ -69,7 +69,6 @@ export const Status = {
 	Penalized: "penalized",
 	SimFailed: "simFailed",
 	Cancelled: "cancelled",
-	Superseded: "superseded",
 } as const;
 
 export type Status = (typeof Status)[keyof typeof Status];
@@ -85,7 +84,6 @@ export const statusSchema = z.enum([
 	Status.Penalized,
 	Status.SimFailed,
 	Status.Cancelled,
-	Status.Superseded,
 ]);
 
 /**
@@ -111,6 +109,7 @@ export function isTerminalStatus(status: Status): boolean {
 
 export const RejectionReason = {
 	InsufficientEscrow: "InsufficientEscrow",
+	ExposureCapExceeded: "ExposureCapExceeded",
 	UnsupportedOrder: "UnsupportedOrder",
 	AmountMismatch: "AmountMismatch",
 	TokenMismatch: "TokenMismatch",
@@ -122,6 +121,7 @@ export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionRea
 
 export const rejectionReasonSchema = z.enum([
 	RejectionReason.InsufficientEscrow,
+	RejectionReason.ExposureCapExceeded,
 	RejectionReason.UnsupportedOrder,
 	RejectionReason.AmountMismatch,
 	RejectionReason.TokenMismatch,
