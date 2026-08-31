@@ -66,12 +66,13 @@ bake_byos_contracts() {
   output=$("$REPO_ROOT/offline-mode/scripts/byos/deploy-byos-contracts.sh" 2>&1)
   echo "$output"
 
-  # Parse addresses from the deploy script output
-  local escrow trampoline_factory
+  # Parse addresses and keys from the deploy script output
+  local escrow trampoline_factory operator_private_key
   escrow=$(echo "$output" | grep "^Escrow:" | tail -1 | awk '{print $2}')
   trampoline_factory=$(echo "$output" | grep "^TrampolineFactory:" | tail -1 | awk '{print $2}')
+  operator_private_key=$(echo "$output" | grep "^OperatorPrivateKey:" | tail -1 | awk '{print $2}')
 
-  if [ -z "$escrow" ] || [ -z "$trampoline_factory" ]; then
+  if [ -z "$escrow" ] || [ -z "$trampoline_factory" ] || [ -z "$operator_private_key" ]; then
     echo "Error: could not parse contract addresses from deploy output"
     exit 1
   fi
@@ -82,6 +83,7 @@ bake_byos_contracts() {
 # These addresses come from the baked Anvil state.
 ESCROW_ADDRESS=$escrow
 TRAMPOLINE_FACTORY=$trampoline_factory
+OPERATOR_PRIVATE_KEY=$operator_private_key
 ENVEOF
 
   echo ""

@@ -13,11 +13,13 @@
 		"build": "tsup",
 		"dev": "tsup --watch --onSuccess 'node dist/index.js'",
 		"start": "node dist/index.js",
+		"debit:resume": "node dist/resume-debit.js",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate"
 	},
 	"dependencies": {
 		"@byos/common": "workspace:*",
+		"@cowprotocol/cow-sdk": "^9.2.6",
 		"@hono/node-server": "^1.0.0",
 		"bullmq": "^5.0.0",
 		"dotenv": "^16.0.0",

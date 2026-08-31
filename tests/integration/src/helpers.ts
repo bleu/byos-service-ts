@@ -79,6 +79,10 @@ function testRateLimits(overrides: TestAppOverrides) {
 		DATABASE_URL: "postgres://unused/e2e",
 		CHAIN_ID: String(CHAIN_ID),
 		TRAMPOLINE_FACTORY,
+		RPC_URL: "http://localhost:8545",
+		ESCROW_ADDRESS: "0x0000000000000000000000000000000000000001",
+		DEFAULT_GAS_PRICE: "1000000000",
+		OPERATOR_PRIVATE_KEY: `0x${"11".repeat(32)}`,
 	});
 
 	const limits = rateLimitsFromConfig(config, overrides.floorWei ?? 10n ** 16n);
@@ -123,6 +127,8 @@ export interface ProposalOverrides {
 	interactions?: ContractInteraction[];
 }
 
+let submissionNonce = 0n;
+
 export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverrides) {
 	const orderUid = overrides?.orderUid ?? (`0x${"ab".repeat(56)}` as Hex);
 	const sellToken: Address = overrides?.sellToken ?? "0x1111111111111111111111111111111111111111";
@@ -132,7 +138,7 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	const quoteBuyAmount = overrides?.quoteBuyAmount ?? 990_000n;
 	const now = BigInt(Math.floor(Date.now() / 1000));
 	const validUntil = overrides?.validUntil ?? now + 240n;
-	const nonce = overrides?.nonce ?? 1n;
+	const nonce = overrides?.nonce ?? submissionNonce++;
 	const interactions: ContractInteraction[] = overrides?.interactions ?? [
 		{
 			target: "0x00000000000000000000000000000000000000dd" as Address,
@@ -184,6 +190,8 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 
 // --- Direct-insert seeding (the Rust tests' test_proposal fixture) ---
 
+let seededNonce = 0n;
+
 /** Inserts a proposal directly into the store, bypassing the HTTP layer, so
  * tests can seed any status/simulation state. Defaults mirror the Rust
  * test_proposal fixture: sell 1_000_000, buy 990_000, far-future expiry. */
@@ -203,7 +211,7 @@ export async function seedProposal(
 		interactions: [],
 		interactionsHash: `0x${"00".repeat(32)}` as Hex,
 		validUntil: 2n ** 40n,
-		nonce: 1n,
+		nonce: seededNonce++,
 		signature: "0x" as Hex,
 		status: "active",
 		rejectionReason: null,

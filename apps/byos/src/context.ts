@@ -1,17 +1,18 @@
 import { resolve } from "node:path";
-import { evmChainFor, minCollateralFor } from "@byos/common";
+import { evmChainFor, orderbookUrlFor, settlementAddressFor } from "@byos/common";
+import type { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
-import type { Address, Hex } from "viem";
+import type { Address, Chain, Hex, PublicClient, Transport } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { type Config, rateLimitsFromConfig } from "./config.js";
 import { createDb, type Db } from "./db/index.js";
 import type { AuditEvent } from "./domain/audit.js";
-import { type BalanceCache, unknownBalances } from "./domain/balance-cache.js";
+import type { BalanceCache } from "./domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "./domain/rate-limit.js";
-import { acceptAll, type ValidateProposal } from "./domain/validator.js";
+import type { ValidateProposal } from "./domain/validator.js";
 import { createRedisBalanceStore } from "./infra/balance-cache.js";
 import {
 	createEscrowBalanceReader,
@@ -31,6 +32,7 @@ import {
 } from "./infra/jobs/index.js";
 import { OrderbookClient } from "./infra/orderbook.js";
 import { createRedisRateLimiter } from "./infra/rate-limit.js";
+import * as store from "./infra/storage.js";
 
 export interface AppContext {
 	db: Db;
@@ -42,18 +44,29 @@ export interface AppContext {
 	 * MIN_COLLATERAL override. Feeds the validator threshold, the penalty
 	 * parameter c_l, and the request-path escrow floor gate. */
 	minCollateralWei: bigint;
+	/** Resolved TrampolineFactory address: the chain's default from
+	 * `trampolineFactoryFor`, or the TRAMPOLINE_FACTORY override. */
+	trampolineFactory: Address;
 	queues: Queues;
 	config: Config;
 	gasPriceRef: GasPriceRef;
 	validator: ValidateProposal;
-	operator: EscrowOperator | null;
+	operator: EscrowOperator;
 	rateLimiter: RateLimiter;
 	balances: BalanceCache;
 	rateLimits: { windowSecs: number; ipPerWindow: number; tier: TierParams; floorWei: bigint };
-	/** Null when no RPC is configured — nothing to refresh from. */
-	balanceRefresh: BalanceRefreshConfig | null;
+	balanceRefresh: BalanceRefreshConfig;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
+}
+
+/**
+ * Creates the one public client shared by validation, balance refresh, and
+ * settlement observation. A short collection window coalesces nearby reads
+ * without materially delaying the background work that issues them.
+ */
+export function createSharedPublicClient(chain: Chain, transport: Transport): PublicClient {
+	return createPublicClient({ chain, transport, batch: { multicall: { wait: 100 } } });
 }
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
@@ -96,10 +109,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// One resolution of the collateral floor, shared by everything that needs
 	// it, so the validator, the penalty loop and the floor gate cannot drift.
 	const chain = evmChainFor(config.CHAIN_ID);
-	const minCollateralWei =
-		config.MIN_COLLATERAL !== undefined
-			? BigInt(config.MIN_COLLATERAL)
-			: minCollateralFor(config.CHAIN_ID);
+	const minCollateralWei = BigInt(config.MIN_COLLATERAL);
 
 	if (minCollateralWei === 0n) {
 		// The negative set is what bounds the refresh population by capital
@@ -118,84 +128,80 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// it can never reject a proposal the validator accepts.
 	const rateLimits = rateLimitsFromConfig(config, minCollateralWei);
 
-	// Blockchain (optional — depends on RPC_URL)
-	let validator: ValidateProposal = acceptAll;
-	let operator: EscrowOperator | null = null;
-	let balances: BalanceCache = unknownBalances;
-	let balanceRefresh: BalanceRefreshConfig | null = null;
+	// TrampolineFactory is needed for EIP-712 domain construction.
+	// Required in config, so always present here.
+	const trampolineFactory = config.TRAMPOLINE_FACTORY as Address;
 
-	if (config.RPC_URL) {
-		const transport = http(config.RPC_URL);
-		// The chain is what lets viem resolve Multicall3 for the batched
-		// balance reads; without it every multicall throws before it reaches
-		// the RPC.
-		const publicClient = createPublicClient({ chain, transport });
+	// Blockchain
+	const transport = http(config.RPC_URL);
+	// The chain is what lets viem resolve Multicall3 for the batched
+	// balance reads; without it every multicall throws before it reaches
+	// the RPC.
+	const publicClient = createSharedPublicClient(chain, transport);
 
-		// Fail-fast RPC check
-		try {
-			await publicClient.getBlockNumber();
-		} catch (e) {
-			throw new Error(`RPC unreachable at ${config.RPC_URL}: ${e}`);
-		}
-		logger.info("rpc connected");
-
-		// The config schema requires these alongside RPC_URL, so the casts
-		// cannot see undefined — same guarantee clap's requires_all gives Rust.
-		const escrowAddress = config.ESCROW_ADDRESS as Address;
-
-		// Escrow validator
-		const escrowValidator = new EscrowValidator(
-			publicClient,
-			escrowAddress,
-			minCollateralWei,
-			gasPriceRef,
-		);
-
-		// Orderbook client
-		const orderbook = new OrderbookClient(config.ORDERBOOK_URL as string);
-
-		// Simulation validator
-		const simulationValidator = new SimulationValidator(
-			publicClient,
-			orderbook,
-			config.SETTLEMENT_ADDRESS as Address,
-			escrowAddress,
-			config.TRAMPOLINE_FACTORY as Address,
-			gasPriceRef,
-			BigInt(config.MIN_PROPOSAL_SCORE),
-		);
-
-		validator = new ProposalValidator(escrowValidator, simulationValidator);
-
-		// Request-path balance cache and the job that keeps it fresh.
-		const balanceStore = createRedisBalanceStore(requestRedis, {
-			negativeTtlSecs: config.BALANCE_NEGATIVE_TTL_SECS,
-			balanceTtlSecs: config.BALANCE_EVICTION_SECS,
-		});
-		balances = balanceStore;
-		balanceRefresh = {
-			store: balanceStore,
-			fetchBalances: createEscrowBalanceReader(publicClient, escrowAddress),
-			floorWei: rateLimits.floorWei,
-			evictionSecs: config.BALANCE_EVICTION_SECS,
-			maxActive: config.BALANCE_ACTIVE_SET_MAX,
-			batchSize: config.BALANCE_REFRESH_BATCH_SIZE,
-			logger: logger.child({ worker: "balance-refresh" }),
-		};
-
-		// Operator (optional — depends on OPERATOR_PRIVATE_KEY)
-		if (config.OPERATOR_PRIVATE_KEY) {
-			const account = privateKeyToAccount(config.OPERATOR_PRIVATE_KEY as Hex);
-			const walletClient = createWalletClient({ account, chain, transport });
-			operator = new EscrowOperator(walletClient, publicClient, escrowAddress);
-			logger.info("escrow operator configured");
-		} else {
-			logger.warn("no OPERATOR_PRIVATE_KEY — penalty loop disabled");
-		}
-	} else {
-		logger.warn("no RPC_URL — validation disabled, using AcceptAll");
-		logger.warn("no RPC_URL — escrow floor gate disabled, every signer at the lowest tier");
+	// Fail-fast RPC check
+	try {
+		await publicClient.getBlockNumber();
+	} catch (e) {
+		throw new Error(`RPC unreachable at ${config.RPC_URL}: ${e}`);
 	}
+	logger.info("rpc connected");
+
+	const escrowAddress = config.ESCROW_ADDRESS as Address;
+
+	const settlementAddress: Address =
+		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
+
+	// Escrow validator
+	const escrowValidator = new EscrowValidator(
+		publicClient,
+		escrowAddress,
+		minCollateralWei,
+		gasPriceRef,
+		(subSolver, excludeId) => store.inflightGasUsedBySubSolver(db, subSolver, excludeId),
+	);
+
+	// Orderbook client. Resolve the base URL explicitly so that local chains
+	// (e.g. foundry/31337) get the LOCAL_ORDERBOOK_URL fallback from
+	// orderbookUrlFor rather than an undefined SDK base URL.
+	// ORDERBOOK_URL overrides it (barn/staging).
+	const orderbookUrl = config.ORDERBOOK_URL ?? orderbookUrlFor(config.CHAIN_ID);
+	const orderbook = new OrderbookClient(config.CHAIN_ID as SupportedChainId, orderbookUrl);
+
+	// Simulation validator
+	const simulationValidator = new SimulationValidator(
+		publicClient,
+		orderbook,
+		settlementAddress,
+		escrowAddress,
+		trampolineFactory,
+		gasPriceRef,
+		BigInt(config.MIN_PROPOSAL_SCORE),
+	);
+
+	const validator = new ProposalValidator(escrowValidator, simulationValidator);
+
+	// Request-path balance cache and the job that keeps it fresh.
+	const balanceStore = createRedisBalanceStore(requestRedis, {
+		negativeTtlSecs: config.BALANCE_NEGATIVE_TTL_SECS,
+		balanceTtlSecs: config.BALANCE_EVICTION_SECS,
+	});
+	const balances: BalanceCache = balanceStore;
+	const balanceRefresh: BalanceRefreshConfig = {
+		store: balanceStore,
+		fetchBalances: createEscrowBalanceReader(publicClient, escrowAddress),
+		floorWei: rateLimits.floorWei,
+		evictionSecs: config.BALANCE_EVICTION_SECS,
+		maxActive: config.BALANCE_ACTIVE_SET_MAX,
+		batchSize: config.BALANCE_REFRESH_BATCH_SIZE,
+		logger: logger.child({ worker: "balance-refresh" }),
+	};
+
+	// Operator
+	const account = privateKeyToAccount(config.OPERATOR_PRIVATE_KEY as Hex);
+	const walletClient = createWalletClient({ account, chain, transport });
+	const operator = new EscrowOperator(walletClient, publicClient, escrowAddress);
+	logger.info("escrow operator configured");
 
 	// Setup job schedulers
 	await setupJobSchedulers(queues, {
@@ -211,6 +217,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		redis,
 		requestRedis,
 		minCollateralWei,
+		trampolineFactory,
 		queues,
 		config,
 		gasPriceRef,

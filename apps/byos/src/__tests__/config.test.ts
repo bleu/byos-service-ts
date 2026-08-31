@@ -5,25 +5,17 @@ const base = {
 	DATABASE_URL: "postgres://localhost/byos",
 	CHAIN_ID: "1",
 	TRAMPOLINE_FACTORY: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7",
-};
-
-const chain = {
 	RPC_URL: "http://localhost:8545",
-	ORDERBOOK_URL: "http://localhost:8080",
 	ESCROW_ADDRESS: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1",
-	SETTLEMENT_ADDRESS: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-	MIN_COLLATERAL: "10000000000000000",
 	DEFAULT_GAS_PRICE: "1000000000",
+	OPERATOR_PRIVATE_KEY: `0x${"11".repeat(32)}`,
 };
 
 describe("parseConfig", () => {
-	it("parses a minimal config without chain connectivity", () => {
-		expect(parseConfig(base).RPC_URL).toBeUndefined();
-	});
-
-	it("parses a full chain-connected config", () => {
-		const config = parseConfig({ ...base, ...chain });
-		expect(config.MIN_COLLATERAL).toBe("10000000000000000");
+	it("parses a minimal config with all required fields", () => {
+		const config = parseConfig(base);
+		expect(config.RPC_URL).toBe(base.RPC_URL);
+		expect(config.ESCROW_ADDRESS).toBe(base.ESCROW_ADDRESS);
 	});
 
 	it("accepts every EVM chain CoW settles on", () => {
@@ -82,38 +74,34 @@ describe("parseConfig", () => {
 		).toThrow(/RATE_MIN_PER_WINDOW/);
 	});
 
-	it("treats MIN_COLLATERAL as optional, since the chain supplies a default", () => {
-		const { MIN_COLLATERAL: _omitted, ...withoutFloor } = chain;
-		expect(parseConfig({ ...base, ...withoutFloor }).MIN_COLLATERAL).toBeUndefined();
+	it("defaults MIN_COLLATERAL to 10^16 wei when not set", () => {
+		// The default is a placeholder (COW-1265) — identical to what the old
+		// per-chain table carried for every EVM chain. Operators override it via
+		// MIN_COLLATERAL when deploying.
+		expect(parseConfig(base).MIN_COLLATERAL).toBe("10000000000000000");
 	});
 
 	it("rejects a MIN_COLLATERAL that is not a decimal wei amount", () => {
-		expect(() => parseConfig({ ...base, ...chain, MIN_COLLATERAL: "0.5" })).toThrow(
-			/MIN_COLLATERAL/,
-		);
+		expect(() => parseConfig({ ...base, MIN_COLLATERAL: "0.5" })).toThrow(/MIN_COLLATERAL/);
 	});
 
-	it("rejects RPC_URL without its companion settings", () => {
-		expect(() => parseConfig({ ...base, RPC_URL: chain.RPC_URL })).toThrow(
-			/ORDERBOOK_URL.*required when RPC_URL is set/s,
-		);
+	it("rejects a missing RPC_URL", () => {
+		const { RPC_URL: _dropped, ...partial } = base;
+		expect(() => parseConfig(partial)).toThrow(/RPC_URL/);
 	});
 
-	it("rejects RPC_URL when a single companion is missing", () => {
-		const { ESCROW_ADDRESS: _dropped, ...partial } = chain;
-		expect(() => parseConfig({ ...base, ...partial })).toThrow(
-			/ESCROW_ADDRESS: required when RPC_URL is set/,
-		);
+	it("rejects a missing ESCROW_ADDRESS", () => {
+		const { ESCROW_ADDRESS: _dropped, ...partial } = base;
+		expect(() => parseConfig(partial)).toThrow(/ESCROW_ADDRESS/);
 	});
 
-	it("rejects an operator key without RPC_URL", () => {
-		expect(() => parseConfig({ ...base, OPERATOR_PRIVATE_KEY: `0x${"11".repeat(32)}` })).toThrow(
-			/OPERATOR_PRIVATE_KEY: requires RPC_URL/,
-		);
+	it("rejects a missing OPERATOR_PRIVATE_KEY", () => {
+		const { OPERATOR_PRIVATE_KEY: _dropped, ...partial } = base;
+		expect(() => parseConfig(partial)).toThrow(/OPERATOR_PRIVATE_KEY/);
 	});
 
 	it("rejects a malformed escrow address", () => {
-		expect(() => parseConfig({ ...base, ...chain, ESCROW_ADDRESS: "not-an-address" })).toThrow(
+		expect(() => parseConfig({ ...base, ESCROW_ADDRESS: "not-an-address" })).toThrow(
 			/ESCROW_ADDRESS/,
 		);
 	});

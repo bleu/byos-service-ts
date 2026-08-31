@@ -1,8 +1,15 @@
 import type { RejectionReason, Status } from "@byos/common";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
-import { bufferEntries, penalties, proposals, solutions } from "../db/schema.js";
+import {
+	bufferEntries,
+	debitOperations,
+	penalties,
+	proposals,
+	serviceState,
+	solutions,
+} from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
@@ -22,6 +29,229 @@ export type StoreError =
 
 export function shouldRetry(error: StoreError): boolean {
 	return error.kind === "database";
+}
+
+// --- Shared replica state ---
+
+/** Publishes the valid auction price that validators use on every replica. */
+export async function publishAuctionGasPrice(db: Db, gasPrice: bigint): Promise<void> {
+	await db
+		.insert(serviceState)
+		.values({
+			id: 1,
+			latestAuctionGasPrice: gasPrice.toString(),
+			latestAuctionGasPriceAt: sql`now()`,
+		})
+		.onConflictDoUpdate({
+			target: serviceState.id,
+			set: {
+				latestAuctionGasPrice: gasPrice.toString(),
+				latestAuctionGasPriceAt: sql`now()`,
+			},
+		});
+}
+
+/** Reads the fleet-wide auction price, retaining the configured fallback before any auction arrives. */
+export async function latestAuctionGasPrice(db: Db, fallback: bigint): Promise<bigint> {
+	const [state] = await db
+		.select({ gasPrice: serviceState.latestAuctionGasPrice })
+		.from(serviceState)
+		.where(eq(serviceState.id, 1));
+
+	return state?.gasPrice === null || state?.gasPrice === undefined
+		? fallback
+		: BigInt(state.gasPrice);
+}
+
+export interface DebitOperation {
+	id: number;
+	sourceKind: string;
+	sourceId: string;
+	subSolver: Address;
+	amount: bigint;
+	reason: Hex;
+	status: string;
+	rawTransaction: Hex | null;
+	transactionHash: Hex | null;
+}
+
+export type DebitOperationInput = Pick<
+	DebitOperation,
+	"sourceKind" | "sourceId" | "subSolver" | "amount" | "reason"
+>;
+
+function rowToDebitOperation(row: typeof debitOperations.$inferSelect): DebitOperation {
+	return {
+		id: row.id,
+		sourceKind: row.sourceKind,
+		sourceId: row.sourceId,
+		subSolver: row.subSolver as Address,
+		amount: BigInt(row.amount),
+		reason: row.reason as Hex,
+		status: row.status,
+		rawTransaction: (row.rawTransaction as Hex) ?? null,
+		transactionHash: (row.transactionHash as Hex) ?? null,
+	};
+}
+
+/** Stores the only transaction bytes this operation may ever broadcast. */
+export async function persistSignedDebit(
+	db: Db,
+	id: number,
+	owner: string,
+	rawTransaction: Hex,
+	transactionHash: Hex,
+): Promise<boolean> {
+	const [row] = await db
+		.update(debitOperations)
+		.set({
+			rawTransaction: rawTransaction.toLowerCase(),
+			transactionHash: transactionHash.toLowerCase(),
+			status: "broadcasting",
+			updatedAt: sql`now()`,
+		})
+		.where(
+			and(
+				eq(debitOperations.id, id),
+				eq(debitOperations.leaseOwner, owner),
+				sql`${debitOperations.rawTransaction} IS NULL`,
+			),
+		)
+		.returning({ id: debitOperations.id });
+	return row !== undefined;
+}
+
+export async function completeDebitOperation(db: Db, id: number, owner: string): Promise<boolean> {
+	const [row] = await db
+		.update(debitOperations)
+		.set({
+			status: "completed",
+			leaseOwner: null,
+			leaseExpiresAt: null,
+			nextRetryAt: null,
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(debitOperations.id, id), eq(debitOperations.leaseOwner, owner)))
+		.returning({ id: debitOperations.id });
+	return row !== undefined;
+}
+
+/** Creates exactly one durable operation for a chargeable event. */
+export async function createDebitOperation(
+	db: Db,
+	operation: DebitOperationInput,
+): Promise<DebitOperation> {
+	await db
+		.insert(debitOperations)
+		.values({
+			sourceKind: operation.sourceKind,
+			sourceId: operation.sourceId,
+			subSolver: operation.subSolver.toLowerCase(),
+			amount: operation.amount.toString(),
+			reason: operation.reason.toLowerCase(),
+		})
+		.onConflictDoNothing();
+	const [row] = await db
+		.select()
+		.from(debitOperations)
+		.where(
+			and(
+				eq(debitOperations.sourceKind, operation.sourceKind),
+				eq(debitOperations.sourceId, operation.sourceId),
+			),
+		);
+	if (!row) throw new Error("debit operation disappeared after creation");
+	return rowToDebitOperation(row);
+}
+
+/** Atomically grants an unowned or expired lease to one replica. */
+export async function claimDebitOperation(
+	db: Db,
+	id: number,
+	owner: string,
+	leaseSecs: number,
+): Promise<DebitOperation | null> {
+	const [row] = await db
+		.update(debitOperations)
+		.set({
+			leaseOwner: owner,
+			leaseExpiresAt: sql`now() + make_interval(secs => ${leaseSecs})`,
+			updatedAt: sql`now()`,
+		})
+		.where(
+			and(
+				eq(debitOperations.id, id),
+				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+				or(
+					sql`${debitOperations.leaseExpiresAt} IS NULL`,
+					sql`${debitOperations.leaseExpiresAt} < now()`,
+				),
+			),
+		)
+		.returning();
+	return row ? rowToDebitOperation(row) : null;
+}
+
+/** Records a recoverable broadcast/lookup failure against the operation lease. */
+export async function recordDebitFailure(
+	db: Db,
+	id: number,
+	owner: string,
+	error: string,
+): Promise<void> {
+	await db
+		.update(debitOperations)
+		.set({
+			attemptCount: sql`${debitOperations.attemptCount} + 1`,
+			lastError: error,
+			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'retrying' END`,
+			nextRetryAt: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN NULL ELSE now() END`,
+			leaseOwner: null,
+			leaseExpiresAt: null,
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(debitOperations.id, id), eq(debitOperations.leaseOwner, owner)))
+		.returning({ attemptCount: debitOperations.attemptCount });
+}
+
+export async function debitOperationStatus(db: Db, id: number): Promise<string | null> {
+	const [operation] = await db
+		.select({ status: debitOperations.status })
+		.from(debitOperations)
+		.where(eq(debitOperations.id, id));
+	return operation?.status ?? null;
+}
+
+/** Returns a reconciliation-paused operation to the durable retry loop. */
+export async function resumeDebitOperation(db: Db, id: number): Promise<boolean> {
+	const [operation] = await db
+		.update(debitOperations)
+		.set({
+			status: "retrying",
+			attemptCount: 0,
+			lastError: null,
+			nextRetryAt: sql`now()`,
+			leaseOwner: null,
+			leaseExpiresAt: null,
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(debitOperations.id, id), eq(debitOperations.status, "needs_reconciliation")))
+		.returning({ id: debitOperations.id });
+	return operation !== undefined;
+}
+
+/** Operations needing automatic recovery; reconciliation-paused rows stay untouched. */
+export async function openDebitOperations(db: Db, sourceKind: string): Promise<DebitOperation[]> {
+	const rows = await db
+		.select()
+		.from(debitOperations)
+		.where(
+			and(
+				eq(debitOperations.sourceKind, sourceKind),
+				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+			),
+		);
+	return rows.map(rowToDebitOperation);
 }
 
 // --- Row Codec ---
@@ -86,8 +316,55 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 	return interactions.map((i) => ({
 		target: i.target.toLowerCase(),
 		value: i.value.toString(),
-		callData: i.callData,
+		callData: i.callData.toLowerCase(),
 	}));
+}
+
+function proposalValues(proposal: Omit<Proposal, "id">) {
+	return {
+		subSolver: proposal.subSolver.toLowerCase(),
+		orderUid: proposal.orderUid.toLowerCase(),
+		orderUidHash: proposal.orderUidHash.toLowerCase(),
+		sellAmount: proposal.sellAmount.toString(),
+		minBuyAmount: proposal.minBuyAmount.toString(),
+		quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+		sellToken: proposal.sellToken.toLowerCase(),
+		buyToken: proposal.buyToken.toLowerCase(),
+		interactions: interactionsToJson(proposal.interactions),
+		interactionsHash: proposal.interactionsHash.toLowerCase(),
+		validUntil: proposal.validUntil.toString(),
+		nonce: proposal.nonce.toString(),
+		signature: proposal.signature.toLowerCase(),
+		status: proposal.status,
+		rejectionReason: proposal.rejectionReason,
+		gasUsed: proposal.gasUsed != null ? Number(proposal.gasUsed) : null,
+		trampoline: proposal.trampoline?.toLowerCase() ?? null,
+		settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
+		penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
+	};
+}
+
+/**
+ * Canonical fingerprint of every field committed by the proposal signature.
+ * It is deliberately derived rather than persisted so replay checks cannot
+ * drift from the actual signed payload as the row shape evolves.
+ */
+export function signedProposalFingerprint(proposal: Omit<Proposal, "id"> | Proposal): string {
+	return JSON.stringify({
+		subSolver: proposal.subSolver.toLowerCase(),
+		orderUid: proposal.orderUid.toLowerCase(),
+		orderUidHash: proposal.orderUidHash.toLowerCase(),
+		sellToken: proposal.sellToken.toLowerCase(),
+		buyToken: proposal.buyToken.toLowerCase(),
+		sellAmount: proposal.sellAmount.toString(),
+		minBuyAmount: proposal.minBuyAmount.toString(),
+		quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+		interactions: interactionsToJson(proposal.interactions),
+		interactionsHash: proposal.interactionsHash.toLowerCase(),
+		validUntil: proposal.validUntil.toString(),
+		nonce: proposal.nonce.toString(),
+		signature: proposal.signature.toLowerCase(),
+	});
 }
 
 // --- Writes ---
@@ -98,27 +375,7 @@ export async function insert(
 ): Promise<{ id: number; auditEvent: AuditEvent }> {
 	const [row] = await db
 		.insert(proposals)
-		.values({
-			subSolver: proposal.subSolver.toLowerCase(),
-			orderUid: proposal.orderUid.toLowerCase(),
-			orderUidHash: proposal.orderUidHash.toLowerCase(),
-			sellAmount: proposal.sellAmount.toString(),
-			minBuyAmount: proposal.minBuyAmount.toString(),
-			quoteBuyAmount: proposal.quoteBuyAmount.toString(),
-			sellToken: proposal.sellToken.toLowerCase(),
-			buyToken: proposal.buyToken.toLowerCase(),
-			interactions: interactionsToJson(proposal.interactions),
-			interactionsHash: proposal.interactionsHash.toLowerCase(),
-			validUntil: proposal.validUntil.toString(),
-			nonce: proposal.nonce.toString(),
-			signature: proposal.signature,
-			status: proposal.status,
-			rejectionReason: proposal.rejectionReason,
-			gasUsed: proposal.gasUsed != null ? Number(proposal.gasUsed) : null,
-			trampoline: proposal.trampoline?.toLowerCase() ?? null,
-			settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
-			penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
-		})
+		.values(proposalValues(proposal))
 		.returning({ id: proposals.id });
 
 	// INSERT ... RETURNING always returns exactly one row
@@ -132,6 +389,49 @@ export async function insert(
 	};
 
 	return { id, auditEvent };
+}
+
+/**
+ * Atomically claims `(subSolver, nonce)`. A losing concurrent writer receives
+ * the durable row to classify as an exact replay or nonce conflict.
+ */
+export async function insertIfUnused(
+	db: Db,
+	proposal: Omit<Proposal, "id">,
+): Promise<{ id: number; auditEvent: AuditEvent } | { existing: Proposal }> {
+	const rows = await db
+		.insert(proposals)
+		.values(proposalValues(proposal))
+		.onConflictDoNothing({ target: [proposals.subSolver, proposals.nonce] })
+		.returning({ id: proposals.id });
+	const row = rows[0];
+	if (!row) {
+		const existing = await findBySubSolverAndNonce(db, proposal.subSolver, proposal.nonce);
+		if (!existing) throw new Error("nonce conflict returned no proposal");
+		return { existing };
+	}
+	const fullProposal: Proposal = { ...proposal, id: row.id };
+	return {
+		id: row.id,
+		auditEvent: { occurredAt: new Date(), kind: { type: "received", proposal: fullProposal } },
+	};
+}
+
+/** Returns the proposal that first consumed a nonce for a sub-solver. */
+export async function findBySubSolverAndNonce(
+	db: Db,
+	subSolver: Address,
+	nonce: bigint,
+): Promise<Proposal | null> {
+	const [row] = await db
+		.select()
+		.from(proposals)
+		.where(
+			and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.nonce, nonce.toString())),
+		)
+		.limit(1);
+
+	return row ? rowToProposal(row) : null;
 }
 
 export async function transition(
@@ -175,9 +475,31 @@ export async function resolveVerdict(
 	db: Db,
 	id: number,
 	verdict: Verdict,
-): Promise<{ status: Status; auditEvent: AuditEvent | null } | StoreError> {
+): Promise<
+	| { status: Status; auditEvent: AuditEvent | null; replacementAuditEvents: AuditEvent[] }
+	| StoreError
+> {
 	// Use raw SQL for SELECT ... FOR UPDATE inside a transaction
 	const result = await db.transaction(async (tx) => {
+		const [identity] = await tx
+			.select({
+				subSolver: proposals.subSolver,
+				orderUid: proposals.orderUid,
+			})
+			.from(proposals)
+			.where(eq(proposals.id, id));
+
+		if (!identity) {
+			return { kind: "notFound" as const, id };
+		}
+		// Every activation for a `(subSolver, orderUid)` group takes the same
+		// transaction-scoped advisory lock before it acquires row locks. Locking
+		// each proposal row first can deadlock two validators that start on
+		// different rows of one replacement group.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${identity.subSolver} || ':' || ${identity.orderUid})::bigint)`,
+		);
+
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
@@ -188,9 +510,7 @@ export async function resolveVerdict(
 			.where(eq(proposals.id, id))
 			.for("update");
 
-		if (!locked) {
-			return { kind: "notFound" as const, id };
-		}
+		if (!locked) return { kind: "notFound" as const, id };
 
 		// Decided under the lock, not from the caller's snapshot: a cancellation
 		// that landed while the validator was simulating must win, or the verdict
@@ -199,6 +519,17 @@ export async function resolveVerdict(
 		if (from !== "submitted" && from !== "active") {
 			return { kind: "staleTransition" as const, id, expected: "submitted|active", actual: from };
 		}
+
+		// Lock the complete replacement group before deciding whether this is
+		// still the newest eligible proposal. This prevents a slow validator for
+		// an older submission from reactivating it after a newer route won.
+		const group = await tx
+			.select({ id: proposals.id, status: proposals.status })
+			.from(proposals)
+			.where(
+				and(eq(proposals.subSolver, locked.subSolver), eq(proposals.orderUid, locked.orderUid)),
+			)
+			.for("update");
 
 		let toStatus: Status;
 		let rejectionReason: RejectionReason | null = null;
@@ -209,6 +540,19 @@ export async function resolveVerdict(
 
 		switch (verdict.kind) {
 			case "accept":
+				if (
+					group.some(
+						(proposal) =>
+							proposal.id > id && (proposal.status === "submitted" || proposal.status === "active"),
+					)
+				) {
+					return {
+						kind: "staleTransition" as const,
+						id,
+						expected: "newest submitted|active",
+						actual: from,
+					};
+				}
 				toStatus = "active";
 				if (verdict.simulation) {
 					gasUsed = Number(verdict.simulation.gasUsed);
@@ -241,6 +585,45 @@ export async function resolveVerdict(
 			})
 			.where(eq(proposals.id, id));
 
+		if (verdict.kind === "accept") {
+			await tx
+				.update(proposals)
+				.set({
+					status: "cancelled" as Status,
+					statusChangedAt: sql`now()`,
+				})
+				.where(
+					and(
+						eq(proposals.subSolver, locked.subSolver),
+						eq(proposals.orderUid, locked.orderUid),
+						sql`${proposals.id} < ${id}`,
+						inArray(proposals.status, ["submitted", "active"]),
+					),
+				);
+		}
+		const replacementAuditEvents =
+			verdict.kind === "accept"
+				? group
+						.filter(
+							(proposal) =>
+								proposal.id < id &&
+								(proposal.status === "submitted" || proposal.status === "active"),
+						)
+						.map((proposal) => ({
+							occurredAt: new Date(),
+							kind: {
+								type: "statusChanged" as const,
+								proposalId: proposal.id,
+								subSolver: locked.subSolver as Address,
+								orderUid: locked.orderUid,
+								from: proposal.status as Status,
+								to: "cancelled" as Status,
+								rejectionReason: null,
+								settlementTxHash: null,
+							},
+						}))
+				: [];
+
 		const auditEvent: AuditEvent | null = statusChanged
 			? {
 					occurredAt: new Date(),
@@ -257,7 +640,7 @@ export async function resolveVerdict(
 				}
 			: null;
 
-		return { status: toStatus, auditEvent };
+		return { status: toStatus, auditEvent, replacementAuditEvents };
 	});
 
 	return result;
@@ -340,12 +723,23 @@ export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
-): Promise<{ auditEvent: AuditEvent | null; insertedPenalty: boolean } | StoreError> {
+): Promise<
+	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
+	| StoreError
+> {
 	const result = await db.transaction(async (tx) => {
+		// Settlement success and validation both change eligibility for the same
+		// replacement group, so they must serialize on the same advisory lock.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${proposal.subSolver.toLowerCase()} || ':' || ${proposal.orderUid.toLowerCase()})::bigint)`,
+		);
+
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
 				pendingCancellation: proposals.pendingCancellation,
+				subSolver: proposals.subSolver,
+				orderUid: proposals.orderUid,
 			})
 			.from(proposals)
 			.where(eq(proposals.id, proposal.id))
@@ -385,7 +779,7 @@ export async function applySettlementOutcome(
 		}
 
 		if (!toStatus) {
-			return { auditEvent: null, insertedPenalty: false };
+			return { auditEvent: null, cancelledAuditEvents: [], insertedPenalty: false };
 		}
 
 		await tx
@@ -406,6 +800,34 @@ export async function applySettlementOutcome(
 			});
 		}
 
+		const cancelled =
+			outcome.kind === "succeeded"
+				? await tx
+						.select({ id: proposals.id, status: proposals.status })
+						.from(proposals)
+						.where(
+							and(
+								eq(proposals.subSolver, locked.subSolver),
+								eq(proposals.orderUid, locked.orderUid),
+								sql`${proposals.id} <> ${proposal.id}`,
+								inArray(proposals.status, ["submitted", "active"]),
+							),
+						)
+						.for("update")
+				: [];
+
+		if (cancelled.length > 0) {
+			await tx
+				.update(proposals)
+				.set({ status: "cancelled" as Status, statusChangedAt: sql`now()` })
+				.where(
+					inArray(
+						proposals.id,
+						cancelled.map((sibling) => sibling.id),
+					),
+				);
+		}
+
 		const auditEvent: AuditEvent = {
 			occurredAt: new Date(),
 			kind: {
@@ -420,7 +842,23 @@ export async function applySettlementOutcome(
 			},
 		};
 
-		return { auditEvent, insertedPenalty: insertPenalty };
+		return {
+			auditEvent,
+			cancelledAuditEvents: cancelled.map((sibling) => ({
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged" as const,
+					proposalId: sibling.id,
+					subSolver: locked.subSolver as Address,
+					orderUid: locked.orderUid,
+					from: sibling.status as Status,
+					to: "cancelled" as Status,
+					rejectionReason: null,
+					settlementTxHash: null,
+				},
+			})),
+			insertedPenalty: insertPenalty,
+		};
 	});
 
 	return result;
@@ -474,16 +912,6 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 		sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
 	);
 
-	const released = await db
-		.update(proposals)
-		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
-		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
-		.returning({
-			id: proposals.id,
-			subSolver: proposals.subSolver,
-			orderUid: proposals.orderUid,
-		});
-
 	const cancelled = await db
 		.update(proposals)
 		.set({
@@ -492,6 +920,16 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 			statusChangedAt: sql`now()`,
 		})
 		.where(and(staleCondition, eq(proposals.pendingCancellation, true)))
+		.returning({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		});
+
+	const released = await db
+		.update(proposals)
+		.set({ status: "active" as Status, statusChangedAt: sql`now()` })
+		.where(and(staleCondition, eq(proposals.pendingCancellation, false)))
 		.returning({
 			id: proposals.id,
 			subSolver: proposals.subSolver,
@@ -677,6 +1115,35 @@ export async function listBySubSolver(db: Db, subSolver: Address): Promise<Propo
 		.orderBy(proposals.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
+}
+
+/**
+ * Returns the gas used for all proposals of a sub-solver that are in-flight
+ * (`submitted`, `active`, or `executing`), excluding one proposal by id (the
+ * one being validated). Used by EscrowValidator to compute cumulative exposure.
+ *
+ * `submitted` proposals have not been simulated yet, so their `gasUsed` is
+ * null — they contribute 0 gas to the exposure (minCollateral only).
+ * `active` proposals have been simulated and carry a real gas estimate.
+ * `executing` proposals may or may not have a gas estimate; same rule applies.
+ */
+export async function inflightGasUsedBySubSolver(
+	db: Db,
+	subSolver: Address,
+	excludeId: number,
+): Promise<(bigint | null)[]> {
+	const rows = await db
+		.select({ gasUsed: proposals.gasUsed })
+		.from(proposals)
+		.where(
+			and(
+				eq(proposals.subSolver, subSolver.toLowerCase()),
+				inArray(proposals.status, ["submitted", "active", "executing"]),
+				sql`${proposals.id} != ${excludeId}`,
+			),
+		);
+
+	return rows.map((r) => (r.gasUsed != null ? BigInt(r.gasUsed) : null));
 }
 
 export async function activeByOrderUids(
@@ -865,12 +1332,21 @@ export async function unclearedBufferEntries(db: Db, subSolver: Address): Promis
  * In-flight entries are excluded from balance computation, preventing double-debit
  * if the on-chain debit succeeds but the subsequent DB update fails.
  */
-export async function markBufferEntriesInFlight(db: Db, subSolver: Address): Promise<number> {
+export async function markBufferEntriesInFlight(
+	db: Db,
+	subSolver: Address,
+	entryIds?: number[],
+): Promise<number> {
+	if (entryIds?.length === 0) return 0;
 	const result = await db
 		.update(bufferEntries)
 		.set({ cleared: true, clearTxHash: null })
 		.where(
-			and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+			and(
+				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+				eq(bufferEntries.cleared, false),
+				...(entryIds ? [inArray(bufferEntries.id, entryIds)] : []),
+			),
 		)
 		.returning({ id: bufferEntries.id });
 	return result.length;
@@ -880,8 +1356,10 @@ export async function markBufferEntriesInFlight(db: Db, subSolver: Address): Pro
 export async function finalizeBufferEntries(
 	db: Db,
 	subSolver: Address,
+	entryIds: number[],
 	clearTxHash: Hex,
 ): Promise<number> {
+	if (entryIds.length === 0) return 0;
 	const result = await db
 		.update(bufferEntries)
 		.set({ clearTxHash: clearTxHash.toLowerCase() })
@@ -889,6 +1367,7 @@ export async function finalizeBufferEntries(
 			and(
 				eq(bufferEntries.subSolver, subSolver.toLowerCase()),
 				eq(bufferEntries.cleared, true),
+				inArray(bufferEntries.id, entryIds),
 				sql`clear_tx_hash IS NULL`,
 			),
 		)

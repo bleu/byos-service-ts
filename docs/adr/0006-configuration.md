@@ -26,8 +26,8 @@ Secrets (`DATABASE_URL`, `RPC_URL`, `OPERATOR_PRIVATE_KEY`, `SOLVE_BEARER_TOKEN`
 
 `dotenv` loads `.env` files in development. The `.env.example` file documents all variables with defaults.
 
-### Conditional groups
+### Required fields
 
-When `RPC_URL` is set, several related variables become required (`ESCROW_ADDRESS`, `SETTLEMENT_ADDRESS`, `ORDERBOOK_URL`, `MIN_COLLATERAL`, `DEFAULT_GAS_PRICE`). Without `RPC_URL`, the service runs with `AcceptAll` validation (useful for development).
+`RPC_URL`, `ESCROW_ADDRESS`, `DEFAULT_GAS_PRICE`, and `OPERATOR_PRIVATE_KEY` are all required. BYOS cannot validate proposals without an RPC connection, and the penalty loop requires an operator key. Omitting any of these fails startup with a clear error.
 
-Similarly, `OPERATOR_PRIVATE_KEY` is optional — without it, the penalty loop is disabled.
+`ORDERBOOK_URL` and `SETTLEMENT_ADDRESS` resolve automatically from `CHAIN_ID` via the cow-sdk and only need to be set for barn/staging overrides.
