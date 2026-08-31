@@ -1,14 +1,14 @@
-import { BUY_ETH_ADDRESS } from "@byos/common";
+import { BUY_ETH_ADDRESS, Erc20Abi } from "@byos/common";
 import {
 	encodingOptions,
 	type FyndClient,
 	type InstanceInfo,
 	type Quote,
 } from "@kayibal/fynd-client";
+import { encodeFunctionData } from "viem";
 import type { CandidateOrder, ProviderRoute, RouteProvider } from "./provider.js";
 
 type Address = `0x${string}`;
-type Hex = `0x${string}`;
 
 export interface FyndProviderConfig {
 	client: Pick<FyndClient, "quote" | "health" | "info">;
@@ -122,8 +122,11 @@ export class FyndProvider implements RouteProvider {
 				{
 					target: order.sellToken,
 					value: 0n,
-					callData:
-						`0x095ea7b3${router.slice(2).padStart(64, "0")}${order.remainingSell.toString(16).padStart(64, "0")}` as Hex,
+					callData: encodeFunctionData({
+						abi: Erc20Abi,
+						functionName: "approve",
+						args: [router, order.remainingSell],
+					}),
 				},
 				{ target: quote.transaction.to, value: 0n, callData: quote.transaction.data },
 			],

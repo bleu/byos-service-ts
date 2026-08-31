@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parse } from "smol-toml";
-import type { Address } from "viem";
+import { type Address, isAddress } from "viem";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -16,6 +16,7 @@ const envSchema = z.object({
 	BYOS_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(100),
 	BYOS_READ_RESERVE: z.coerce.number().int().nonnegative().default(10),
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
+	JSON_LOGS: z.enum(["true", "false"]).optional(),
 	CONFIG_PATH: z.string().optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
@@ -26,6 +27,7 @@ export interface Config {
 	rpcUrl: string;
 	privateKey: `0x${string}`;
 	logLevel: string;
+	jsonLogs: boolean;
 	fyndUrl: string;
 	fyndSlippageBps: number;
 	fyndQuoteConcurrency: number;
@@ -49,8 +51,12 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		string,
 		unknown
 	>;
-	const chainId = Number(raw["chain-id"] ?? raw.chainId);
+	const chainId = positiveInteger(raw["chain-id"] ?? raw.chainId, "chain-id");
 	if (chainId !== 56) throw new Error("Fynd subsolver requires BSC (chain-id = 56)");
+	const trampolineFactory = raw["trampoline-factory"] ?? raw.trampolineFactory;
+	if (typeof trampolineFactory !== "string" || !isAddress(trampolineFactory)) {
+		throw new Error("trampoline-factory must be a valid address");
+	}
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
@@ -60,6 +66,9 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
 		logLevel: result.data.LOG_LEVEL,
+		jsonLogs:
+			result.data.JSON_LOGS === "true" ||
+			(result.data.JSON_LOGS === undefined && env.NODE_ENV === "production"),
 		fyndUrl: result.data.FYND_URL,
 		fyndSlippageBps: result.data.FYND_SLIPPAGE_BPS,
 		fyndQuoteConcurrency: result.data.FYND_QUOTE_CONCURRENCY,
@@ -70,9 +79,24 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,
 		toml: {
 			chainId,
-			trampolineFactory: (raw["trampoline-factory"] ?? raw.trampolineFactory) as Address,
-			proposalTtl: Number(raw["proposal-ttl-secs"] ?? raw.proposalTtl ?? 60),
-			pollInterval: Number(raw["poll-interval-secs"] ?? raw.pollInterval ?? 2),
+			trampolineFactory,
+			proposalTtl: positiveInteger(
+				raw["proposal-ttl-secs"] ?? raw.proposalTtl ?? 60,
+				"proposal-ttl-secs",
+			),
+			pollInterval: positiveInteger(
+				raw["poll-interval-secs"] ?? raw.pollInterval ?? 2,
+				"poll-interval-secs",
+			),
 		},
 	};
+}
+
+function positiveInteger(value: unknown, name: string): number {
+	const number =
+		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
+	if (!Number.isSafeInteger(number) || number <= 0) {
+		throw new Error(`${name} must be a positive whole number`);
+	}
+	return number;
 }

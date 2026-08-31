@@ -19,6 +19,7 @@ RUN pnpm build
 # Stage 2: Runtime — only dist + node_modules
 FROM node:22-alpine
 WORKDIR /app
+ENV NODE_ENV=production
 RUN corepack enable pnpm
 
 # Workspace root manifests (pnpm needs these for workspace resolution)
