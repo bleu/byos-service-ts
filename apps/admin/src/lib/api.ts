@@ -8,14 +8,18 @@ async function apiFetch(path: string) {
   return res.json();
 }
 
-export type TimeRange = "24h" | "7d" | "30d";
-
-export async function getOverview(range: TimeRange = "24h") {
-  return apiFetch(`/overview?range=${range}`);
+export function defaultDateRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+  return { from: from.toISOString(), to: to.toISOString() };
 }
 
-export async function getSubsolvers(range: TimeRange = "24h") {
-  return apiFetch(`/subsolvers?range=${range}`);
+export async function getOverview(from: string, to: string) {
+  return apiFetch(`/overview?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+}
+
+export async function getSubsolvers(from: string, to: string) {
+  return apiFetch(`/subsolvers?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 }
 
 export async function getProposals(params: {

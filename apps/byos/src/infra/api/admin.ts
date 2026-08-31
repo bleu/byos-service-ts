@@ -9,11 +9,12 @@ import {
 	getSubsolverStats,
 	listProposals,
 	getPendingPenaltiesCount,
-	type TimeRange,
+	type DateRange,
 } from "../admin-storage.js";
 import {
 	blockExplorerAddressUrl,
 	cowExplorerOrderUrl,
+	formatNativeAmount,
 	tenderlyTxUrl,
 	txLinks,
 } from "../formatters.js";
@@ -33,9 +34,10 @@ export interface AdminAppContext {
 	};
 }
 
-function parseTimeRange(raw: string | undefined): TimeRange {
-	if (raw === "7d" || raw === "30d") return raw;
-	return "24h";
+function parseDateRange(fromStr: string | undefined, toStr: string | undefined): DateRange {
+	const to = toStr ? new Date(toStr) : new Date();
+	const from = fromStr ? new Date(fromStr) : new Date(to.getTime() - 24 * 60 * 60 * 1000);
+	return { from, to };
 }
 
 /** Creates the admin Hono app (admin-facing, port 9587). */
@@ -45,16 +47,19 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 	// GET /healthz — for liveness probes
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
 
-	// GET /overview?range=24h|7d|30d
+	// GET /overview?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/overview", async (c) => {
-		const range = parseTimeRange(c.req.query("range"));
+		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
 		const stats = await getOverviewStats(ctx.db, range);
-		return c.json(stats);
+		return c.json({
+			...stats,
+			penalizedAmountFormatted: formatNativeAmount(stats.penalizedAmountWei, ctx.chainId),
+		});
 	});
 
-	// GET /subsolvers?range=24h|7d|30d
+	// GET /subsolvers?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/subsolvers", async (c) => {
-		const range = parseTimeRange(c.req.query("range"));
+		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
 		const stats = await getSubsolverStats(ctx.db, range);
 		return c.json(stats);
 	});
