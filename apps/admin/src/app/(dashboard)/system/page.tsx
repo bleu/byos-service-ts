@@ -1,10 +1,7 @@
-import { auth } from "@/lib/auth";
 import { getSystem } from "@/lib/api";
 
 export default async function SystemPage() {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
-  const data = await getSystem(idToken);
+  const data = await getSystem();
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

@@ -1,4 +1,3 @@
-import { auth } from "@/lib/auth";
 import { getSubsolvers, type TimeRange } from "@/lib/api";
 
 export default async function SubsolversPage({
@@ -6,8 +5,6 @@ export default async function SubsolversPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
   const { range: rawRange } = await searchParams;
   const range = (rawRange === "7d" || rawRange === "30d" ? rawRange : "24h") as TimeRange;
 
@@ -18,7 +15,7 @@ export default async function SubsolversPage({
     settleFailed: number;
     rejected: number;
     penalized: number;
-  }[] = await getSubsolvers(idToken, range);
+  }[] = await getSubsolvers(range);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">

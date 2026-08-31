@@ -19,9 +19,6 @@ export const configSchema = z.object({
 	INTERNAL_ADDR_PORT: z.coerce.number().default(9586),
 	ADMIN_ADDR_PORT: z.coerce.number().default(9587),
 
-	// Admin auth
-	GOOGLE_CLIENT_ID: z.string().optional(),
-
 	// Slack notifications
 	SLACK_TOKEN: z.string().optional(),
 	SLACK_CHANNEL: z.string().optional(),

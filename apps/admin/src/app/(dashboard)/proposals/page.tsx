@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
 import { getProposals } from "@/lib/api";
 
 const STATUSES = ["submitted", "active", "rejected", "simFailed", "executing", "settled", "settleFailed", "penalized", "cancelled", "expired"];
@@ -9,12 +8,10 @@ export default async function ProposalsPage({
 }: {
   searchParams: Promise<{ subSolver?: string; status?: string; page?: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
   const { subSolver, status, page: pageStr } = await searchParams;
   const page = Math.max(1, Number(pageStr ?? "1"));
 
-  const { items, total } = await getProposals(idToken, { subSolver, status, page, limit: 50 });
+  const { items, total } = await getProposals({ subSolver, status, page, limit: 50 });
   const totalPages = Math.ceil(total / 50);
 
   return (

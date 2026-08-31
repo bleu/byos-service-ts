@@ -1,4 +1,3 @@
-import { auth } from "@/lib/auth";
 import { getOverview, type TimeRange } from "@/lib/api";
 
 function StatCard({ label, value }: { label: string; value: number }) {
@@ -15,12 +14,10 @@ export default async function OverviewPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
   const { range: rawRange } = await searchParams;
   const range = (rawRange === "7d" || rawRange === "30d" ? rawRange : "24h") as TimeRange;
 
-  const stats = await getOverview(idToken, range);
+  const stats = await getOverview(range);
   const settlementTotal = stats.settled + stats.settleFailed;
   const successRate = settlementTotal > 0 ? Math.round((stats.settled / settlementTotal) * 100) : 0;
 

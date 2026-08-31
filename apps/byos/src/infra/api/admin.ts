@@ -1,5 +1,4 @@
 import os from "node:os";
-import { OAuth2Client } from "google-auth-library";
 import { Hono } from "hono";
 import type { Redis } from "ioredis";
 import type { Queue } from "bullmq";
@@ -24,22 +23,6 @@ export interface AdminAppContext {
 		audit: Queue;
 		balanceRefresh: Queue;
 	};
-	googleClientId: string;
-}
-
-/** Verifies a Google ID token and returns the email, or null on failure. */
-async function verifyGoogleToken(
-	client: OAuth2Client,
-	clientId: string,
-	token: string,
-): Promise<string | null> {
-	try {
-		const ticket = await client.verifyIdToken({ idToken: token, audience: clientId });
-		const payload = ticket.getPayload();
-		return payload?.email ?? null;
-	} catch {
-		return null;
-	}
 }
 
 function parseTimeRange(raw: string | undefined): TimeRange {
@@ -50,27 +33,9 @@ function parseTimeRange(raw: string | undefined): TimeRange {
 /** Creates the admin Hono app (admin-facing, port 9587). */
 export function createAdminApp(ctx: AdminAppContext): Hono {
 	const app = new Hono();
-	const googleClient = new OAuth2Client();
 
-	// GET /healthz — unauthenticated, for liveness probes (registered before auth middleware)
+	// GET /healthz — for liveness probes
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
-
-	// Auth middleware — every admin request must carry a valid @bleu.studio Google ID token
-	app.use("*", async (c, next) => {
-		const authHeader = c.req.header("Authorization");
-		if (!authHeader?.startsWith("Bearer ")) {
-			return c.json({ error: "missing authorization header" }, 401);
-		}
-		const token = authHeader.slice(7);
-		const email = await verifyGoogleToken(googleClient, ctx.googleClientId, token);
-		if (!email) {
-			return c.json({ error: "invalid token" }, 401);
-		}
-		if (!email.endsWith("@bleu.studio")) {
-			return c.json({ error: "unauthorized domain" }, 403);
-		}
-		await next();
-	});
 
 	// GET /overview?range=24h|7d|30d
 	app.get("/overview", async (c) => {

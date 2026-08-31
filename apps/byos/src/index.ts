@@ -64,14 +64,11 @@ async function main() {
 		logger,
 	});
 
-	const adminApp = config.GOOGLE_CLIENT_ID
-		? createAdminApp({
-				db: ctx.db,
-				redis: ctx.redis,
-				queues: ctx.queues,
-				googleClientId: config.GOOGLE_CLIENT_ID,
-			})
-		: null;
+	const adminApp = createAdminApp({
+		db: ctx.db,
+		redis: ctx.redis,
+		queues: ctx.queues,
+	});
 
 	// 5. Start HTTP servers
 	const publicServer = serve({ fetch: publicApp.fetch, port: config.PUBLIC_ADDR_PORT }, (info) =>
@@ -83,15 +80,9 @@ async function main() {
 		(info) => logger.info(`internal API listening on :${info.port}`),
 	);
 
-	const adminServer = adminApp
-		? serve({ fetch: adminApp.fetch, port: config.ADMIN_ADDR_PORT }, (info) =>
-				logger.info(`admin API listening on :${info.port}`),
-			)
-		: null;
-
-	if (!adminApp) {
-		logger.warn("GOOGLE_CLIENT_ID not set — admin API disabled");
-	}
+	const adminServer = serve({ fetch: adminApp.fetch, port: config.ADMIN_ADDR_PORT }, (info) =>
+		logger.info(`admin API listening on :${info.port}`),
+	);
 
 	// 6. Start BullMQ workers
 	const slackWorker =
@@ -168,9 +159,7 @@ async function main() {
 		await Promise.all([
 			new Promise<void>((resolve) => (publicServer as Server).close(() => resolve())),
 			new Promise<void>((resolve) => (internalServer as Server).close(() => resolve())),
-			...(adminServer
-				? [new Promise<void>((resolve) => (adminServer as Server).close(() => resolve()))]
-				: []),
+			new Promise<void>((resolve) => (adminServer as Server).close(() => resolve())),
 		]);
 		logger.info("http servers closed");
 

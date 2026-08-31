@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { getProposal } from "@/lib/api";
 
 export default async function ProposalDetailPage({
@@ -8,8 +7,6 @@ export default async function ProposalDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
   const { id: idStr } = await params;
   const id = Number(idStr);
 
@@ -17,7 +14,7 @@ export default async function ProposalDetailPage({
 
   let data: any;
   try {
-    data = await getProposal(idToken, id);
+    data = await getProposal(id);
   } catch {
     notFound();
   }

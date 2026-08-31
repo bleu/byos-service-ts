@@ -31,9 +31,15 @@ When that need arises, adding `prom-client` and a `/metrics` endpoint to the byo
 
 ## Implementation
 
+### Access control
+
+The admin API (port 9587) and dashboard are protected at the network level via Tailscale. Port 9587 is not exposed to the public internet — it is only reachable from inside the Docker network, where the admin Next.js container calls it directly. The Next.js container is the only public-facing entry point, exposed exclusively on the Tailscale network. Membership in the tailnet is the auth boundary.
+
+Google OAuth was considered and prototyped but removed. It added infrastructure complexity (client ID, secret, redirect URIs, token verification) with no meaningful security gain over Tailscale network isolation for an internal tool.
+
 ### Admin API (byos, port 9587)
 
-A third Hono app instance listens on port 9587. Every request (except `/healthz`) must carry a valid Google ID token as a Bearer token; the service verifies it using `google-auth-library` and rejects tokens whose email does not end in `@bleu.studio`.
+A third Hono app instance listens on port 9587. The port is not exposed to the host; it is only reachable from other containers on the same Docker network. No application-level authentication is applied — the network boundary is the security control.
 
 Endpoints:
 
@@ -49,17 +55,9 @@ All business metrics are read from `audit_events`, `proposals`, and `penalties` 
 
 System metrics (`/system`) are read live from Node.js `process.memoryUsage()`, `os` module, and BullMQ queue APIs. These are point-in-time values; no history is stored. Prometheus/Grafana covers historical system metrics when that need arises.
 
-### Google token validation
-
-Token verification uses `google-auth-library`'s `OAuth2Client.verifyIdToken()`. The library caches Google's public JWKS keys automatically (TTL-driven, rotates ~every 6 hours). Per-request cost is a single RSA signature verification — sub-millisecond, negligible.
-
-The port must be publicly reachable so the Next.js admin app (deployed independently) can call it from anywhere. Auth is the security boundary; no IP allowlisting is required beyond standard firewall hygiene.
-
 ### Admin dashboard (apps/admin)
 
-A Next.js app with Google OAuth via NextAuth v5. Access is restricted to `@bleu.studio` accounts in both the NextAuth `signIn` callback and the byos admin port middleware (defense in depth).
-
-The Google ID token from the NextAuth JWT is forwarded as a Bearer token on every API call to the byos admin port.
+A Next.js app with no application-level authentication. It is deployed as a Docker container on the same network as byos, calling the admin API at `http://byos-ts:9587` internally. Port 3000 is the only externally exposed port, and it is only reachable via Tailscale.
 
 Pages:
 
@@ -77,7 +75,7 @@ Pages:
 
 ## Consequences
 
-- No new infrastructure dependencies beyond the existing Postgres and the Google OAuth credentials.
-- The admin port (9587) must be exposed and reachable from wherever `apps/admin` is deployed.
-- `GOOGLE_CLIENT_ID` must be set in the byos environment for the admin API to start. If unset, the port is disabled and a warning is logged.
+- No new infrastructure dependencies beyond the existing Postgres.
+- The admin port (9587) must not be exposed to the host. It is internal to the Docker network.
+- The admin Next.js container must be deployed on the Tailscale network to enforce access control.
 - System metrics are current-values-only until Prometheus is added.
