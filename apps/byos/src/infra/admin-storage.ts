@@ -170,6 +170,7 @@ export interface ProposalListItem {
 	orderUid: string;
 	status: string;
 	rejectionReason: string | null;
+	settlementTxHash: string | null;
 	createdAt: Date;
 	statusChangedAt: Date;
 }
@@ -202,6 +203,7 @@ export async function listProposals(
 				orderUid: proposals.orderUid,
 				status: proposals.status,
 				rejectionReason: proposals.rejectionReason,
+				settlementTxHash: proposals.settlementTxHash,
 				createdAt: proposals.createdAt,
 				statusChangedAt: proposals.statusChangedAt,
 			})

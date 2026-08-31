@@ -3,6 +3,10 @@ import { getProposals } from "@/lib/api";
 
 const STATUSES = ["submitted", "active", "rejected", "simFailed", "executing", "settled", "settleFailed", "penalized", "cancelled", "expired"];
 
+function isoZ(dateStr: string) {
+  return new Date(dateStr).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export default async function ProposalsPage({
   searchParams,
 }: {
@@ -78,9 +82,12 @@ export default async function ProposalsPage({
               (p: {
                 id: number;
                 subSolver: string;
+                subSolverUrl: string | null;
                 orderUid: string;
+                orderUidUrl: string | null;
                 status: string;
                 rejectionReason: string | null;
+                tenderlyUrl: string | null;
                 createdAt: string;
               }) => (
                 <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -90,19 +97,31 @@ export default async function ProposalsPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                    {p.subSolver.slice(0, 8)}…{p.subSolver.slice(-4)}
+                    {p.subSolverUrl ? (
+                      <a href={p.subSolverUrl} target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">
+                        {p.subSolver}
+                      </a>
+                    ) : (
+                      p.subSolver
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                    {p.orderUid.slice(0, 10)}…
+                    {p.orderUidUrl ? (
+                      <a href={p.orderUidUrl} target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">
+                        {p.orderUid.slice(0, 10)}…
+                      </a>
+                    ) : (
+                      <>{p.orderUid.slice(0, 10)}…</>
+                    )}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={p.status} />
+                    <StatusBadge status={p.status} tenderlyUrl={p.tenderlyUrl} />
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500 font-mono">
                     {p.rejectionReason ?? "—"}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {new Date(p.createdAt).toLocaleString()}
+                  <td className="px-4 py-3 text-xs text-gray-500 font-mono">
+                    {isoZ(p.createdAt)}
                   </td>
                 </tr>
               ),
@@ -154,7 +173,7 @@ function buildPageUrl(subSolver?: string, status?: string, page?: number) {
   return `/proposals?${qs}`;
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, tenderlyUrl }: { status: string; tenderlyUrl?: string | null }) {
   const colors: Record<string, string> = {
     settled: "bg-green-100 text-green-700",
     active: "bg-blue-100 text-blue-700",
@@ -167,9 +186,13 @@ function StatusBadge({ status }: { status: string }) {
     cancelled: "bg-gray-200 text-gray-600",
     simFailed: "bg-orange-100 text-orange-700",
   };
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
-  );
+  const cls = `px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-gray-100 text-gray-600"}`;
+  if (tenderlyUrl) {
+    return (
+      <a href={tenderlyUrl} target="_blank" rel="noopener noreferrer" className={`${cls} hover:underline`}>
+        {status}
+      </a>
+    );
+  }
+  return <span className={cls}>{status}</span>;
 }

@@ -67,6 +67,8 @@ async function main() {
 	const adminApp = createAdminApp({
 		db: ctx.db,
 		redis: ctx.redis,
+		chainId: config.CHAIN_ID,
+		cowExplorerUrl: config.COW_EXPLORER_URL,
 		queues: ctx.queues,
 	});
 
@@ -93,6 +95,8 @@ async function main() {
 	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, {
 		slackQueue: slackWorker ? ctx.queues.slackNotification : undefined,
 		redis: slackWorker ? ctx.redis : undefined,
+		chainId: config.CHAIN_ID,
+		cowExplorerUrl: config.COW_EXPLORER_URL,
 	});
 
 	const validationWorker = createValidationWorker(ctx.redis, {

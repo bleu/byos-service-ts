@@ -11,10 +11,18 @@ import {
 	getPendingPenaltiesCount,
 	type TimeRange,
 } from "../admin-storage.js";
+import {
+	blockExplorerAddressUrl,
+	cowExplorerOrderUrl,
+	tenderlyTxUrl,
+	txLinks,
+} from "../formatters.js";
 
 export interface AdminAppContext {
 	db: Db;
 	redis: Redis;
+	chainId: number;
+	cowExplorerUrl: string;
 	queues: {
 		validation: Queue;
 		validateProposal: Queue;
@@ -59,7 +67,15 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? "50")));
 
 		const result = await listProposals(ctx.db, { subSolver, status, page, limit });
-		return c.json(result);
+		const enrichedItems = result.items.map((item) => ({
+			...item,
+			subSolverUrl: blockExplorerAddressUrl(item.subSolver, ctx.chainId),
+			orderUidUrl: cowExplorerOrderUrl(item.orderUid, ctx.cowExplorerUrl),
+			tenderlyUrl: item.settlementTxHash
+				? tenderlyTxUrl(item.settlementTxHash, ctx.chainId)
+				: null,
+		}));
+		return c.json({ ...result, items: enrichedItems });
 	});
 
 	// GET /proposals/:id
@@ -72,7 +88,15 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		if (!detail) {
 			return c.json({ error: "not found" }, 404);
 		}
-		return c.json(detail);
+		const { proposal, auditTrail } = detail;
+		const enrichedProposal = {
+			...proposal,
+			subSolverUrl: blockExplorerAddressUrl(proposal.subSolver, ctx.chainId),
+			orderUidUrl: cowExplorerOrderUrl(proposal.orderUid, ctx.cowExplorerUrl),
+			...txLinks(proposal.settlementTxHash, ctx.chainId),
+			penaltyTxLinks: txLinks(proposal.penaltyTxHash, ctx.chainId),
+		};
+		return c.json({ proposal: enrichedProposal, auditTrail });
 	});
 
 	// GET /system — live CPU, memory, disk, queue depths

@@ -14,7 +14,7 @@ export async function postToSlack(token: string, channel: string, text: string):
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${token}`,
 		},
-		body: JSON.stringify({ channel, text }),
+		body: JSON.stringify({ channel, text, unfurl_links: false }),
 	});
 	if (!res.ok) {
 		throw new Error(`Slack API returned ${res.status}: ${await res.text()}`);

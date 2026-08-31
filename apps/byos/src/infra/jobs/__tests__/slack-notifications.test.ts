@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuditKind } from "../../../domain/audit.js";
 import type { Proposal } from "../../../domain/proposal.js";
 import { buildNotification } from "../audit-worker.js";
+import type { SlackFormatterContext } from "../../formatters.js";
 import { postToSlack } from "../slack-worker.js";
 
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
@@ -45,8 +46,13 @@ function sampleProposal(): Proposal {
 	};
 }
 
+const testCtx: SlackFormatterContext = {
+	chainId: 1,
+	cowExplorerUrl: "https://explorer.cow.fi",
+};
+
 async function send(kind: AuditKind, redis: Redis = makeRedis(1)): Promise<string | null> {
-	const text = await buildNotification(redis, kind);
+	const text = await buildNotification(redis, kind, testCtx);
 	if (text && SLACK_TOKEN && SLACK_CHANNEL) {
 		await postToSlack(SLACK_TOKEN, SLACK_CHANNEL, text);
 	}
@@ -113,7 +119,7 @@ describe.skipIf(!SLACK_TOKEN || !SLACK_CHANNEL)("Slack notification integration"
 		};
 		const text = await send(kind);
 		expect(text).toContain("Subsolver penalized");
-		expect(text).toContain("10000000000000000");
+		expect(text).toContain("0.01 ETH");
 	});
 
 	it("non-settlement debited", async () => {
@@ -127,7 +133,7 @@ describe.skipIf(!SLACK_TOKEN || !SLACK_CHANNEL)("Slack notification integration"
 		};
 		const text = await send(kind);
 		expect(text).toContain("non-settlement debited");
-		expect(text).toContain("5000000000000000");
+		expect(text).toContain("0.005 ETH");
 	});
 
 	it("BYOS buffer debited", async () => {
@@ -140,7 +146,7 @@ describe.skipIf(!SLACK_TOKEN || !SLACK_CHANNEL)("Slack notification integration"
 		};
 		const text = await send(kind);
 		expect(text).toContain("buffer debited");
-		expect(text).toContain("20000000000000000");
+		expect(text).toContain("0.02 ETH");
 		expect(text).toContain("3");
 	});
 });

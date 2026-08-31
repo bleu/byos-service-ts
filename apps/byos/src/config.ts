@@ -19,6 +19,9 @@ export const configSchema = z.object({
 	INTERNAL_ADDR_PORT: z.coerce.number().default(9586),
 	ADMIN_ADDR_PORT: z.coerce.number().default(9587),
 
+	// Observability
+	COW_EXPLORER_URL: z.string().url().default("https://explorer.cow.fi"),
+
 	// Slack notifications
 	SLACK_TOKEN: z.string().optional(),
 	SLACK_CHANNEL: z.string().optional(),
