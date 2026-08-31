@@ -26,112 +26,119 @@ export default async function ProposalDetailPage({
   const { proposal, auditTrail } = data;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-3xl space-y-5">
       <div className="flex items-center gap-3">
-        <Link href="/proposals" className="text-sm text-blue-600 hover:underline">
+        <Link href="/proposals" className="text-[12px] text-muted hover:text-ink hover:underline">
           ← Proposals
         </Link>
-        <h1 className="text-xl font-bold">Proposal #{proposal.id}</h1>
+        <span className="text-dim">/</span>
+        <h1 className="text-[13px] font-semibold text-ink font-mono">#{proposal.id}</h1>
       </div>
 
-      {/* Proposal fields */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="font-semibold mb-4">Details</h2>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+      {/* Details */}
+      <div className="bg-surface border border-line rounded">
+        <div className="px-5 py-3 border-b border-line">
+          <span className="text-[10px] uppercase tracking-widest text-dim font-medium">Details</span>
+        </div>
+        <dl className="grid grid-cols-2 divide-x-0 p-5 gap-x-8 gap-y-4">
           <Field label="Subsolver">
-            <ExternalLink href={proposal.subSolverUrl} mono>{proposal.subSolver}</ExternalLink>
+            <ExternalLink href={proposal.subSolverUrl}>{proposal.subSolver}</ExternalLink>
           </Field>
           <Field label="Status">
-            <span>{proposal.status}</span>
+            <span className="font-mono text-[12px] text-ink">{proposal.status}</span>
           </Field>
           <Field label="Order UID">
-            <ExternalLink href={proposal.orderUidUrl} mono>{proposal.orderUid}</ExternalLink>
+            <ExternalLink href={proposal.orderUidUrl}>{proposal.orderUid}</ExternalLink>
           </Field>
           <Field label="Rejection reason">
-            <span className="font-mono">{proposal.rejectionReason ?? "—"}</span>
+            <span className="font-mono text-[12px] text-muted">{proposal.rejectionReason ?? <span className="text-dim">—</span>}</span>
           </Field>
           <Field label="Sell token">
-            <span className="font-mono text-xs break-all">{proposal.sellToken}</span>
+            <span className="font-mono text-[12px] text-muted break-all">{proposal.sellToken ?? <span className="text-dim">—</span>}</span>
           </Field>
           <Field label="Buy token">
-            <span className="font-mono text-xs break-all">{proposal.buyToken}</span>
+            <span className="font-mono text-[12px] text-muted break-all">{proposal.buyToken ?? <span className="text-dim">—</span>}</span>
           </Field>
           <Field label="Sell amount">
-            <span className="font-mono text-xs">{proposal.sellAmount}</span>
+            <span className="font-mono text-[12px] text-muted">{proposal.sellAmount}</span>
           </Field>
           <Field label="Min buy amount">
-            <span className="font-mono text-xs">{proposal.minBuyAmount}</span>
+            <span className="font-mono text-[12px] text-muted">{proposal.minBuyAmount}</span>
           </Field>
           <Field label="Settlement tx">
             {proposal.settlementTxHash ? (
-              <div className="flex flex-wrap gap-2 font-mono text-xs break-all">
+              <div className="space-y-1">
                 <ExternalLink href={proposal.explorerUrl}>{proposal.settlementTxHash}</ExternalLink>
                 {proposal.tenderlyUrl && (
-                  <a href={proposal.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-700 underline non-mono text-xs">
-                    Tenderly
-                  </a>
+                  <div>
+                    <a href={proposal.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-dim hover:text-muted underline">
+                      Tenderly
+                    </a>
+                  </div>
                 )}
               </div>
             ) : (
-              <span className="text-gray-400">—</span>
+              <span className="text-dim font-mono text-[12px]">—</span>
             )}
           </Field>
           <Field label="Penalty tx">
             {proposal.penaltyTxHash ? (
-              <div className="flex flex-wrap gap-2 font-mono text-xs break-all">
+              <div className="space-y-1">
                 <ExternalLink href={proposal.penaltyTxLinks?.explorerUrl}>{proposal.penaltyTxHash}</ExternalLink>
                 {proposal.penaltyTxLinks?.tenderlyUrl && (
-                  <a href={proposal.penaltyTxLinks.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-700 underline non-mono text-xs">
-                    Tenderly
-                  </a>
+                  <div>
+                    <a href={proposal.penaltyTxLinks.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-dim hover:text-muted underline">
+                      Tenderly
+                    </a>
+                  </div>
                 )}
               </div>
             ) : (
-              <span className="text-gray-400">—</span>
+              <span className="text-dim font-mono text-[12px]">—</span>
             )}
           </Field>
           <Field label="Created">
-            <span className="font-mono text-xs">{isoZ(proposal.createdAt)}</span>
+            <span className="font-mono text-[12px] text-muted">{isoZ(proposal.createdAt)}</span>
           </Field>
           <Field label="Last updated">
-            <span className="font-mono text-xs">{isoZ(proposal.statusChangedAt)}</span>
+            <span className="font-mono text-[12px] text-muted">{isoZ(proposal.statusChangedAt)}</span>
           </Field>
         </dl>
       </div>
 
       {/* Audit trail */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <h2 className="font-semibold mb-4">Audit trail</h2>
-        <div className="space-y-3">
-          {auditTrail.map(
-            (event: {
-              id: number;
-              eventType: string;
-              payload: unknown;
-              occurredAt: string;
-            }) => (
-              <div key={event.id} className="border border-gray-100 rounded p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                    {event.eventType}
-                  </span>
-                  <span className="text-xs text-gray-400 font-mono">
-                    {isoZ(event.occurredAt)}
-                  </span>
-                </div>
-                {(() => {
-                  const p = event.payload as Record<string, unknown> | null;
-                  return p && Object.keys(p).length > 0 ? (
-                    <pre className="text-xs text-gray-600 bg-gray-50 rounded p-2 overflow-x-auto mt-1">
-                      {JSON.stringify(p, null, 2)}
-                    </pre>
-                  ) : null;
-                })()}
+      <div className="bg-surface border border-line rounded">
+        <div className="px-5 py-3 border-b border-line">
+          <span className="text-[10px] uppercase tracking-widest text-dim font-medium">Audit trail</span>
+        </div>
+        <div className="p-4 space-y-2">
+          {auditTrail.map((event: {
+            id: number;
+            eventType: string;
+            payload: unknown;
+            occurredAt: string;
+          }) => (
+            <div key={event.id} className="border border-line rounded p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[11px] font-medium text-accent bg-accent-tint px-1.5 py-0.5 rounded-sm">
+                  {event.eventType}
+                </span>
+                <span className="font-mono text-[11px] text-dim">
+                  {isoZ(event.occurredAt)}
+                </span>
               </div>
-            ),
-          )}
+              {(() => {
+                const p = event.payload as Record<string, unknown> | null;
+                return p && Object.keys(p).length > 0 ? (
+                  <pre className="font-mono text-[11px] text-muted bg-base rounded p-3 overflow-x-auto leading-relaxed">
+                    {JSON.stringify(p, null, 2)}
+                  </pre>
+                ) : null;
+              })()}
+            </div>
+          ))}
           {auditTrail.length === 0 && (
-            <p className="text-sm text-gray-400">No audit events recorded.</p>
+            <p className="text-[12px] text-dim py-4 text-center">No audit events recorded.</p>
           )}
         </div>
       </div>
@@ -142,25 +149,17 @@ export default async function ProposalDetailPage({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-gray-500 text-xs mb-0.5">{label}</dt>
-      <dd className="text-sm break-all">{children}</dd>
+      <dt className="text-[10px] uppercase tracking-widest text-dim font-medium mb-1">{label}</dt>
+      <dd className="break-all">{children}</dd>
     </div>
   );
 }
 
-function ExternalLink({
-  href,
-  children,
-  mono = true,
-}: {
-  href?: string | null;
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  const cls = `${mono ? "font-mono text-xs" : "text-xs"} break-all`;
-  if (!href) return <span className={cls}>{children}</span>;
+function ExternalLink({ href, children }: { href?: string | null; children: React.ReactNode }) {
+  const cls = "font-mono text-[12px] break-all";
+  if (!href) return <span className={`${cls} text-muted`}>{children}</span>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={`${cls} text-blue-600 hover:underline`}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={`${cls} text-accent hover:underline`}>
       {children}
     </a>
   );
