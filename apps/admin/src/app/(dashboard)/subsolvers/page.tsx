@@ -1,8 +1,5 @@
 import { getSubsolvers, defaultDateRange } from "@/lib/api";
-
-function toDatetimeLocal(iso: string): string {
-  return iso.slice(0, 16);
-}
+import { DateRangeForm } from "../date-range-form";
 
 export default async function SubsolversPage({
   searchParams,
@@ -24,51 +21,23 @@ export default async function SubsolversPage({
   }[] = await getSubsolvers(from, to);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">Subsolvers</h1>
-        <form method="GET" className="flex items-end gap-2">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">From (UTC)</label>
-            <input
-              type="datetime-local"
-              name="from"
-              defaultValue={toDatetimeLocal(from)}
-              className="border border-gray-200 rounded px-2 py-1 text-xs"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">To (UTC)</label>
-            <input
-              type="datetime-local"
-              name="to"
-              defaultValue={toDatetimeLocal(to)}
-              className="border border-gray-200 rounded px-2 py-1 text-xs"
-            />
-          </div>
-          <button
-            type="submit"
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded"
-          >
-            Apply
-          </button>
-          <a href="/subsolvers" className="text-xs text-gray-400 hover:text-gray-700 underline pb-1.5">
-            Reset
-          </a>
-        </form>
+        <h1 className="text-[13px] font-semibold text-ink">Subsolvers</h1>
+        <DateRangeForm from={from} to={to} resetHref="/subsolvers" />
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr className="text-left text-gray-500">
-              <th className="px-4 py-3 font-medium">Subsolver</th>
-              <th className="px-4 py-3 font-medium text-right">Received</th>
-              <th className="px-4 py-3 font-medium text-right">Settled</th>
-              <th className="px-4 py-3 font-medium text-right">Failed</th>
-              <th className="px-4 py-3 font-medium text-right">Rejected</th>
-              <th className="px-4 py-3 font-medium text-right">Penalized</th>
-              <th className="px-4 py-3 font-medium text-right">Success %</th>
+      <div className="bg-surface border border-line rounded overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-base border-b border-line">
+              <th className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-dim font-medium">Subsolver</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Received</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Settled</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Reverted</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Rejected</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Penalized</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Win rate</th>
             </tr>
           </thead>
           <tbody>
@@ -76,28 +45,28 @@ export default async function SubsolversPage({
               const total = s.settled + s.settleFailed;
               const pct = total > 0 ? Math.round((s.settled / total) * 100) : 0;
               return (
-                <tr key={s.subSolver} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">
+                <tr key={s.subSolver} className="border-b border-line last:border-0 hover:bg-base transition-colors duration-100">
+                  <td className="px-4 py-3 font-mono text-[12px]">
                     <a
                       href={`/proposals?subSolver=${s.subSolver}`}
-                      className="hover:underline text-blue-600"
+                      className="text-accent hover:underline"
                     >
                       {s.subSolver.slice(0, 10)}…{s.subSolver.slice(-6)}
                     </a>
                   </td>
-                  <td className="px-4 py-3 text-right">{s.proposalsReceived.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-green-600">{s.settled.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-red-500">{s.settleFailed.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-yellow-600">{s.rejected.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-red-600">{s.penalized.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right font-medium">{pct}%</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink text-right">{s.proposalsReceived.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ok text-right">{s.settled.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-fail text-right">{s.settleFailed.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-muted text-right">{s.rejected.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-warn text-right">{s.penalized.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink text-right font-medium">{pct}%</td>
                 </tr>
               );
             })}
             {subsolvers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
-                  No data for this time range.
+                <td colSpan={7} className="px-4 py-10 text-center text-[12px] text-dim">
+                  No data for this interval.
                 </td>
               </tr>
             )}

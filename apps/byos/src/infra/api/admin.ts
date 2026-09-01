@@ -1,15 +1,15 @@
 import os from "node:os";
+import type { Queue } from "bullmq";
 import { Hono } from "hono";
 import type { Redis } from "ioredis";
-import type { Queue } from "bullmq";
 import type { Db } from "../../db/index.js";
 import {
+	type DateRange,
 	getOverviewStats,
+	getPendingPenaltiesCount,
 	getProposalDetail,
 	getSubsolverStats,
 	listProposals,
-	getPendingPenaltiesCount,
-	type DateRange,
 } from "../admin-storage.js";
 import {
 	blockExplorerAddressUrl,
@@ -31,12 +31,14 @@ export interface AdminAppContext {
 		penalty: Queue;
 		audit: Queue;
 		balanceRefresh: Queue;
+		slackNotification: Queue;
 	};
 }
 
-function parseDateRange(fromStr: string | undefined, toStr: string | undefined): DateRange {
+function parseDateRange(fromStr: string | undefined, toStr: string | undefined): DateRange | null {
 	const to = toStr ? new Date(toStr) : new Date();
 	const from = fromStr ? new Date(fromStr) : new Date(to.getTime() - 24 * 60 * 60 * 1000);
+	if (Number.isNaN(to.getTime()) || Number.isNaN(from.getTime())) return null;
 	return { from, to };
 }
 
@@ -50,6 +52,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 	// GET /overview?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/overview", async (c) => {
 		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
+		if (!range) return c.json({ error: "invalid date range" }, 400);
 		const stats = await getOverviewStats(ctx.db, range);
 		return c.json({
 			...stats,
@@ -60,6 +63,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 	// GET /subsolvers?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/subsolvers", async (c) => {
 		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
+		if (!range) return c.json({ error: "invalid date range" }, 400);
 		const stats = await getSubsolverStats(ctx.db, range);
 		return c.json(stats);
 	});
@@ -76,9 +80,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 			...item,
 			subSolverUrl: blockExplorerAddressUrl(item.subSolver, ctx.chainId),
 			orderUidUrl: cowExplorerOrderUrl(item.orderUid, ctx.cowExplorerUrl),
-			tenderlyUrl: item.settlementTxHash
-				? tenderlyTxUrl(item.settlementTxHash, ctx.chainId)
-				: null,
+			tenderlyUrl: item.settlementTxHash ? tenderlyTxUrl(item.settlementTxHash, ctx.chainId) : null,
 		}));
 		return c.json({ ...result, items: enrichedItems });
 	});
@@ -112,15 +114,23 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		const cpus = os.cpus();
 
 		// Queue depths
-		const [validation, validateProposal, retention, penalty, audit, balanceRefresh] =
-			await Promise.all([
-				ctx.queues.validation.getJobCounts("waiting", "active", "delayed"),
-				ctx.queues.validateProposal.getJobCounts("waiting", "active", "delayed"),
-				ctx.queues.retention.getJobCounts("waiting", "active", "delayed"),
-				ctx.queues.penalty.getJobCounts("waiting", "active", "delayed"),
-				ctx.queues.audit.getJobCounts("waiting", "active", "delayed"),
-				ctx.queues.balanceRefresh.getJobCounts("waiting", "active", "delayed"),
-			]);
+		const [
+			validation,
+			validateProposal,
+			retention,
+			penalty,
+			audit,
+			balanceRefresh,
+			slackNotification,
+		] = await Promise.all([
+			ctx.queues.validation.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.validateProposal.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.retention.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.penalty.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.audit.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.balanceRefresh.getJobCounts("waiting", "active", "delayed"),
+			ctx.queues.slackNotification.getJobCounts("waiting", "active", "delayed"),
+		]);
 
 		const pendingPenalties = await getPendingPenaltiesCount(ctx.db);
 
@@ -144,6 +154,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 				penalty,
 				audit,
 				balanceRefresh,
+				slackNotification,
 			},
 			pendingPenalties,
 		});

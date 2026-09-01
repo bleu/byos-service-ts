@@ -33,5 +33,7 @@ COPY --from=build /app/packages/common/dist packages/common/dist/
 COPY --from=build /app/packages/common/package.json packages/common/
 COPY --from=build /app/packages/common/node_modules packages/common/node_modules/
 
-EXPOSE 9585 9586 9587
+# Port 9587 (admin) is intentionally omitted — it is internal to the Docker
+# network and must never be published to the host (ADR-0016).
+EXPOSE 9585 9586
 CMD ["node", "apps/byos/dist/index.js"]

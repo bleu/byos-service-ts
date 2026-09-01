@@ -405,7 +405,6 @@ describe("buffer debits", () => {
 		expect(entry).toBeDefined();
 		expect(entry?.gap).toBe("50"); // maxBuy - delivered
 		expect(entry?.delta).toBe("950");
-		// biome-ignore lint/style/noNonNullAssertion: guarded by expect(entry).toBeDefined()
 		expect(BigInt(entry!.nativeTokenAmount)).toBe(50n); // gap * 1e18 / 1e18 = 50
 	});
 
@@ -425,7 +424,6 @@ describe("buffer debits", () => {
 		const entry = entries.find((e) => e.proposalId === id);
 		expect(entry).toBeDefined();
 		expect(entry?.gap).toBe("-50");
-		// biome-ignore lint/style/noNonNullAssertion: guarded by expect(entry).toBeDefined()
 		expect(BigInt(entry!.nativeTokenAmount)).toBe(-50n);
 	});
 

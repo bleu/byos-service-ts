@@ -14,7 +14,7 @@ Slack webhook notifications dispatched asynchronously via a dedicated BullMQ que
 
 ### Notification queue
 
-A new `slack-notification` BullMQ queue is added alongside the existing queues. The worker posts to the Slack Incoming Webhook URL configured via `SLACK_WEBHOOK_URL`. If the env var is unset, the worker is not started and no notifications are sent.
+A new `slack-notification` BullMQ queue is added alongside the existing queues. The worker calls the Slack Web API (`chat.postMessage`) using a bot token configured via `SLACK_TOKEN`, posting to the channel configured via `SLACK_CHANNEL`. Both variables are required together — the config schema rejects a half-configured state at startup. If neither is set, the worker is not started and no notifications are sent.
 
 Job options: 5 attempts, exponential backoff starting at 2 seconds. Slack outages cause retries, not failures in the domain logic.
 
@@ -53,6 +53,6 @@ Sent at process startup by enqueueing directly to the `slack-notification` queue
 
 ## Consequences
 
-- `SLACK_WEBHOOK_URL` is optional. If unset, no notifications are sent and no worker starts.
-- The `byos:known-subsolvers` Redis set persists across restarts. A subsolver restart or reconnect after a previous session will not re-trigger the "new subsolver" notification — which is the correct behavior.
+- `SLACK_TOKEN` and `SLACK_CHANNEL` are optional but must be set together. If neither is set, no notifications are sent and no worker starts.
+- The `byos:known-subsolvers` Redis set persists across restarts **only if Redis persistence (AOF or RDB) is enabled**. The dev `docker-compose.yml` enables AOF persistence for this reason. In production, Redis persistence must be configured at the infrastructure level to preserve the guarantee that a subsolver reconnect does not re-fire the "new subsolver" notification.
 - Notification volume scales with settlement activity. At current volumes (few settlements per day) this is fine. If volume grows significantly, the notification logic in `buildNotification()` can be extended with throttling or batching in a single place.

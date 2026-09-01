@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { auditEvents, penalties, proposals } from "../db/schema.js";
 
@@ -10,7 +10,7 @@ export interface DateRange {
 // --- Overview ---
 
 export interface OverviewStats {
-	// Funnel
+	// Funnel (proposals created in range, by current status — always coherent)
 	received: number;
 	discarded: number;
 	simFailed: number;
@@ -21,7 +21,7 @@ export interface OverviewStats {
 	settleFailed: number;
 	// Breakdown
 	rejectionBreakdown: { reason: string; count: number }[];
-	// Penalties & debits
+	// Penalties & debits (event-time: financial events that occurred in range)
 	penalizedCount: number;
 	penalizedAmountWei: string;
 	nonSettlementDebitedCount: number;
@@ -31,49 +31,54 @@ export interface OverviewStats {
 export async function getOverviewStats(db: Db, range: DateRange): Promise<OverviewStats> {
 	const { from, to } = range;
 
-	const inRange = (type: string) =>
-		and(eq(auditEvents.eventType, type), gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to));
+	const [statusRows, rejectionRows, [penaltyStats]] = await Promise.all([
+		// Funnel: count proposals created in range by current status.
+		// Anchoring to proposal creation date (not event time) guarantees the
+		// funnel is always coherent: settled ≤ won ≤ sentToAuction ≤ received.
+		db
+			.select({ status: proposals.status, count: count() })
+			.from(proposals)
+			.where(and(gte(proposals.createdAt, from), lt(proposals.createdAt, to)))
+			.groupBy(proposals.status),
 
-	const countOf = (type: string) =>
-		db.select({ count: count() }).from(auditEvents).where(inRange(type));
+		// Rejection breakdown from the proposals table directly.
+		db
+			.select({ reason: proposals.rejectionReason, count: count() })
+			.from(proposals)
+			.where(
+				and(
+					gte(proposals.createdAt, from),
+					lt(proposals.createdAt, to),
+					isNotNull(proposals.rejectionReason),
+				),
+			)
+			.groupBy(proposals.rejectionReason),
 
-	const [received, simFailed, rejections, settled, settleFailed, penalized, nonSettlementDebited, bufferDebited] =
-		await Promise.all([
-			countOf("received"),
-			countOf("sim_failed"),
-			db
-				.select({
-					reason: sql<string>`payload->>'rejectionReason'`,
-					count: count(),
-				})
-				.from(auditEvents)
-				.where(inRange("rejected"))
-				.groupBy(sql`payload->>'rejectionReason'`),
-			countOf("settled"),
-			countOf("settle_failed"),
-			db
-				.select({
-					count: count(),
-					amount: sql<string>`COALESCE(SUM((payload->>'amount')::numeric), 0)::text`,
-				})
-				.from(auditEvents)
-				.where(inRange("penalized")),
-			countOf("non_settlement_debited"),
-			countOf("buffer_debited"),
-		]);
+		// Penalty/debit event counts in a single pass using conditional aggregation.
+		db
+			.select({
+				penalizedCount: sql<number>`COUNT(*) FILTER (WHERE event_type = 'penalized')`,
+				penalizedAmount: sql<string>`COALESCE(SUM((payload->>'amount')::numeric) FILTER (WHERE event_type = 'penalized'), 0)::text`,
+				nonSettlementDebitedCount: sql<number>`COUNT(*) FILTER (WHERE event_type = 'non_settlement_debited')`,
+				bufferDebitedCount: sql<number>`COUNT(*) FILTER (WHERE event_type = 'buffer_debited')`,
+			})
+			.from(auditEvents)
+			.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to))),
+	]);
 
-	const receivedCount = received[0]?.count ?? 0;
-	const simFailedCount = simFailed[0]?.count ?? 0;
-	const rejectedCount = rejections.reduce((acc, r) => acc + r.count, 0);
+	const byStatus = new Map(statusRows.map((r) => [r.status, r.count]));
+	const simFailedCount = byStatus.get("simFailed") ?? 0;
+	const rejectedCount = byStatus.get("rejected") ?? 0;
+	const settledCount = byStatus.get("settled") ?? 0;
+	const settleFailedCount = byStatus.get("settleFailed") ?? 0;
+	const received = statusRows.reduce((acc, r) => acc + r.count, 0);
 	const discarded = simFailedCount + rejectedCount;
-	const sentToAuction = receivedCount - discarded;
-	const settledCount = settled[0]?.count ?? 0;
-	const settleFailedCount = settleFailed[0]?.count ?? 0;
+	const sentToAuction = received - discarded;
 	const won = settledCount + settleFailedCount;
-	const lost = Math.max(0, sentToAuction - won);
+	const lost = sentToAuction - won;
 
 	return {
-		received: receivedCount,
+		received,
 		discarded,
 		simFailed: simFailedCount,
 		sentToAuction,
@@ -81,14 +86,14 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 		lost,
 		settled: settledCount,
 		settleFailed: settleFailedCount,
-		rejectionBreakdown: rejections.map((r) => ({
+		rejectionBreakdown: rejectionRows.map((r) => ({
 			reason: r.reason ?? "unknown",
 			count: r.count,
 		})),
-		penalizedCount: penalized[0]?.count ?? 0,
-		penalizedAmountWei: penalized[0]?.amount ?? "0",
-		nonSettlementDebitedCount: nonSettlementDebited[0]?.count ?? 0,
-		bufferDebitedCount: bufferDebited[0]?.count ?? 0,
+		penalizedCount: Number(penaltyStats?.penalizedCount ?? 0),
+		penalizedAmountWei: penaltyStats?.penalizedAmount ?? "0",
+		nonSettlementDebitedCount: Number(penaltyStats?.nonSettlementDebitedCount ?? 0),
+		bufferDebitedCount: Number(penaltyStats?.bufferDebitedCount ?? 0),
 	};
 }
 
@@ -106,51 +111,30 @@ export interface SubsolverStats {
 export async function getSubsolverStats(db: Db, range: DateRange): Promise<SubsolverStats[]> {
 	const { from, to } = range;
 
+	// Single query with conditional aggregation — one pass, no in-memory pivot.
 	const rows = await db
 		.select({
 			subSolver: auditEvents.subSolver,
-			eventType: auditEvents.eventType,
-			count: count(),
+			proposalsReceived: sql<number>`COUNT(*) FILTER (WHERE event_type = 'received')`,
+			settled: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settled')`,
+			settleFailed: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settle_failed')`,
+			rejected: sql<number>`COUNT(*) FILTER (WHERE event_type = 'rejected')`,
+			penalized: sql<number>`COUNT(*) FILTER (WHERE event_type IN ('penalized', 'non_settlement_debited'))`,
 		})
 		.from(auditEvents)
 		.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to)))
-		.groupBy(auditEvents.subSolver, auditEvents.eventType);
+		.groupBy(auditEvents.subSolver);
 
-	// Pivot in memory — the table is small enough and avoids complex SQL
-	const map = new Map<string, SubsolverStats>();
-	for (const row of rows) {
-		if (!map.has(row.subSolver)) {
-			map.set(row.subSolver, {
-				subSolver: row.subSolver,
-				proposalsReceived: 0,
-				settled: 0,
-				settleFailed: 0,
-				rejected: 0,
-				penalized: 0,
-			});
-		}
-		const entry = map.get(row.subSolver)!;
-		switch (row.eventType) {
-			case "received":
-				entry.proposalsReceived = row.count;
-				break;
-			case "settled":
-				entry.settled = row.count;
-				break;
-			case "settle_failed":
-				entry.settleFailed = row.count;
-				break;
-			case "rejected":
-				entry.rejected = row.count;
-				break;
-			case "penalized":
-			case "non_settlement_debited":
-				entry.penalized += row.count;
-				break;
-		}
-	}
-
-	return [...map.values()].sort((a, b) => b.proposalsReceived - a.proposalsReceived);
+	return rows
+		.map((r) => ({
+			subSolver: r.subSolver,
+			proposalsReceived: Number(r.proposalsReceived),
+			settled: Number(r.settled),
+			settleFailed: Number(r.settleFailed),
+			rejected: Number(r.rejected),
+			penalized: Number(r.penalized),
+		}))
+		.sort((a, b) => b.proposalsReceived - a.proposalsReceived);
 }
 
 // --- Proposals list ---
@@ -275,6 +259,6 @@ export async function getPendingPenaltiesCount(db: Db): Promise<number> {
 	const [row] = await db
 		.select({ count: count() })
 		.from(penalties)
-		.where(sql`penalty_tx_hash IS NULL`);
+		.where(isNull(penalties.penaltyTxHash));
 	return row?.count ?? 0;
 }

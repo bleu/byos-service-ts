@@ -378,14 +378,10 @@ export async function spawnChain(): Promise<ChainFixture> {
 
 	// Deploy Escrow with the same role mapping as the Rust fixture:
 	//   admin = accounts[2], operator = accounts[1], submitters = [accounts[0]]
-	// biome-ignore lint/style/noNonNullAssertion: anvil accounts array is always 10 elements
 	const deployer = { account: accounts[0]!, key: keys[0]! };
 	const { escrow, trampolineFactory } = await deployEscrow(rpcUrl, deployer, {
-		// biome-ignore lint/style/noNonNullAssertion: anvil accounts array is always 10 elements
 		admin: accounts[2]!,
-		// biome-ignore lint/style/noNonNullAssertion: anvil accounts array is always 10 elements
 		operator: accounts[1]!,
-		// biome-ignore lint/style/noNonNullAssertion: anvil accounts array is always 10 elements
 		submitters: [accounts[0]!],
 	});
 

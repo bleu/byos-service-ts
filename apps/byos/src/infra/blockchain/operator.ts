@@ -25,6 +25,7 @@ export class EscrowOperator {
 			functionName: "debit",
 			args: [subSolver, amount, reason],
 			chain: this.walletClient.chain,
+			// biome-ignore lint/style/noNonNullAssertion: walletClient is always constructed with an account
 			account: this.walletClient.account!,
 		});
 
