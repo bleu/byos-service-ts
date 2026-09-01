@@ -6,6 +6,7 @@ import {
 	recoverReader,
 } from "@byos/common";
 import { Hono } from "hono";
+import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
@@ -27,11 +28,13 @@ export interface RoutesConfig {
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	signerLimit: SignerLimitConfig;
+	logger?: Logger;
 }
 
 export function createPublicRoutes(config: RoutesConfig) {
 	const app = new Hono();
 	const domain = byosDomain(config.chainId, config.trampolineFactory);
+	const log = config.logger?.child({ component: "ingestion" });
 
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
 
@@ -87,7 +90,12 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		// The floor gate is a write-side control: a sub-solver whose withdrawal
 		// is pending must still be able to read and cancel what it has live.
-		await enforceSignerLimit(config.signerLimit, subSolver, { enforceEscrowFloor: true });
+		try {
+			await enforceSignerLimit(config.signerLimit, subSolver, { enforceEscrowFloor: true });
+		} catch (err) {
+			log?.warn({ reason: (err as { kind?: string }).kind }, "proposal rejected at ingestion");
+			throw err;
+		}
 
 		// Validate expiry
 		const now = BigInt(Math.floor(Date.now() / 1000));
@@ -140,6 +148,16 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
+		log?.info(
+			{
+				id: inserted.id,
+				subSolver,
+				orderUid: parsed.orderUid,
+				sellToken: parsed.sellToken,
+				buyToken: parsed.buyToken,
+			},
+			"proposal received",
+		);
 		return c.json({ id: inserted.id }, 202);
 	});
 
