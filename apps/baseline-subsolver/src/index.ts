@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { byosDomain } from "@byos/common";
+import { randomNonce } from "@byos/subsolver-core";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -14,11 +15,11 @@ import { OrderbookClient } from "./infra/orderbook.js";
 interface Live {
 	id: number;
 	validUntil: bigint;
+	lastSubmitted: bigint;
 }
 
 class Subsolver {
 	private live = new Map<string, Live>();
-	private nextNonce: bigint;
 
 	constructor(
 		private readonly config: ReturnType<typeof parseConfig>,
@@ -30,14 +31,12 @@ class Subsolver {
 		// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 		private readonly signFn: (params: any) => Promise<Hex>,
 		private readonly logger: pino.Logger,
-	) {
-		this.nextNonce = BigInt(Date.now());
-	}
+	) {}
 
 	async pollOnce(now: bigint): Promise<void> {
 		// Cleanup expired proposals
 		for (const [uid, live] of this.live) {
-			if (live.validUntil <= now) {
+			if (live.validUntil < now) {
 				this.live.delete(uid);
 			}
 		}
@@ -61,7 +60,8 @@ class Subsolver {
 		if (pending.length === 0) return;
 
 		// Batch fetch reserves (single multicall)
-		const queries: ReservesQuery[] = pending.map((o) => ({
+		const candidates = pending;
+		const queries: ReservesQuery[] = candidates.map((o) => ({
 			pair: pairAddress(
 				this.config.toml.uniswapFactory,
 				this.config.toml.pairInitCodeHash,
@@ -81,10 +81,10 @@ class Subsolver {
 		}
 
 		// Per-order proposal
-		for (let i = 0; i < pending.length; i++) {
-			const order = pending[i]!;
+		for (let i = 0; i < candidates.length; i++) {
+			const order = candidates[i];
 			const reserve = reserves[i];
-			if (!reserve) continue;
+			if (!order || !reserve) continue;
 
 			try {
 				const result = await this.propose(order, reserve.reserveSell, reserve.reserveBuy, now);
@@ -92,8 +92,8 @@ class Subsolver {
 					this.live.set(order.uid.toLowerCase(), result);
 					this.logger.info({ id: result.id, orderUid: order.uid }, "proposal submitted");
 				}
-			} catch (e) {
-				this.logger.warn({ err: e, orderUid: order.uid }, "proposal failed");
+			} catch (error) {
+				this.logger.warn({ err: error, orderUid: order.uid }, "proposal failed");
 			}
 		}
 	}
@@ -126,7 +126,7 @@ class Subsolver {
 		now: bigint,
 	): Promise<Live | null> {
 		const validUntil = now + BigInt(this.config.toml.proposalTtl);
-		const nonce = this.nextNonce++;
+		const nonce = randomNonce();
 
 		const proposal = await buildProposal(
 			order,
@@ -146,7 +146,7 @@ class Subsolver {
 		if (!proposal) return null;
 
 		const id = await this.byos.submit(proposal);
-		return { id, validUntil };
+		return { id, validUntil, lastSubmitted: now };
 	}
 }
 
@@ -180,7 +180,6 @@ async function main() {
 	// Clients
 	const orderbook = new OrderbookClient(config.orderBookUrl);
 	const byos = new ByosClient(config.byosUrl, domain, signFn);
-
 	// Subsolver
 	const subsolver = new Subsolver(
 		config,

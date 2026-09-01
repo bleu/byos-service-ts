@@ -17,7 +17,7 @@ We need a standard shape for packages in this workspace: how apps are structured
 | Package | Kind | Role |
 |---|---|---|
 | `apps/byos` | app | The BYOS service: public proposal API + solver engine, one process, two listeners ([ADR-0001](0001-proposal-api.md)) |
-| `apps/subsolver` | app | Reference sub-solver: example proposal-API client, e2e-test counterpart, documentation for external teams |
+| `apps/baseline-subsolver` | app | Baseline reference sub-solver: example proposal-API client, e2e-test counterpart, documentation for external teams |
 | `packages/common` | library | Shared types: EIP-712 encoding, ABIs, DTOs, settlement encoding |
 | `tests/integration` | tests | API integration tests: in-process Hono apps with real Postgres ([ADR-0009](0009-testing-strategy.md)) |
 | `tests/e2e` | tests | End-to-end tests: full CoW Protocol stack on Anvil ([ADR-0009](0009-testing-strategy.md)) |
@@ -26,7 +26,7 @@ New capabilities get their own small, single-purpose, kebab-case-named packages 
 
 ### domain / infra split
 
-Inside `apps/byos` (and `apps/subsolver` once it grows):
+Inside `apps/byos` (and `apps/baseline-subsolver` once it grows):
 
 - `domain/` — pure business logic, no IO: proposal store and lifecycle, scoring and selection, eligibility math, attribution. Types here are the CONTEXT.md vocabulary.
 - `infra/` — everything touching the outside world: `api/` (Hono routes with Zod request schemas), `blockchain/` (RPC via viem, simulation, escrow operator), `config/`, `jobs/` (BullMQ workers), `persistence/` (Drizzle queries, audit trail).

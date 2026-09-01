@@ -1,4 +1,5 @@
 import { type ContractInteraction, type Proposal, signProposal } from "@byos/common";
+import type { SignedProposal } from "@byos/subsolver-core";
 import type { Address, Hex, TypedDataDomain } from "viem";
 import { encodeFunctionData, keccak256 } from "viem";
 import { amountIn, amountOut } from "./routing.js";
@@ -11,6 +12,10 @@ export interface Order {
 	sellAmount: bigint;
 	buyAmount: bigint;
 	kind: "sell" | "buy";
+	/** The auction's original amounts, used to calculate a partial remaining fill. */
+	fullSellAmount?: bigint;
+	fullBuyAmount?: bigint;
+	estimatedNativeSurplus?: bigint;
 }
 
 /** Parameters for building a routed proposal. */
@@ -22,20 +27,6 @@ export interface RouteParams {
 	validUntil: bigint;
 	nonce: bigint;
 	extraInteractions: ContractInteraction[];
-}
-
-/** A fully signed proposal ready for submission to BYOS. */
-export interface SignedProposal {
-	orderUid: Hex;
-	sellToken: Address;
-	buyToken: Address;
-	sellAmount: bigint;
-	minBuyAmount: bigint;
-	quoteBuyAmount: bigint;
-	interactions: ContractInteraction[];
-	validUntil: bigint;
-	nonce: bigint;
-	signature: Hex;
 }
 
 /** ERC20 approve ABI for building approve interactions. */

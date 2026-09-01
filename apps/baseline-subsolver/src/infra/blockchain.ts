@@ -47,7 +47,8 @@ export class ChainClient {
 		return results.map((result, i) => {
 			if (result.status === "failure") return null;
 			const [reserve0, reserve1] = result.result;
-			const query = queries[i]!;
+			const query = queries[i];
+			if (!query) return null;
 
 			// Reorient by trade direction: Uniswap V2 stores reserves by token address sort order
 			if (query.sellToken.toLowerCase() < query.buyToken.toLowerCase()) {

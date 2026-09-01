@@ -333,14 +333,14 @@ describe("/solve economics", () => {
 
 		const auction = auctionJson(first, "sell", "1000", "900", "0");
 		const secondOrder = {
-			...auction.orders[0]!,
+			...auction.orders[0],
 			uid: second,
 			sellAmount: "2000",
 			fullSellAmount: "2000",
 			buyAmount: "1800",
 			fullBuyAmount: "1800",
 		};
-		auction.orders = [auction.orders[0]!, secondOrder];
+		auction.orders = [auction.orders[0], secondOrder];
 
 		const { solutions } = await postSolve(auction);
 		expect(solutions, "each order must be scored on its own").toHaveLength(2);

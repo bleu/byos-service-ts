@@ -175,7 +175,8 @@ describe("proposal lifecycle", () => {
 		// Other signer should not see SIGNER's proposals
 		// (they might have their own, but shouldn't see ours)
 		const ourProposals = otherBody.proposals.filter(
-			(p: any) => p.subSolver?.toLowerCase() !== OTHER_SIGNER_ACCOUNT.address.toLowerCase(),
+			(p: { subSolver?: string }) =>
+				p.subSolver?.toLowerCase() !== OTHER_SIGNER_ACCOUNT.address.toLowerCase(),
 		);
 		expect(ourProposals).toHaveLength(0);
 	});

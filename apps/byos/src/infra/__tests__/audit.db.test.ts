@@ -59,7 +59,8 @@ describe("audit persistence", () => {
 			.where(eq(auditEvents.eventType, "received"));
 
 		expect(rows.length).toBeGreaterThanOrEqual(1);
-		const row = rows[rows.length - 1]!;
+		const row = rows.at(-1);
+		if (!row) throw new Error("received audit event missing");
 		expect(row.eventType).toBe("received");
 		expect(row.proposalId).toBe(1);
 	});
@@ -87,7 +88,8 @@ describe("audit persistence", () => {
 			.where(eq(auditEvents.eventType, "validated"));
 
 		expect(rows.length).toBeGreaterThanOrEqual(1);
-		const row = rows[rows.length - 1]!;
+		const row = rows.at(-1);
+		if (!row) throw new Error("validated audit event missing");
 		expect(row.proposalId).toBe(2);
 		expect((row.payload as Record<string, unknown>).from).toBe("submitted");
 		expect((row.payload as Record<string, unknown>).to).toBe("active");
