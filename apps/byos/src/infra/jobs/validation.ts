@@ -144,6 +144,10 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 				if ("auditEvent" in result) {
 					onAuditEvent(result.auditEvent);
 				}
+				logger.info(
+					{ id: proposal.id, subSolver: proposal.subSolver, orderUid: proposal.orderUid },
+					"proposal expired",
+				);
 				expired++;
 			} catch (e) {
 				logger.debug({ err: e, id: proposal.id }, "expire transition lost");
@@ -212,6 +216,11 @@ export async function runProposalValidation(
 					reason: verdict.kind === "reject" ? verdict.reason : undefined,
 				},
 				"proposal rejected",
+			);
+		} else if (result.status === "simFailed") {
+			logger.warn(
+				{ id: proposal.id, subSolver: proposal.subSolver, orderUid: proposal.orderUid },
+				"proposal sim failed",
 			);
 		}
 	} catch (e) {
