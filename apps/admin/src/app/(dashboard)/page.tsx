@@ -1,5 +1,13 @@
-import { getOverview, defaultDateRange } from "@/lib/api";
+import { db } from "@/lib/db";
+import { formatNativeAmount } from "@/lib/formatters";
+import { getOverviewStats } from "@/lib/queries";
 import { DateRangeForm } from "./date-range-form";
+
+function defaultDateRange(): { from: string; to: string } {
+	const to = new Date();
+	const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+	return { from: from.toISOString(), to: to.toISOString() };
+}
 
 export default async function OverviewPage({
   searchParams,
@@ -11,7 +19,9 @@ export default async function OverviewPage({
   const from = fromParam ?? defaults.from;
   const to = toParam ?? defaults.to;
 
-  const stats = await getOverview(from, to);
+  const range = { from: new Date(from), to: new Date(to) };
+  const raw = await getOverviewStats(db, range);
+  const stats = { ...raw, penalizedAmountFormatted: formatNativeAmount(raw.penalizedAmountWei) };
 
   return (
     <div className="space-y-6">

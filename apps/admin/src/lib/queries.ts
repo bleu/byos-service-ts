@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import type { Db } from "../db/index.js";
-import { auditEvents, penalties, proposals } from "../db/schema.js";
+import type { Db } from "./db";
+import { auditEvents, penalties, proposals } from "./schema";
 
 export interface DateRange {
 	from: Date;
@@ -32,16 +32,12 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 	const { from, to } = range;
 
 	const [statusRows, rejectionRows, [penaltyStats]] = await Promise.all([
-		// Funnel: count proposals created in range by current status.
-		// Anchoring to proposal creation date (not event time) guarantees the
-		// funnel is always coherent: settled ≤ won ≤ sentToAuction ≤ received.
 		db
 			.select({ status: proposals.status, count: count() })
 			.from(proposals)
 			.where(and(gte(proposals.createdAt, from), lt(proposals.createdAt, to)))
 			.groupBy(proposals.status),
 
-		// Rejection breakdown from the proposals table directly.
 		db
 			.select({ reason: proposals.rejectionReason, count: count() })
 			.from(proposals)
@@ -54,7 +50,6 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 			)
 			.groupBy(proposals.rejectionReason),
 
-		// Penalty/debit event counts in a single pass using conditional aggregation.
 		db
 			.select({
 				penalizedCount: sql<number>`COUNT(*) FILTER (WHERE event_type = 'penalized')`,
@@ -111,7 +106,6 @@ export interface SubsolverStats {
 export async function getSubsolverStats(db: Db, range: DateRange): Promise<SubsolverStats[]> {
 	const { from, to } = range;
 
-	// Single query with conditional aggregation — one pass, no in-memory pivot.
 	const rows = await db
 		.select({
 			subSolver: auditEvents.subSolver,
@@ -194,7 +188,7 @@ export async function listProposals(
 	return { items, total: totalRows[0]?.count ?? 0 };
 }
 
-// --- Proposal audit trail ---
+// --- Proposal detail ---
 
 export interface AuditEventRow {
 	id: number;
@@ -210,7 +204,6 @@ export interface ProposalDetail {
 		buyToken: string;
 		sellAmount: string;
 		minBuyAmount: string;
-		settlementTxHash: string | null;
 		penaltyTxHash: string | null;
 	};
 	auditTrail: AuditEventRow[];
