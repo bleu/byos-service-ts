@@ -1,7 +1,7 @@
 import { formatUnits } from "viem";
-import { gnosis, gnosisChiado, mainnet, sepolia } from "viem/chains";
+import { bsc, gnosis, gnosisChiado, mainnet, sepolia } from "viem/chains";
 
-const KNOWN_CHAINS = [mainnet, gnosis, sepolia, gnosisChiado];
+const KNOWN_CHAINS = [mainnet, gnosis, sepolia, gnosisChiado, bsc];
 
 function getChain(chainId: number) {
 	return KNOWN_CHAINS.find((c) => c.id === chainId);
@@ -34,6 +34,7 @@ export function blockExplorerTxUrl(txHash: string): string | null {
 
 const TENDERLY_NETWORK_SLUGS: Record<number, string> = {
 	1: "mainnet",
+	56: "bsc",
 	100: "gnosis",
 	11155111: "sepolia",
 	10200: "chiado",
