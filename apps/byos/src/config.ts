@@ -22,6 +22,9 @@ export const configSchema = z.object({
 	// Admin auth
 	GOOGLE_CLIENT_ID: z.string().optional(),
 
+	// Slack notifications
+	SLACK_WEBHOOK_URL: z.string().url().optional(),
+
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 
