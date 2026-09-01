@@ -74,6 +74,14 @@ async function main() {
 	);
 
 	// 6. Start BullMQ workers
+	const slackMisconfigured =
+		(config.SLACK_TOKEN && !config.SLACK_CHANNEL) ||
+		(!config.SLACK_TOKEN && config.SLACK_CHANNEL);
+	if (slackMisconfigured) {
+		logger.warn(
+			"SLACK_TOKEN and SLACK_CHANNEL must both be set to enable Slack notifications — disabling",
+		);
+	}
 	const slackWorker =
 		config.SLACK_TOKEN && config.SLACK_CHANNEL
 			? createSlackWorker(ctx.redis, config.SLACK_TOKEN, config.SLACK_CHANNEL, logger)

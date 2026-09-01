@@ -107,21 +107,6 @@ export const configSchema = z.object({
 });
 
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
-	if (cfg.SLACK_TOKEN && !cfg.SLACK_CHANNEL) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			path: ["SLACK_CHANNEL"],
-			message: "required when SLACK_TOKEN is set",
-		});
-	}
-	if (cfg.SLACK_CHANNEL && !cfg.SLACK_TOKEN) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			path: ["SLACK_TOKEN"],
-			message: "required when SLACK_CHANNEL is set",
-		});
-	}
-
 	if (cfg.RATE_MIN_PER_WINDOW > cfg.RATE_MAX_PER_WINDOW) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
