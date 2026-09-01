@@ -39,9 +39,10 @@ COPY --from=build /app/packages/common/node_modules packages/common/node_modules
 COPY --from=build /app/apps/baseline-subsolver/dist apps/baseline-subsolver/dist/
 COPY --from=build /app/apps/baseline-subsolver/package.json apps/baseline-subsolver/
 COPY --from=build /app/apps/baseline-subsolver/node_modules apps/baseline-subsolver/node_modules/
-# Fynd subsolver executable.
+# Fynd subsolver executable + BSC config.
 COPY --from=build /app/apps/fynd-subsolver/dist apps/fynd-subsolver/dist/
 COPY --from=build /app/apps/fynd-subsolver/package.json apps/fynd-subsolver/
+COPY --from=build /app/config/bsc/subsolver.toml config/bsc/subsolver.toml
 COPY --from=build /app/apps/fynd-subsolver/node_modules apps/fynd-subsolver/node_modules/
 COPY --from=build /app/packages/subsolver-core/dist packages/subsolver-core/dist/
 COPY --from=build /app/packages/subsolver-core/package.json packages/subsolver-core/
