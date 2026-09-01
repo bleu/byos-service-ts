@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { getProposals } from "@/lib/api";
+import { db } from "@/lib/db";
+import { blockExplorerAddressUrl, cowExplorerOrderUrl, tenderlyTxUrl } from "@/lib/formatters";
+import { listProposals } from "@/lib/queries";
 
 const STATUSES = ["submitted", "active", "rejected", "simFailed", "executing", "settled", "settleFailed", "penalized", "cancelled", "expired"];
 
-function isoZ(dateStr: string) {
-  return new Date(dateStr).toISOString().replace(/\.\d{3}Z$/, "Z");
+function isoZ(date: Date | string) {
+  return new Date(date).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export default async function ProposalsPage({
@@ -15,7 +17,13 @@ export default async function ProposalsPage({
   const { subSolver, status, page: pageStr } = await searchParams;
   const page = Math.max(1, Number(pageStr ?? "1"));
 
-  const { items, total } = await getProposals({ subSolver, status, page, limit: 50 });
+  const { items: rawItems, total } = await listProposals(db, { subSolver, status, page, limit: 50 });
+  const items = rawItems.map((p) => ({
+    ...p,
+    subSolverUrl: blockExplorerAddressUrl(p.subSolver),
+    orderUidUrl: cowExplorerOrderUrl(p.orderUid),
+    tenderlyUrl: p.settlementTxHash ? tenderlyTxUrl(p.settlementTxHash) : null,
+  }));
   const totalPages = Math.ceil(total / 50);
 
   return (
@@ -73,17 +81,7 @@ export default async function ProposalsPage({
             </tr>
           </thead>
           <tbody>
-            {items.map((p: {
-              id: number;
-              subSolver: string;
-              subSolverUrl: string | null;
-              orderUid: string;
-              orderUidUrl: string | null;
-              status: string;
-              rejectionReason: string | null;
-              tenderlyUrl: string | null;
-              createdAt: string;
-            }) => (
+            {items.map((p) => (
               <tr key={p.id} className="border-b border-line last:border-0 hover:bg-base transition-colors duration-100">
                 <td className="px-4 py-3">
                   <Link href={`/proposals/${p.id}`} className="font-mono text-[12px] text-accent hover:underline">

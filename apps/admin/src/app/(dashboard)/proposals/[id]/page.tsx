@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getProposal } from "@/lib/api";
+import { db } from "@/lib/db";
+import {
+	blockExplorerAddressUrl,
+	cowExplorerOrderUrl,
+	txLinks,
+} from "@/lib/formatters";
+import { getProposalDetail } from "@/lib/queries";
 
-function isoZ(dateStr: string) {
-  return new Date(dateStr).toISOString().replace(/\.\d{3}Z$/, "Z");
+function isoZ(date: Date | string) {
+  return new Date(date).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 export default async function ProposalDetailPage({
@@ -16,14 +22,18 @@ export default async function ProposalDetailPage({
 
   if (!Number.isSafeInteger(id) || id <= 0) notFound();
 
-  let data: any;
-  try {
-    data = await getProposal(id);
-  } catch {
-    notFound();
-  }
+  const detail = await getProposalDetail(db, id);
+  if (!detail) notFound();
 
-  const { proposal, auditTrail } = data;
+  const { auditTrail } = detail;
+  const raw = detail.proposal;
+  const proposal = {
+    ...raw,
+    subSolverUrl: blockExplorerAddressUrl(raw.subSolver),
+    orderUidUrl: cowExplorerOrderUrl(raw.orderUid),
+    ...txLinks(raw.settlementTxHash),
+    penaltyTxLinks: txLinks(raw.penaltyTxHash),
+  };
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -112,12 +122,7 @@ export default async function ProposalDetailPage({
           <span className="text-[10px] uppercase tracking-widest text-dim font-medium">Audit trail</span>
         </div>
         <div className="p-4 space-y-2">
-          {auditTrail.map((event: {
-            id: number;
-            eventType: string;
-            payload: unknown;
-            occurredAt: string;
-          }) => (
+          {auditTrail.map((event) => (
             <div key={event.id} className="border border-line rounded p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[11px] font-medium text-accent bg-accent-tint px-1.5 py-0.5 rounded-sm">

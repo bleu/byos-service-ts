@@ -1,5 +1,12 @@
-import { getSubsolvers, defaultDateRange } from "@/lib/api";
+import { db } from "@/lib/db";
+import { getSubsolverStats } from "@/lib/queries";
 import { DateRangeForm } from "../date-range-form";
+
+function defaultDateRange(): { from: string; to: string } {
+	const to = new Date();
+	const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+	return { from: from.toISOString(), to: to.toISOString() };
+}
 
 export default async function SubsolversPage({
   searchParams,
@@ -11,14 +18,8 @@ export default async function SubsolversPage({
   const from = fromParam ?? defaults.from;
   const to = toParam ?? defaults.to;
 
-  const subsolvers: {
-    subSolver: string;
-    proposalsReceived: number;
-    settled: number;
-    settleFailed: number;
-    rejected: number;
-    penalized: number;
-  }[] = await getSubsolvers(from, to);
+  const range = { from: new Date(from), to: new Date(to) };
+  const subsolvers = await getSubsolverStats(db, range);
 
   return (
     <div className="space-y-5">
