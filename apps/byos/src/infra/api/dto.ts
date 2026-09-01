@@ -79,6 +79,7 @@ export function proposalToMetadata(p: Proposal) {
 	return {
 		id: p.id,
 		subSolver: p.subSolver,
+		orderUid: p.orderUid,
 		validUntil: p.validUntil.toString(),
 		status: p.status,
 	};

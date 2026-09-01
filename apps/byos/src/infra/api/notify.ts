@@ -134,6 +134,9 @@ export function createNotifyRoute(config: NotifyConfig) {
 			}
 			if (result.auditEvent) {
 				config.onAuditEvent(result.auditEvent);
+				for (const auditEvent of result.cancelledAuditEvents) {
+					config.onAuditEvent(auditEvent);
+				}
 				continue;
 			}
 			// Not legal from the committed status: a duplicate notification, or

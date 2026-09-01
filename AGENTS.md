@@ -30,6 +30,7 @@ The normative BYOS specification lives in `docs/shared/` (a Git submodule pointi
 
 ```
 CONTEXT.md              Domain language and architecture map — read first
+AGENTS/skills/          Agent skills available in this repo (e.g. linear-review)
 apps/byos/              The BYOS service (proposal API, solver engine, workers)
 apps/subsolver/         Reference sub-solver client
 packages/common/        Shared contract ABIs, EIP-712, DTOs, trampoline encoding
@@ -144,6 +145,24 @@ The glossary lives in [`CONTEXT.md`](CONTEXT.md) — sub-solver, proposal, inges
 - `sub_solver` / `subSolver` — the external party. Never plain `solver` (that means BYOS itself in CoW's vocabulary).
 - `gas cut` — not "fee". The order's signed `feeAmount` is a different field.
 - `ingestion` — the `POST /proposals` path. Does NOT include simulation or escrow checks.
+
+## Linear issue labels
+
+Issues in this project use two agent-facing labels. Apply them when creating or triaging issues so the `linear-review` skill can triage automatically.
+
+| Label | Meaning |
+|-------|---------|
+| `ready-for-agent` | The issue is fully specified and within agentic scope. An agent can pick it up without asking for clarification. |
+| `needs-requirements` | The issue is missing information an agent needs (acceptance criteria, scope, expected behaviour, or validation approach). Add a comment explaining what is missing. |
+
+**When creating an issue**, ask yourself whether an agent could answer all four questions below without guessing. If yes, add `ready-for-agent`. If not, add `needs-requirements` and note what is missing.
+
+1. What needs to change?
+2. Where does the change belong in the codebase?
+3. What behaviour is expected after the change?
+4. How can the result be validated (test, type check, manual step)?
+
+Do not add either label to issues that require product decisions, UX/design work, or coordination across multiple teams — those are out of agentic scope regardless of how well they are written.
 
 ## Related repositories
 

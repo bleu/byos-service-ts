@@ -12,6 +12,8 @@ export const configSchema = z.object({
 		.number()
 		.int()
 		.refine(isSupportedEvmChain, "Must be an EVM chain supported by CoW Protocol"),
+	/** TrampolineFactory address for this deployment. Required: BYOS needs it
+	 * for EIP-712 domain construction even before an RPC is configured. */
 	TRAMPOLINE_FACTORY: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
 
 	// Listeners
@@ -28,21 +30,26 @@ export const configSchema = z.object({
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 
-	// Chain connectivity (all required together when RPC_URL is set)
-	RPC_URL: z.string().optional(),
+	// Chain connectivity
+	RPC_URL: z.string(),
+	/** Overrides the orderbook URL from `orderbookUrlFor`. Useful for barn/staging. */
 	ORDERBOOK_URL: z.string().optional(),
-	ESCROW_ADDRESS: z
-		.string()
-		.regex(addressPattern, "Must be a valid 0x-prefixed address")
-		.optional(),
+	/** Escrow contract address for this deployment. Set once per chain by the
+	 * operator who deployed the contract. */
+	ESCROW_ADDRESS: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
+	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
-	/** Overrides the chain's default minimum collateral. Omit to take the
-	 * per-chain value from `minCollateralFor`. */
-	MIN_COLLATERAL: z.string().regex(/^\d+$/, "Must be a decimal wei amount").optional(),
-	DEFAULT_GAS_PRICE: z.string().optional(),
+	/** Minimum escrow collateral for this deployment, in wei. Defaults to 10^16
+	 * (0.01 ETH-equivalent) — a placeholder until per-chain gas data informs it
+	 * (COW-1265). Override with MIN_COLLATERAL when deploying. */
+	MIN_COLLATERAL: z
+		.string()
+		.regex(/^\d+$/, "Must be a decimal wei amount")
+		.default("10000000000000000"),
+	DEFAULT_GAS_PRICE: z.string(),
 
 	// Timing
 	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
@@ -89,7 +96,7 @@ export const configSchema = z.object({
 	BALANCE_REFRESH_BATCH_SIZE: z.coerce.number().int().positive().default(50),
 
 	// Operator (Track A penalty loop)
-	OPERATOR_PRIVATE_KEY: z.string().optional(),
+	OPERATOR_PRIVATE_KEY: z.string(),
 
 	// Logging
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
@@ -99,33 +106,7 @@ export const configSchema = z.object({
 		.default("false"),
 });
 
-/**
- * Mirrors the Rust CLI's requires_all: a half-configured chain connection
- * must fail startup, not boot with an undefined escrow address.
- *
- * MIN_COLLATERAL is not listed: it defaults to the chain's value, so an absent
- * one is a deliberate choice rather than a half-configuration.
- */
-const RPC_COMPANIONS = [
-	"ORDERBOOK_URL",
-	"ESCROW_ADDRESS",
-	"SETTLEMENT_ADDRESS",
-	"DEFAULT_GAS_PRICE",
-] as const;
-
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
-	if (cfg.RPC_URL) {
-		for (const key of RPC_COMPANIONS) {
-			if (!cfg[key]) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: [key],
-					message: "required when RPC_URL is set",
-				});
-			}
-		}
-	}
-
 	if (cfg.SLACK_TOKEN && !cfg.SLACK_CHANNEL) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
@@ -146,14 +127,6 @@ const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
 			code: z.ZodIssueCode.custom,
 			path: ["RATE_MIN_PER_WINDOW"],
 			message: "must not exceed RATE_MAX_PER_WINDOW",
-		});
-	}
-
-	if (!cfg.RPC_URL && cfg.OPERATOR_PRIVATE_KEY) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			path: ["OPERATOR_PRIVATE_KEY"],
-			message: "requires RPC_URL",
 		});
 	}
 });

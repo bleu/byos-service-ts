@@ -1,8 +1,8 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import pino from "pino";
-import type { Address } from "viem";
 import { parseConfig } from "./config.js";
 import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
@@ -39,7 +39,7 @@ async function main() {
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
-		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
+		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		gasPriceRef: ctx.gasPriceRef,
@@ -54,7 +54,7 @@ async function main() {
 	const internalApp = createInternalApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
-		trampolineFactory: config.TRAMPOLINE_FACTORY as Address,
+		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		gasPriceRef: ctx.gasPriceRef,
@@ -96,6 +96,7 @@ async function main() {
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,
 		validator: ctx.validator,
+		gasPriceRef: ctx.gasPriceRef,
 		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
 		enqueueValidation: (proposalId) =>
 			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
@@ -116,20 +117,16 @@ async function main() {
 		logger: logger.child({ worker: "retention" }),
 	});
 
-	// Only with RPC — there is nothing to refresh balances from otherwise.
-	const balanceRefreshWorker = ctx.balanceRefresh
-		? createBalanceRefreshWorker(ctx.redis, ctx.balanceRefresh)
-		: null;
+	const balanceRefreshWorker = createBalanceRefreshWorker(ctx.redis, ctx.balanceRefresh);
 
-	const penaltyWorker = ctx.operator
-		? createPenaltyWorker(ctx.redis, {
-				db: ctx.db,
-				operator: ctx.operator,
-				cL: ctx.minCollateralWei,
-				onAuditEvent: ctx.onAuditEvent,
-				logger: logger.child({ worker: "penalty" }),
-			})
-		: null;
+	const penaltyWorker = createPenaltyWorker(ctx.redis, {
+		db: ctx.db,
+		operator: ctx.operator,
+		cL: ctx.minCollateralWei,
+		workerId: `penalty-${randomUUID()}`,
+		onAuditEvent: ctx.onAuditEvent,
+		logger: logger.child({ worker: "penalty" }),
+	});
 
 	const workers = [
 		auditWorker,

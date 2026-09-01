@@ -9,6 +9,7 @@ import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 
 let ctx: TestContext;
+let nonceCounter = 0n;
 
 beforeAll(async () => {
 	ctx = await createTestDb();
@@ -37,7 +38,7 @@ function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposa
 		],
 		interactionsHash: `0x${"dd".repeat(32)}` as Hex,
 		validUntil: 1_700_000_000n,
-		nonce: 1n,
+		nonce: nonceCounter++,
 		signature: `0x${"ee".repeat(65)}` as Hex,
 		status: "submitted",
 		rejectionReason: null,
@@ -141,6 +142,110 @@ describe("proposal store", () => {
 		if ("status" in result) {
 			expect(result.status).toBe("rejected");
 		}
+	});
+
+	it("activating the newest proposal cancels older live proposals for its sub-solver and order", async () => {
+		const orderUid = `0x${"f1".repeat(56)}`;
+		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+		await store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null });
+		const { id: submittedId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		const result = await store.resolveVerdict(ctx.db, newerId, {
+			kind: "accept",
+			simulation: null,
+		});
+
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
+		expect((await store.get(ctx.db, submittedId))?.status).toBe("cancelled");
+		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
+		if ("status" in result) {
+			expect(result.replacementAuditEvents).toHaveLength(2);
+			expect(result.replacementAuditEvents).toContainEqual(
+				expect.objectContaining({
+					kind: expect.objectContaining({
+						type: "statusChanged",
+						from: "active",
+						to: "cancelled",
+					}),
+				}),
+			);
+		}
+	});
+
+	it("serializes concurrent validators so an older proposal cannot reactivate", async () => {
+		const orderUid = `0x${"f2".repeat(56)}`;
+		const { id: olderId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+		const { id: newerId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		await Promise.all([
+			store.resolveVerdict(ctx.db, olderId, { kind: "accept", simulation: null }),
+			store.resolveVerdict(ctx.db, newerId, { kind: "accept", simulation: null }),
+		]);
+
+		expect((await store.get(ctx.db, olderId))?.status).toBe("cancelled");
+		expect((await store.get(ctx.db, newerId))?.status).toBe("active");
+	});
+
+	it("never cancels an executing proposal when a replacement activates", async () => {
+		const orderUid = `0x${"f3".repeat(56)}`;
+		const { id: executingId } = await store.insert(
+			ctx.db,
+			sampleProposal({ orderUid, status: "executing" }),
+		);
+		const { id: replacementId } = await store.insert(ctx.db, sampleProposal({ orderUid }));
+
+		await store.resolveVerdict(ctx.db, replacementId, { kind: "accept", simulation: null });
+
+		expect((await store.get(ctx.db, executingId))?.status).toBe("executing");
+		expect((await store.get(ctx.db, replacementId))?.status).toBe("active");
+	});
+
+	it("restores a timed-out execution to active", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "executing" }));
+		await ctx.db.execute(
+			sql`UPDATE proposals SET status_changed_at = now() - interval '61 seconds' WHERE id = ${id}`,
+		);
+
+		const events = await store.releaseStaleExecuting(ctx.db, 60);
+
+		expect((await store.get(ctx.db, id))?.status).toBe("active");
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				kind: expect.objectContaining({ proposalId: id, to: "active" }),
+			}),
+		);
+	});
+
+	it("derives a fingerprint from all signed payload fields", async () => {
+		const proposal = sampleProposal();
+		const differentRoute = {
+			...proposal,
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xdeadbeef" as Hex }],
+		};
+		expect(store.signedProposalFingerprint(proposal)).not.toBe(
+			store.signedProposalFingerprint(differentRoute),
+		);
+	});
+
+	it("canonicalizes calldata casing in the signed payload fingerprint", async () => {
+		const proposal = sampleProposal({
+			interactions: [
+				{
+					target: "0x00000000000000000000000000000000000000cc" as Address,
+					value: 0n,
+					callData: "0xdeadbeef" as Hex,
+				},
+			],
+		});
+		const sameBytesDifferentCasing = {
+			...proposal,
+			interactions: [{ ...proposal.interactions[0]!, callData: "0xDEADBEEF" as Hex }],
+		};
+
+		expect(store.signedProposalFingerprint(proposal)).toBe(
+			store.signedProposalFingerprint(sameBytesDifferentCasing),
+		);
 	});
 
 	it("verdict on a terminal proposal is stale", async () => {
