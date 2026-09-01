@@ -23,7 +23,7 @@ export function DateRangeForm({
   return (
     <form method="GET" className="flex items-end gap-2">
       <div>
-        <label className={LABEL_CLS}>From (UTC)</label>
+        <label className={LABEL_CLS}>From</label>
         <input
           type="datetime-local"
           name="from"
@@ -32,7 +32,7 @@ export function DateRangeForm({
         />
       </div>
       <div>
-        <label className={LABEL_CLS}>To (UTC)</label>
+        <label className={LABEL_CLS}>To</label>
         <input
           type="datetime-local"
           name="to"

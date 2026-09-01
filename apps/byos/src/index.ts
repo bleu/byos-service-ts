@@ -8,10 +8,10 @@ import { buildContext } from "./context.js";
 import { createAdminApp } from "./infra/api/admin.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
-import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
+import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
 import {
 	createProposalValidationWorker,
 	createValidationWorker,
@@ -92,12 +92,19 @@ async function main() {
 			? createSlackWorker(ctx.redis, config.SLACK_TOKEN, config.SLACK_CHANNEL, logger)
 			: null;
 
-	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, slackWorker ? {
-		slackQueue: ctx.queues.slackNotification,
-		redis: ctx.redis,
-		chainId: config.CHAIN_ID,
-		cowExplorerUrl: config.COW_EXPLORER_URL,
-	} : undefined);
+	const auditWorker = createAuditWorker(
+		ctx.redis,
+		ctx.db,
+		logger,
+		slackWorker
+			? {
+					slackQueue: ctx.queues.slackNotification,
+					redis: ctx.redis,
+					chainId: config.CHAIN_ID,
+					cowExplorerUrl: config.COW_EXPLORER_URL,
+				}
+			: undefined,
+	);
 
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,

@@ -26,7 +26,6 @@ const EXPECTED_ROUTES = [
 
 function publicRoutes(): string[] {
 	const ctx: PublicAppContext = {
-		// biome-ignore lint/suspicious/noExplicitAny: the routes are registered without touching the db
 		db: {} as any,
 		chainId: 1,
 		trampolineFactory: "0x00000000000000000000000000000000000fac70" as Address,

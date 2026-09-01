@@ -62,7 +62,6 @@ function guardedApp(limiter: RateLimiter, logger?: { warn: (o: unknown, m: strin
 			limit: 10,
 			windowSecs: 60,
 			exemptPaths: ["/healthz"],
-			// biome-ignore lint/suspicious/noExplicitAny: test double for pino
 			logger: logger as any,
 		}),
 	);

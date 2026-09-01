@@ -30,7 +30,7 @@ export function createSlackWorker(
 	connection: Redis,
 	token: string,
 	channel: string,
-	logger: Logger,
+	_logger: Logger,
 ): Worker {
 	return new Worker(
 		"slack-notification",
@@ -51,14 +51,10 @@ export async function enqueueSlackNotification(
 	queue: import("bullmq").Queue,
 	text: string,
 ): Promise<void> {
-	await queue.add(
-		"slack-notify",
-		{ text } satisfies SlackNotificationPayload,
-		{
-			attempts: 5,
-			backoff: { type: "exponential", delay: 2000 },
-			removeOnComplete: true,
-			removeOnFail: false,
-		},
-	);
+	await queue.add("slack-notify", { text } satisfies SlackNotificationPayload, {
+		attempts: 5,
+		backoff: { type: "exponential", delay: 2000 },
+		removeOnComplete: true,
+		removeOnFail: false,
+	});
 }

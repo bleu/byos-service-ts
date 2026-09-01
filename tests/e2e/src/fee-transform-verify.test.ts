@@ -200,13 +200,13 @@ describe("fee transform verification (COW-1240)", () => {
 			"\nclearing price [sell]: ",
 			driverSellPrice.toString(),
 			"(driver set, index",
-			trade.sellTokenIndex.toString() + ")",
+			`${trade.sellTokenIndex.toString()})`,
 		);
 		console.log(
 			"clearing price [buy]:  ",
 			driverBuyPrice.toString(),
 			"(driver set, index",
-			trade.buyTokenIndex.toString() + ")",
+			`${trade.buyTokenIndex.toString()})`,
 		);
 		console.log("credited buy amount:   ", creditedBuy.toString(), "WETH atoms");
 		console.log("protocol fee taken:    ", protocolFee.toString(), "WETH atoms");

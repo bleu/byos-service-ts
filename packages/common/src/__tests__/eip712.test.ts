@@ -25,7 +25,6 @@ function makeSignFn(account: ReturnType<typeof privateKeyToAccount>) {
 		chain: foundry,
 		transport: http(),
 	});
-	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 	return (params: any) => client.signTypedData(params);
 }
 

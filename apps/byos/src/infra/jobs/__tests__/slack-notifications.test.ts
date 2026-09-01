@@ -3,8 +3,8 @@ import type { Address, Hex } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import type { AuditKind } from "../../../domain/audit.js";
 import type { Proposal } from "../../../domain/proposal.js";
-import { buildNotification } from "../audit-worker.js";
 import type { SlackFormatterContext } from "../../formatters.js";
+import { buildNotification } from "../../notifications.js";
 import { postToSlack } from "../slack-worker.js";
 
 const SLACK_TOKEN = process.env.SLACK_TOKEN;

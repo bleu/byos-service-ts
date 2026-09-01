@@ -10,7 +10,6 @@ import { CONFIG, CONTRACTS } from "./config.js";
 const DOMAIN = byosDomain(CONFIG.chainId, CONTRACTS.trampolineFactory);
 
 function makeSignFn(client: WalletClient) {
-	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 	return (params: any) => client.signTypedData(params);
 }
 

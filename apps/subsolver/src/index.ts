@@ -82,6 +82,7 @@ class Subsolver {
 
 		// Per-order proposal
 		for (let i = 0; i < pending.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: index is bounded by pending.length
 			const order = pending[i]!;
 			const reserve = reserves[i];
 			if (!reserve) continue;

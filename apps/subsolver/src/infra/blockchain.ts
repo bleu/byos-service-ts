@@ -47,6 +47,7 @@ export class ChainClient {
 		return results.map((result, i) => {
 			if (result.status === "failure") return null;
 			const [reserve0, reserve1] = result.result;
+			// biome-ignore lint/style/noNonNullAssertion: index is bounded by queries.length
 			const query = queries[i]!;
 
 			// Reorient by trade direction: Uniswap V2 stores reserves by token address sort order
