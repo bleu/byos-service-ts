@@ -1,8 +1,5 @@
 import { getSubsolvers, defaultDateRange } from "@/lib/api";
-
-function toDatetimeLocal(iso: string): string {
-  return iso.slice(0, 16);
-}
+import { DateRangeForm } from "../date-range-form";
 
 export default async function SubsolversPage({
   searchParams,
@@ -27,30 +24,7 @@ export default async function SubsolversPage({
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-[13px] font-semibold text-ink">Subsolvers</h1>
-        <form method="GET" className="flex items-end gap-2">
-          <div>
-            <label className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">From (UTC)</label>
-            <input
-              type="datetime-local"
-              name="from"
-              defaultValue={toDatetimeLocal(from)}
-              className="border border-line rounded bg-surface font-mono text-[12px] text-ink px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">To (UTC)</label>
-            <input
-              type="datetime-local"
-              name="to"
-              defaultValue={toDatetimeLocal(to)}
-              className="border border-line rounded bg-surface font-mono text-[12px] text-ink px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-            />
-          </div>
-          <button type="submit" className="bg-accent text-white text-[12px] font-medium px-3 py-1.5 rounded hover:opacity-90">
-            Apply
-          </button>
-          <a href="/subsolvers" className="text-[12px] text-dim hover:text-muted underline pb-1.5">Reset</a>
-        </form>
+        <DateRangeForm from={from} to={to} resetHref="/subsolvers" />
       </div>
 
       <div className="bg-surface border border-line rounded overflow-hidden">

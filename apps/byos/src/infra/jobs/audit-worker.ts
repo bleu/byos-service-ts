@@ -107,17 +107,19 @@ export async function buildNotification(
 	}
 }
 
+interface SlackOpts {
+	slackQueue: Queue;
+	redis: Redis;
+	chainId: number;
+	cowExplorerUrl: string;
+}
+
 /** Creates a BullMQ worker that drains audit events to Postgres. */
 export function createAuditWorker(
 	connection: Redis,
 	db: Db,
 	logger: Logger,
-	opts: {
-		slackQueue?: Queue;
-		redis?: Redis;
-		chainId?: number;
-		cowExplorerUrl?: string;
-	} = {},
+	slack?: SlackOpts,
 ): Worker {
 	return new Worker(
 		"audit",
@@ -130,15 +132,15 @@ export function createAuditWorker(
 			await insertAuditEvent(db, event);
 
 			// Dispatch Slack notifications after successful persistence
-			if (opts.slackQueue && opts.redis) {
+			if (slack) {
 				try {
 					const ctx: SlackFormatterContext = {
-						chainId: opts.chainId ?? 1,
-						cowExplorerUrl: opts.cowExplorerUrl ?? "https://explorer.cow.fi",
+						chainId: slack.chainId,
+						cowExplorerUrl: slack.cowExplorerUrl,
 					};
-					const text = await buildNotification(opts.redis, event.kind, ctx);
+					const text = await buildNotification(slack.redis, event.kind, ctx);
 					if (text) {
-						await enqueueSlackNotification(opts.slackQueue, text);
+						await enqueueSlackNotification(slack.slackQueue, text);
 					}
 				} catch (err) {
 					// Notification failure must never fail the audit job

@@ -31,6 +31,7 @@ export interface AdminAppContext {
 		penalty: Queue;
 		audit: Queue;
 		balanceRefresh: Queue;
+		slackNotification: Queue;
 	};
 }
 
@@ -112,7 +113,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		const cpus = os.cpus();
 
 		// Queue depths
-		const [validation, validateProposal, retention, penalty, audit, balanceRefresh] =
+		const [validation, validateProposal, retention, penalty, audit, balanceRefresh, slackNotification] =
 			await Promise.all([
 				ctx.queues.validation.getJobCounts("waiting", "active", "delayed"),
 				ctx.queues.validateProposal.getJobCounts("waiting", "active", "delayed"),
@@ -120,6 +121,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 				ctx.queues.penalty.getJobCounts("waiting", "active", "delayed"),
 				ctx.queues.audit.getJobCounts("waiting", "active", "delayed"),
 				ctx.queues.balanceRefresh.getJobCounts("waiting", "active", "delayed"),
+				ctx.queues.slackNotification.getJobCounts("waiting", "active", "delayed"),
 			]);
 
 		const pendingPenalties = await getPendingPenaltiesCount(ctx.db);
@@ -144,6 +146,7 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 				penalty,
 				audit,
 				balanceRefresh,
+				slackNotification,
 			},
 			pendingPenalties,
 		});

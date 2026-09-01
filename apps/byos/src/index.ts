@@ -92,12 +92,12 @@ async function main() {
 			? createSlackWorker(ctx.redis, config.SLACK_TOKEN, config.SLACK_CHANNEL, logger)
 			: null;
 
-	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, {
-		slackQueue: slackWorker ? ctx.queues.slackNotification : undefined,
-		redis: slackWorker ? ctx.redis : undefined,
+	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger, slackWorker ? {
+		slackQueue: ctx.queues.slackNotification,
+		redis: ctx.redis,
 		chainId: config.CHAIN_ID,
 		cowExplorerUrl: config.COW_EXPLORER_URL,
-	});
+	} : undefined);
 
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,
@@ -147,7 +147,8 @@ async function main() {
 		slackWorker,
 	].filter(Boolean) as import("bullmq").Worker[];
 
-	// Startup Slack notification (direct, not queued — queue may not be drained yet)
+	// Enqueue startup notification — routed through the queue for retry semantics,
+	// not through the audit trail (no domain event for "process started").
 	if (config.SLACK_TOKEN && config.SLACK_CHANNEL) {
 		enqueueSlackNotification(
 			ctx.queues.slackNotification,

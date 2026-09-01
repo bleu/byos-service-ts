@@ -36,7 +36,7 @@ export default async function SystemPage() {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(data.queues).map(([name, counts]: [string, any]) => (
+            {Object.entries(data.queues as Record<string, { waiting: number; active: number; delayed: number }>).map(([name, counts]) => (
               <tr key={name} className="border-b border-line last:border-0">
                 <td className="py-2.5 font-mono text-[12px] text-muted">{name}</td>
                 <td className="py-2.5 font-mono text-[12px] text-ink text-right">{counts.waiting ?? 0}</td>

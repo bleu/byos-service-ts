@@ -1,8 +1,5 @@
 import { getOverview, defaultDateRange } from "@/lib/api";
-
-function toDatetimeLocal(iso: string): string {
-  return iso.slice(0, 16);
-}
+import { DateRangeForm } from "./date-range-form";
 
 export default async function OverviewPage({
   searchParams,
@@ -20,7 +17,7 @@ export default async function OverviewPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-[13px] font-semibold text-ink">Overview</h1>
-        <DateRangeForm from={from} to={to} />
+        <DateRangeForm from={from} to={to} resetHref="/" />
       </div>
 
       {/* Funnel */}
@@ -52,6 +49,12 @@ export default async function OverviewPage({
             <span className="text-[10px] uppercase tracking-widest text-dim font-medium">Rejection breakdown</span>
           </div>
           <table className="w-full">
+            <thead>
+              <tr className="bg-base border-b border-line">
+                <th className="px-5 py-2.5 text-left text-[10px] uppercase tracking-widest text-dim font-medium">Reason</th>
+                <th className="px-5 py-2.5 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Count</th>
+              </tr>
+            </thead>
             <tbody>
               {stats.rejectionBreakdown.map((row: { reason: string; count: number }) => (
                 <tr key={row.reason} className="border-b border-line last:border-0 hover:bg-base transition-colors duration-100">
@@ -148,37 +151,6 @@ function FunnelBar({
         </div>
       </div>
     </div>
-  );
-}
-
-// --- Date range ---
-
-function DateRangeForm({ from, to }: { from: string; to: string }) {
-  return (
-    <form method="GET" className="flex items-end gap-2">
-      <div>
-        <label className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">From (UTC)</label>
-        <input
-          type="datetime-local"
-          name="from"
-          defaultValue={toDatetimeLocal(from)}
-          className="border border-line rounded bg-surface font-mono text-[12px] text-ink px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-        />
-      </div>
-      <div>
-        <label className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">To (UTC)</label>
-        <input
-          type="datetime-local"
-          name="to"
-          defaultValue={toDatetimeLocal(to)}
-          className="border border-line rounded bg-surface font-mono text-[12px] text-ink px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-        />
-      </div>
-      <button type="submit" className="bg-accent text-white text-[12px] font-medium px-3 py-1.5 rounded hover:opacity-90">
-        Apply
-      </button>
-      <a href="/" className="text-[12px] text-dim hover:text-muted underline pb-1.5">Reset</a>
-    </form>
   );
 }
 
