@@ -1,5 +1,4 @@
 import os from "node:os";
-import { OAuth2Client } from "google-auth-library";
 import { Hono } from "hono";
 import type { Redis } from "ioredis";
 import type { Queue } from "bullmq";
@@ -10,12 +9,21 @@ import {
 	getSubsolverStats,
 	listProposals,
 	getPendingPenaltiesCount,
-	type TimeRange,
+	type DateRange,
 } from "../admin-storage.js";
+import {
+	blockExplorerAddressUrl,
+	cowExplorerOrderUrl,
+	formatNativeAmount,
+	tenderlyTxUrl,
+	txLinks,
+} from "../formatters.js";
 
 export interface AdminAppContext {
 	db: Db;
 	redis: Redis;
+	chainId: number;
+	cowExplorerUrl: string;
 	queues: {
 		validation: Queue;
 		validateProposal: Queue;
@@ -24,64 +32,34 @@ export interface AdminAppContext {
 		audit: Queue;
 		balanceRefresh: Queue;
 	};
-	googleClientId: string;
 }
 
-/** Verifies a Google ID token and returns the email, or null on failure. */
-async function verifyGoogleToken(
-	client: OAuth2Client,
-	clientId: string,
-	token: string,
-): Promise<string | null> {
-	try {
-		const ticket = await client.verifyIdToken({ idToken: token, audience: clientId });
-		const payload = ticket.getPayload();
-		return payload?.email ?? null;
-	} catch {
-		return null;
-	}
-}
-
-function parseTimeRange(raw: string | undefined): TimeRange {
-	if (raw === "7d" || raw === "30d") return raw;
-	return "24h";
+function parseDateRange(fromStr: string | undefined, toStr: string | undefined): DateRange {
+	const to = toStr ? new Date(toStr) : new Date();
+	const from = fromStr ? new Date(fromStr) : new Date(to.getTime() - 24 * 60 * 60 * 1000);
+	return { from, to };
 }
 
 /** Creates the admin Hono app (admin-facing, port 9587). */
 export function createAdminApp(ctx: AdminAppContext): Hono {
 	const app = new Hono();
-	const googleClient = new OAuth2Client();
 
-	// GET /healthz — unauthenticated, for liveness probes (registered before auth middleware)
+	// GET /healthz — for liveness probes
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
 
-	// Auth middleware — every admin request must carry a valid @bleu.studio Google ID token
-	app.use("*", async (c, next) => {
-		const authHeader = c.req.header("Authorization");
-		if (!authHeader?.startsWith("Bearer ")) {
-			return c.json({ error: "missing authorization header" }, 401);
-		}
-		const token = authHeader.slice(7);
-		const email = await verifyGoogleToken(googleClient, ctx.googleClientId, token);
-		if (!email) {
-			return c.json({ error: "invalid token" }, 401);
-		}
-		if (!email.endsWith("@bleu.studio")) {
-			return c.json({ error: "unauthorized domain" }, 403);
-		}
-		await next();
-	});
-
-	// GET /overview?range=24h|7d|30d
+	// GET /overview?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/overview", async (c) => {
-		const range = parseTimeRange(c.req.query("range"));
+		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
 		const stats = await getOverviewStats(ctx.db, range);
-		return c.json(stats);
+		return c.json({
+			...stats,
+			penalizedAmountFormatted: formatNativeAmount(stats.penalizedAmountWei, ctx.chainId),
+		});
 	});
 
-	// GET /subsolvers?range=24h|7d|30d
+	// GET /subsolvers?from=<ISO>&to=<ISO>  (default: last 24h)
 	app.get("/subsolvers", async (c) => {
-		const range = parseTimeRange(c.req.query("range"));
+		const range = parseDateRange(c.req.query("from"), c.req.query("to"));
 		const stats = await getSubsolverStats(ctx.db, range);
 		return c.json(stats);
 	});
@@ -94,7 +72,15 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? "50")));
 
 		const result = await listProposals(ctx.db, { subSolver, status, page, limit });
-		return c.json(result);
+		const enrichedItems = result.items.map((item) => ({
+			...item,
+			subSolverUrl: blockExplorerAddressUrl(item.subSolver, ctx.chainId),
+			orderUidUrl: cowExplorerOrderUrl(item.orderUid, ctx.cowExplorerUrl),
+			tenderlyUrl: item.settlementTxHash
+				? tenderlyTxUrl(item.settlementTxHash, ctx.chainId)
+				: null,
+		}));
+		return c.json({ ...result, items: enrichedItems });
 	});
 
 	// GET /proposals/:id
@@ -107,7 +93,15 @@ export function createAdminApp(ctx: AdminAppContext): Hono {
 		if (!detail) {
 			return c.json({ error: "not found" }, 404);
 		}
-		return c.json(detail);
+		const { proposal, auditTrail } = detail;
+		const enrichedProposal = {
+			...proposal,
+			subSolverUrl: blockExplorerAddressUrl(proposal.subSolver, ctx.chainId),
+			orderUidUrl: cowExplorerOrderUrl(proposal.orderUid, ctx.cowExplorerUrl),
+			...txLinks(proposal.settlementTxHash, ctx.chainId),
+			penaltyTxLinks: txLinks(proposal.penaltyTxHash, ctx.chainId),
+		};
+		return c.json({ proposal: enrichedProposal, auditTrail });
 	});
 
 	// GET /system — live CPU, memory, disk, queue depths

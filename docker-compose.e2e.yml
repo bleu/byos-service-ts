@@ -39,6 +39,7 @@ services:
       SOLVE_BEARER_TOKEN: ""
       PUBLIC_ADDR_PORT: "9585"
       INTERNAL_ADDR_PORT: "9586"
+      ADMIN_ADDR_PORT: "9587"
       LOG_LEVEL: debug
       JSON_LOGS: "true"
     ports:
@@ -59,6 +60,18 @@ services:
       timeout: 2s
       retries: 20
       start_period: 10s
+
+  admin:
+    build:
+      context: ..
+      dockerfile: apps/admin/Dockerfile
+    environment:
+      ADMIN_API_URL: "http://byos-ts:9587"
+    ports:
+      - "3000:3000"
+    depends_on:
+      byos-ts:
+        condition: service_healthy
 
   # --- Overrides for existing offline-mode services ---
 

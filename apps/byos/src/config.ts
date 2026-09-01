@@ -19,11 +19,12 @@ export const configSchema = z.object({
 	INTERNAL_ADDR_PORT: z.coerce.number().default(9586),
 	ADMIN_ADDR_PORT: z.coerce.number().default(9587),
 
-	// Admin auth
-	GOOGLE_CLIENT_ID: z.string().optional(),
+	// Observability
+	COW_EXPLORER_URL: z.string().url().default("https://explorer.cow.fi"),
 
 	// Slack notifications
-	SLACK_WEBHOOK_URL: z.string().url().optional(),
+	SLACK_TOKEN: z.string().optional(),
+	SLACK_CHANNEL: z.string().optional(),
 
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
@@ -126,6 +127,21 @@ const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
 		}
 	}
 
+	if (cfg.SLACK_TOKEN && !cfg.SLACK_CHANNEL) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["SLACK_CHANNEL"],
+			message: "required when SLACK_TOKEN is set",
+		});
+	}
+	if (cfg.SLACK_CHANNEL && !cfg.SLACK_TOKEN) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["SLACK_TOKEN"],
+			message: "required when SLACK_CHANNEL is set",
+		});
+	}
+
 	if (cfg.RATE_MIN_PER_WINDOW > cfg.RATE_MAX_PER_WINDOW) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
@@ -162,6 +178,7 @@ export function safeConfigForLogging(config: Config): Record<string, unknown> {
 		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
 		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
 		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
+		SLACK_TOKEN: config.SLACK_TOKEN ? "<redacted>" : undefined,
 	};
 }
 

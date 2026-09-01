@@ -12,7 +12,7 @@ COPY packages/common/package.json packages/common/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm build
+RUN pnpm --filter=!@byos/admin -r run build
 
 # Stage 2: Runtime — only dist + node_modules
 FROM node:22-alpine
@@ -33,5 +33,5 @@ COPY --from=build /app/packages/common/dist packages/common/dist/
 COPY --from=build /app/packages/common/package.json packages/common/
 COPY --from=build /app/packages/common/node_modules packages/common/node_modules/
 
-EXPOSE 9585 9586
+EXPOSE 9585 9586 9587
 CMD ["node", "apps/byos/dist/index.js"]

@@ -2,102 +2,93 @@ import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { auditEvents, penalties, proposals } from "../db/schema.js";
 
-export type TimeRange = "24h" | "7d" | "30d";
-
-function rangeStart(range: TimeRange): Date {
-	const now = new Date();
-	switch (range) {
-		case "24h":
-			return new Date(now.getTime() - 24 * 60 * 60 * 1000);
-		case "7d":
-			return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-		case "30d":
-			return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-	}
+export interface DateRange {
+	from: Date;
+	to: Date;
 }
 
 // --- Overview ---
 
 export interface OverviewStats {
-	proposalsReceived: number;
-	rejectionBreakdown: { reason: string; count: number }[];
+	// Funnel
+	received: number;
+	discarded: number;
+	simFailed: number;
+	sentToAuction: number;
+	won: number;
+	lost: number;
 	settled: number;
 	settleFailed: number;
-	penalized: number;
-	nonSettlementDebited: number;
-	bufferDebited: number;
+	// Breakdown
+	rejectionBreakdown: { reason: string; count: number }[];
+	// Penalties & debits
+	penalizedCount: number;
+	penalizedAmountWei: string;
+	nonSettlementDebitedCount: number;
+	bufferDebitedCount: number;
 }
 
-export async function getOverviewStats(db: Db, range: TimeRange): Promise<OverviewStats> {
-	const since = rangeStart(range);
+export async function getOverviewStats(db: Db, range: DateRange): Promise<OverviewStats> {
+	const { from, to } = range;
 
-	const [received, rejections, settled, settleFailed, penalizedCount, nonSettlement, buffer] =
+	const inRange = (type: string) =>
+		and(eq(auditEvents.eventType, type), gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to));
+
+	const countOf = (type: string) =>
+		db.select({ count: count() }).from(auditEvents).where(inRange(type));
+
+	const [received, simFailed, rejections, settled, settleFailed, penalized, nonSettlementDebited, bufferDebited] =
 		await Promise.all([
-			// total received
-			db
-				.select({ count: count() })
-				.from(auditEvents)
-				.where(and(eq(auditEvents.eventType, "received"), gte(auditEvents.occurredAt, since))),
-
-			// rejection breakdown by reason (stored in payload->rejectionReason)
+			countOf("received"),
+			countOf("sim_failed"),
 			db
 				.select({
 					reason: sql<string>`payload->>'rejectionReason'`,
 					count: count(),
 				})
 				.from(auditEvents)
-				.where(and(eq(auditEvents.eventType, "rejected"), gte(auditEvents.occurredAt, since)))
+				.where(inRange("rejected"))
 				.groupBy(sql`payload->>'rejectionReason'`),
-
-			// settled
+			countOf("settled"),
+			countOf("settle_failed"),
 			db
-				.select({ count: count() })
+				.select({
+					count: count(),
+					amount: sql<string>`COALESCE(SUM((payload->>'amount')::numeric), 0)::text`,
+				})
 				.from(auditEvents)
-				.where(and(eq(auditEvents.eventType, "settled"), gte(auditEvents.occurredAt, since))),
-
-			// settle_failed
-			db
-				.select({ count: count() })
-				.from(auditEvents)
-				.where(and(eq(auditEvents.eventType, "settle_failed"), gte(auditEvents.occurredAt, since))),
-
-			// penalized
-			db
-				.select({ count: count() })
-				.from(auditEvents)
-				.where(and(eq(auditEvents.eventType, "penalized"), gte(auditEvents.occurredAt, since))),
-
-			// non_settlement_debited
-			db
-				.select({ count: count() })
-				.from(auditEvents)
-				.where(
-					and(
-						eq(auditEvents.eventType, "non_settlement_debited"),
-						gte(auditEvents.occurredAt, since),
-					),
-				),
-
-			// buffer_debited
-			db
-				.select({ count: count() })
-				.from(auditEvents)
-				.where(
-					and(eq(auditEvents.eventType, "buffer_debited"), gte(auditEvents.occurredAt, since)),
-				),
+				.where(inRange("penalized")),
+			countOf("non_settlement_debited"),
+			countOf("buffer_debited"),
 		]);
 
+	const receivedCount = received[0]?.count ?? 0;
+	const simFailedCount = simFailed[0]?.count ?? 0;
+	const rejectedCount = rejections.reduce((acc, r) => acc + r.count, 0);
+	const discarded = simFailedCount + rejectedCount;
+	const sentToAuction = receivedCount - discarded;
+	const settledCount = settled[0]?.count ?? 0;
+	const settleFailedCount = settleFailed[0]?.count ?? 0;
+	const won = settledCount + settleFailedCount;
+	const lost = Math.max(0, sentToAuction - won);
+
 	return {
-		proposalsReceived: received[0]?.count ?? 0,
+		received: receivedCount,
+		discarded,
+		simFailed: simFailedCount,
+		sentToAuction,
+		won,
+		lost,
+		settled: settledCount,
+		settleFailed: settleFailedCount,
 		rejectionBreakdown: rejections.map((r) => ({
 			reason: r.reason ?? "unknown",
 			count: r.count,
 		})),
-		settled: settled[0]?.count ?? 0,
-		settleFailed: settleFailed[0]?.count ?? 0,
-		penalized: penalizedCount[0]?.count ?? 0,
-		nonSettlementDebited: nonSettlement[0]?.count ?? 0,
-		bufferDebited: buffer[0]?.count ?? 0,
+		penalizedCount: penalized[0]?.count ?? 0,
+		penalizedAmountWei: penalized[0]?.amount ?? "0",
+		nonSettlementDebitedCount: nonSettlementDebited[0]?.count ?? 0,
+		bufferDebitedCount: bufferDebited[0]?.count ?? 0,
 	};
 }
 
@@ -112,8 +103,8 @@ export interface SubsolverStats {
 	penalized: number;
 }
 
-export async function getSubsolverStats(db: Db, range: TimeRange): Promise<SubsolverStats[]> {
-	const since = rangeStart(range);
+export async function getSubsolverStats(db: Db, range: DateRange): Promise<SubsolverStats[]> {
+	const { from, to } = range;
 
 	const rows = await db
 		.select({
@@ -122,7 +113,7 @@ export async function getSubsolverStats(db: Db, range: TimeRange): Promise<Subso
 			count: count(),
 		})
 		.from(auditEvents)
-		.where(gte(auditEvents.occurredAt, since))
+		.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to)))
 		.groupBy(auditEvents.subSolver, auditEvents.eventType);
 
 	// Pivot in memory — the table is small enough and avoids complex SQL
@@ -170,6 +161,7 @@ export interface ProposalListItem {
 	orderUid: string;
 	status: string;
 	rejectionReason: string | null;
+	settlementTxHash: string | null;
 	createdAt: Date;
 	statusChangedAt: Date;
 }
@@ -202,6 +194,7 @@ export async function listProposals(
 				orderUid: proposals.orderUid,
 				status: proposals.status,
 				rejectionReason: proposals.rejectionReason,
+				settlementTxHash: proposals.settlementTxHash,
 				createdAt: proposals.createdAt,
 				statusChangedAt: proposals.statusChangedAt,
 			})

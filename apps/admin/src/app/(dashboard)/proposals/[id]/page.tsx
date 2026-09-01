@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { getProposal } from "@/lib/api";
+
+function isoZ(dateStr: string) {
+  return new Date(dateStr).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
 
 export default async function ProposalDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
   const { id: idStr } = await params;
   const id = Number(idStr);
 
@@ -17,7 +18,7 @@ export default async function ProposalDetailPage({
 
   let data: any;
   try {
-    data = await getProposal(idToken, id);
+    data = await getProposal(id);
   } catch {
     notFound();
   }
@@ -37,18 +38,64 @@ export default async function ProposalDetailPage({
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <h2 className="font-semibold mb-4">Details</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-          <Field label="Subsolver" value={proposal.subSolver} mono />
-          <Field label="Status" value={proposal.status} />
-          <Field label="Order UID" value={proposal.orderUid} mono />
-          <Field label="Rejection reason" value={proposal.rejectionReason ?? "—"} />
-          <Field label="Sell token" value={proposal.sellToken} mono />
-          <Field label="Buy token" value={proposal.buyToken} mono />
-          <Field label="Sell amount" value={proposal.sellAmount} mono />
-          <Field label="Min buy amount" value={proposal.minBuyAmount} mono />
-          <Field label="Settlement tx" value={proposal.settlementTxHash ?? "—"} mono />
-          <Field label="Penalty tx" value={proposal.penaltyTxHash ?? "—"} mono />
-          <Field label="Created" value={new Date(proposal.createdAt).toLocaleString()} />
-          <Field label="Last updated" value={new Date(proposal.statusChangedAt).toLocaleString()} />
+          <Field label="Subsolver">
+            <ExternalLink href={proposal.subSolverUrl} mono>{proposal.subSolver}</ExternalLink>
+          </Field>
+          <Field label="Status">
+            <span>{proposal.status}</span>
+          </Field>
+          <Field label="Order UID">
+            <ExternalLink href={proposal.orderUidUrl} mono>{proposal.orderUid}</ExternalLink>
+          </Field>
+          <Field label="Rejection reason">
+            <span className="font-mono">{proposal.rejectionReason ?? "—"}</span>
+          </Field>
+          <Field label="Sell token">
+            <span className="font-mono text-xs break-all">{proposal.sellToken}</span>
+          </Field>
+          <Field label="Buy token">
+            <span className="font-mono text-xs break-all">{proposal.buyToken}</span>
+          </Field>
+          <Field label="Sell amount">
+            <span className="font-mono text-xs">{proposal.sellAmount}</span>
+          </Field>
+          <Field label="Min buy amount">
+            <span className="font-mono text-xs">{proposal.minBuyAmount}</span>
+          </Field>
+          <Field label="Settlement tx">
+            {proposal.settlementTxHash ? (
+              <div className="flex flex-wrap gap-2 font-mono text-xs break-all">
+                <ExternalLink href={proposal.explorerUrl}>{proposal.settlementTxHash}</ExternalLink>
+                {proposal.tenderlyUrl && (
+                  <a href={proposal.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-700 underline non-mono text-xs">
+                    Tenderly
+                  </a>
+                )}
+              </div>
+            ) : (
+              <span className="text-gray-400">—</span>
+            )}
+          </Field>
+          <Field label="Penalty tx">
+            {proposal.penaltyTxHash ? (
+              <div className="flex flex-wrap gap-2 font-mono text-xs break-all">
+                <ExternalLink href={proposal.penaltyTxLinks?.explorerUrl}>{proposal.penaltyTxHash}</ExternalLink>
+                {proposal.penaltyTxLinks?.tenderlyUrl && (
+                  <a href={proposal.penaltyTxLinks.tenderlyUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-700 underline non-mono text-xs">
+                    Tenderly
+                  </a>
+                )}
+              </div>
+            ) : (
+              <span className="text-gray-400">—</span>
+            )}
+          </Field>
+          <Field label="Created">
+            <span className="font-mono text-xs">{isoZ(proposal.createdAt)}</span>
+          </Field>
+          <Field label="Last updated">
+            <span className="font-mono text-xs">{isoZ(proposal.statusChangedAt)}</span>
+          </Field>
         </dl>
       </div>
 
@@ -68,8 +115,8 @@ export default async function ProposalDetailPage({
                   <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                     {event.eventType}
                   </span>
-                  <span className="text-xs text-gray-400">
-                    {new Date(event.occurredAt).toLocaleString()}
+                  <span className="text-xs text-gray-400 font-mono">
+                    {isoZ(event.occurredAt)}
                   </span>
                 </div>
                 {(() => {
@@ -92,19 +139,29 @@ export default async function ProposalDetailPage({
   );
 }
 
-function Field({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <dt className="text-gray-500 text-xs mb-0.5">{label}</dt>
-      <dd className={`text-sm break-all ${mono ? "font-mono" : ""}`}>{value}</dd>
+      <dd className="text-sm break-all">{children}</dd>
     </div>
+  );
+}
+
+function ExternalLink({
+  href,
+  children,
+  mono = true,
+}: {
+  href?: string | null;
+  children: React.ReactNode;
+  mono?: boolean;
+}) {
+  const cls = `${mono ? "font-mono text-xs" : "text-xs"} break-all`;
+  if (!href) return <span className={cls}>{children}</span>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={`${cls} text-blue-600 hover:underline`}>
+      {children}
+    </a>
   );
 }

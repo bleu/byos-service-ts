@@ -1,15 +1,18 @@
-import { auth } from "@/lib/auth";
-import { getSubsolvers, type TimeRange } from "@/lib/api";
+import { getSubsolvers, defaultDateRange } from "@/lib/api";
+
+function toDatetimeLocal(iso: string): string {
+  return iso.slice(0, 16);
+}
 
 export default async function SubsolversPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
 }) {
-  const session = await auth();
-  const idToken = (session as any)?.idToken as string;
-  const { range: rawRange } = await searchParams;
-  const range = (rawRange === "7d" || rawRange === "30d" ? rawRange : "24h") as TimeRange;
+  const { from: fromParam, to: toParam } = await searchParams;
+  const defaults = defaultDateRange();
+  const from = fromParam ?? defaults.from;
+  const to = toParam ?? defaults.to;
 
   const subsolvers: {
     subSolver: string;
@@ -18,27 +21,41 @@ export default async function SubsolversPage({
     settleFailed: number;
     rejected: number;
     penalized: number;
-  }[] = await getSubsolvers(idToken, range);
+  }[] = await getSubsolvers(from, to);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Subsolvers</h1>
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {(["24h", "7d", "30d"] as TimeRange[]).map((r) => (
-            <a
-              key={r}
-              href={`/subsolvers?range=${r}`}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                range === r
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {r}
-            </a>
-          ))}
-        </div>
+        <form method="GET" className="flex items-end gap-2">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">From (UTC)</label>
+            <input
+              type="datetime-local"
+              name="from"
+              defaultValue={toDatetimeLocal(from)}
+              className="border border-gray-200 rounded px-2 py-1 text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">To (UTC)</label>
+            <input
+              type="datetime-local"
+              name="to"
+              defaultValue={toDatetimeLocal(to)}
+              className="border border-gray-200 rounded px-2 py-1 text-xs"
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded"
+          >
+            Apply
+          </button>
+          <a href="/subsolvers" className="text-xs text-gray-400 hover:text-gray-700 underline pb-1.5">
+            Reset
+          </a>
+        </form>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
