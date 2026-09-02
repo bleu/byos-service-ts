@@ -8,6 +8,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/byos/package.json apps/byos/
 COPY apps/baseline-subsolver/package.json apps/baseline-subsolver/
 COPY apps/fynd-subsolver/package.json apps/fynd-subsolver/
+COPY apps/private-mm-subsolver/package.json apps/private-mm-subsolver/
 COPY packages/common/package.json packages/common/
 COPY packages/subsolver-core/package.json packages/subsolver-core/
 
@@ -47,6 +48,10 @@ COPY --from=build /app/apps/fynd-subsolver/node_modules apps/fynd-subsolver/node
 COPY --from=build /app/packages/subsolver-core/dist packages/subsolver-core/dist/
 COPY --from=build /app/packages/subsolver-core/package.json packages/subsolver-core/
 COPY --from=build /app/packages/subsolver-core/node_modules packages/subsolver-core/node_modules/
+# Private MM subsolver executable
+COPY --from=build /app/apps/private-mm-subsolver/dist apps/private-mm-subsolver/dist/
+COPY --from=build /app/apps/private-mm-subsolver/package.json apps/private-mm-subsolver/
+COPY --from=build /app/apps/private-mm-subsolver/node_modules apps/private-mm-subsolver/node_modules/
 
 EXPOSE 9585 9586
 CMD ["node", "apps/byos/dist/index.js"]
