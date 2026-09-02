@@ -81,6 +81,8 @@ async function main() {
 			trackedUids: new Set(proposals.keys()),
 		});
 
+		logger.info({ total: orders.length, candidates: candidates.length }, "orderbook fetched");
+
 		for (const order of candidates) {
 			const validUntil = nowSecs + config.maxProposalLifetimeSecs;
 
@@ -129,7 +131,21 @@ async function main() {
 					signature,
 				});
 				proposals.set(order.uid.toLowerCase(), { proposalId: id, validUntil, status: "active" });
-				logger.info({ id, orderUid: order.uid }, "proposal submitted");
+				logger.info(
+					{
+						id,
+						orderUid: order.uid,
+						sellToken: order.sellToken,
+						buyToken: order.buyToken,
+						sellAmount: order.sellAmount.toString(),
+						minBuyAmount: proposal.minBuyAmount.toString(),
+						quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+						validUntil: validUntil.toString(),
+						nonce: proposal.nonce.toString(),
+						signature,
+					},
+					"proposal submitted",
+				);
 			} catch (err) {
 				logger.warn({ err, orderUid: order.uid }, "failed to submit proposal");
 			}
