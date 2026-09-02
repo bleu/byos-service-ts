@@ -4,10 +4,11 @@ import { byosDomain, signProposal } from "@byos/common";
 import type { OrderbookOrder, ProposalMetadata } from "@byos/subsolver-core";
 import { ByosClient, OrderbookClient } from "@byos/subsolver-core";
 import pino from "pino";
-import type { Address, Hex } from "viem";
+import type { Hex } from "viem";
 import { encodeFunctionData, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
+import { filterCandidates } from "./filter.js";
 
 const erc20TransferAbi = [
 	{
@@ -61,14 +62,6 @@ async function main() {
 		[config.usdtAddress.toLowerCase(), config.usdtBalance],
 	]);
 
-	const isUsdcUsdtPair = (sellToken: Address, buyToken: Address): boolean => {
-		const sell = sellToken.toLowerCase();
-		const buy = buyToken.toLowerCase();
-		const usdc = config.usdcAddress.toLowerCase();
-		const usdt = config.usdtAddress.toLowerCase();
-		return (sell === usdc && buy === usdt) || (sell === usdt && buy === usdc);
-	};
-
 	// --- Main orderbook polling loop ---
 	const pollOrderbook = async (): Promise<void> => {
 		const nowSecs = BigInt(Math.floor(Date.now() / 1000));
@@ -81,18 +74,11 @@ async function main() {
 			return;
 		}
 
-		const candidates = orders.filter((order) => {
-			// Sell orders only, no partial fills
-			if (order.kind !== "sell") return false;
-			if (order.sellAmount !== order.fullSellAmount) return false;
-			// USDC/USDT pairs only
-			if (!isUsdcUsdtPair(order.sellToken, order.buyToken)) return false;
-			// Trampoline must cover what it needs to deliver (1:1, so sellAmount of buyToken)
-			const balance = trampolineBalance.get(order.buyToken.toLowerCase()) ?? 0n;
-			if (order.sellAmount > balance) return false;
-			// Skip orders already tracked
-			if (proposals.has(order.uid.toLowerCase())) return false;
-			return true;
+		const candidates = filterCandidates(orders, {
+			usdcAddress: config.usdcAddress,
+			usdtAddress: config.usdtAddress,
+			trampolineBalance,
+			trackedUids: new Set(proposals.keys()),
 		});
 
 		for (const order of candidates) {
