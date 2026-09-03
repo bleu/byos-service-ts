@@ -26,6 +26,9 @@ importers:
 
   apps/admin:
     dependencies:
+      '@byos/common':
+        specifier: workspace:*
+        version: link:../../packages/common
       drizzle-orm:
         specifier: ^0.40.0
         version: 0.40.1(gel@2.2.0)(postgres@3.4.9)

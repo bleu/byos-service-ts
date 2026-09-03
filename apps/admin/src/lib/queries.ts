@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { auditEvents, penalties, proposals } from "./schema";
+import { auditEvents, bufferEntries, penalties, proposals } from "./schema";
 
 export interface DateRange {
 	from: Date;
@@ -96,38 +96,80 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 
 export interface SubsolverStats {
 	subSolver: string;
+	// Activity columns — filtered by date range
 	proposalsReceived: number;
 	settled: number;
 	settleFailed: number;
 	rejected: number;
 	penalized: number;
+	// Lifetime financial columns
+	penaltyCount: number;
+	penalizedAmountWei: string;
+	bufferBalanceWei: string;
 }
 
 export async function getSubsolverStats(db: Db, range: DateRange): Promise<SubsolverStats[]> {
 	const { from, to } = range;
 
-	const rows = await db
+	const fromIso = from.toISOString();
+	const toIso = to.toISOString();
+
+	// All subsolvers ever seen, with activity counts filtered to the date range.
+	const activityRows = await db
 		.select({
 			subSolver: auditEvents.subSolver,
-			proposalsReceived: sql<number>`COUNT(*) FILTER (WHERE event_type = 'received')`,
-			settled: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settled')`,
-			settleFailed: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settle_failed')`,
-			rejected: sql<number>`COUNT(*) FILTER (WHERE event_type = 'rejected')`,
-			penalized: sql<number>`COUNT(*) FILTER (WHERE event_type IN ('penalized', 'non_settlement_debited'))`,
+			proposalsReceived: sql<number>`COUNT(*) FILTER (WHERE event_type = 'received' AND occurred_at >= ${fromIso}::timestamptz AND occurred_at < ${toIso}::timestamptz)`,
+			settled: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settled' AND occurred_at >= ${fromIso}::timestamptz AND occurred_at < ${toIso}::timestamptz)`,
+			settleFailed: sql<number>`COUNT(*) FILTER (WHERE event_type = 'settle_failed' AND occurred_at >= ${fromIso}::timestamptz AND occurred_at < ${toIso}::timestamptz)`,
+			rejected: sql<number>`COUNT(*) FILTER (WHERE event_type = 'rejected' AND occurred_at >= ${fromIso}::timestamptz AND occurred_at < ${toIso}::timestamptz)`,
+			penalized: sql<number>`COUNT(*) FILTER (WHERE event_type IN ('penalized', 'non_settlement_debited') AND occurred_at >= ${fromIso}::timestamptz AND occurred_at < ${toIso}::timestamptz)`,
 		})
 		.from(auditEvents)
-		.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to)))
 		.groupBy(auditEvents.subSolver);
 
-	return rows
-		.map((r) => ({
-			subSolver: r.subSolver,
-			proposalsReceived: Number(r.proposalsReceived),
-			settled: Number(r.settled),
-			settleFailed: Number(r.settleFailed),
-			rejected: Number(r.rejected),
-			penalized: Number(r.penalized),
-		}))
+	// Lifetime penalty totals per subsolver.
+	const penaltyRows = await db
+		.select({
+			subSolver: penalties.subSolver,
+			penaltyCount: sql<number>`COUNT(*)`,
+			penalizedAmountWei: sql<string>`COALESCE(SUM((${auditEvents.payload}->>'amount')::numeric), 0)::text`,
+		})
+		.from(penalties)
+		.leftJoin(
+			auditEvents,
+			and(eq(auditEvents.proposalId, penalties.proposalId), eq(auditEvents.eventType, "penalized")),
+		)
+		.groupBy(penalties.subSolver);
+
+	// Lifetime uncleared buffer balance per subsolver.
+	const bufferRows = await db
+		.select({
+			subSolver: bufferEntries.subSolver,
+			bufferBalanceWei: sql<string>`COALESCE(SUM(CAST(${bufferEntries.nativeTokenAmount} AS numeric)), 0)::text`,
+		})
+		.from(bufferEntries)
+		.where(eq(bufferEntries.cleared, false))
+		.groupBy(bufferEntries.subSolver);
+
+	const penaltyBySubsolver = new Map(penaltyRows.map((r) => [r.subSolver, r]));
+	const bufferBySubsolver = new Map(bufferRows.map((r) => [r.subSolver, r]));
+
+	return activityRows
+		.map((r) => {
+			const p = penaltyBySubsolver.get(r.subSolver);
+			const b = bufferBySubsolver.get(r.subSolver);
+			return {
+				subSolver: r.subSolver,
+				proposalsReceived: Number(r.proposalsReceived),
+				settled: Number(r.settled),
+				settleFailed: Number(r.settleFailed),
+				rejected: Number(r.rejected),
+				penalized: Number(r.penalized),
+				penaltyCount: Number(p?.penaltyCount ?? 0),
+				penalizedAmountWei: p?.penalizedAmountWei ?? "0",
+				bufferBalanceWei: b?.bufferBalanceWei ?? "0",
+			};
+		})
 		.sort((a, b) => b.proposalsReceived - a.proposalsReceived);
 }
 

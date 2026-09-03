@@ -81,3 +81,24 @@ export const penalties = pgTable(
 	},
 	(table) => [index("penalties_pending_idx").on(table.id).where(sql`penalty_tx_hash IS NULL`)],
 );
+
+export const bufferEntries = pgTable(
+	"buffer_entries",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		subSolver: text("sub_solver").notNull(),
+		proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
+		orderUid: text("order_uid").notNull(),
+		delta: text().notNull(),
+		gap: text().notNull(),
+		buyToken: text("buy_token").notNull(),
+		nativeTokenAmount: text("native_token_amount").notNull(),
+		cleared: boolean().notNull().default(false),
+		clearTxHash: text("clear_tx_hash"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		index("buffer_entries_sub_solver_cleared_idx").on(table.subSolver, table.cleared),
+		index("buffer_entries_proposal_id_idx").on(table.proposalId),
+	],
+);

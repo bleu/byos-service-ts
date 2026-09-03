@@ -12,4 +12,4 @@ docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 
 DATABASE_URL="${database_url}" node --experimental-strip-types apps/admin/scripts/seed-dashboard.ts
 
 echo "Dashboard fixture ready at ${database_url}"
-exec env DATABASE_URL="${database_url}" pnpm --filter @byos/admin dev
+exec env DATABASE_URL="${database_url}" USE_MOCKED_DATA="true" pnpm --filter @byos/admin dev
