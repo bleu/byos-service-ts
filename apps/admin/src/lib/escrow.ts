@@ -1,12 +1,8 @@
 import { EscrowAbi } from "@byos/common";
-import { createPublicClient, http, parseEther, type Address } from "viem";
+import { type Address, createPublicClient, http, parseEther } from "viem";
 
 // Varied mocked escrow balances for local development (USE_MOCKED_DATA=true).
-const MOCK_BALANCES = [
-	parseEther("2.5"),
-	parseEther("0.8"),
-	parseEther("5.1"),
-];
+const MOCK_BALANCES = [parseEther("2.5"), parseEther("0.8"), parseEther("5.1")];
 
 /**
  * Fetches the effectiveBalance from the escrow contract for each address in
@@ -22,7 +18,7 @@ export async function getEscrowBalances(
 
 	if (process.env.USE_MOCKED_DATA === "true") {
 		return new Map(
-			addresses.map((addr, i) => [addr, MOCK_BALANCES[i % MOCK_BALANCES.length]!]),
+			addresses.map((addr, i) => [addr, MOCK_BALANCES[i % MOCK_BALANCES.length] ?? null]),
 		);
 	}
 
@@ -46,7 +42,10 @@ export async function getEscrowBalances(
 
 	const map = new Map<Address, bigint | null>();
 	for (const [i, result] of results.entries()) {
-		map.set(addresses[i]!, result.status === "success" ? (result.result as bigint) : null);
+		const address = addresses[i];
+		if (address !== undefined) {
+			map.set(address, result.status === "success" ? (result.result as bigint) : null);
+		}
 	}
 	return map;
 }
