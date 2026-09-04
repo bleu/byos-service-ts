@@ -7,7 +7,7 @@
 		"@byos/byos": "workspace:*",
 		"@byos/common": "workspace:*",
 		"@types/node": "^22.0.0",
-		"drizzle-orm": "^0.40.0",
+		"drizzle-orm": "^0.45.2",
 		"hono": "^4.0.0",
 		"postgres": "^3.4.0",
 		"typescript": "^5.8.0",
