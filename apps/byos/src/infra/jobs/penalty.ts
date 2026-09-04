@@ -216,7 +216,13 @@ export async function runRevertDebits(
 				await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 				onAuditEvent(result.auditEvent);
 				logger.info(
-					{ id: proposal.id, amount: amount.toString(), tx: penaltyTxHash },
+					{
+						id: proposal.id,
+						subSolver: proposal.subSolver,
+						orderUid: proposal.orderUid,
+						amount: amount.toString(),
+						tx: penaltyTxHash,
+					},
 					"revert debit landed",
 				);
 			} else {
@@ -272,7 +278,13 @@ export async function runNonSettlementDebits(
 			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
 			onAuditEvent(auditEvent);
 			logger.info(
-				{ penaltyId: penalty.id, amount: amount.toString(), tx: penaltyTxHash },
+				{
+					penaltyId: penalty.id,
+					subSolver: penalty.subSolver,
+					orderUid: penalty.orderUid,
+					amount: amount.toString(),
+					tx: penaltyTxHash,
+				},
 				"non-settlement debit landed",
 			);
 		} catch (e) {
