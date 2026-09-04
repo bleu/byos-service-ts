@@ -60,6 +60,20 @@ services:
       retries: 20
       start_period: 10s
 
+  admin:
+    build:
+      context: ..
+      dockerfile: apps/admin/Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@byos-db:5432/byos
+      CHAIN_ID: "1"
+      COW_EXPLORER_URL: https://explorer.cow.fi
+    ports:
+      - "3000:3000"
+    depends_on:
+      byos-db:
+        condition: service_healthy
+
   # --- Overrides for existing offline-mode services ---
 
   driver:

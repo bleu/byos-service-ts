@@ -10,6 +10,7 @@ import { createAuditWorker } from "./infra/jobs/audit-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
+import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
 import {
 	createProposalValidationWorker,
 	createValidationWorker,
@@ -73,7 +74,31 @@ async function main() {
 	);
 
 	// 6. Start BullMQ workers
-	const auditWorker = createAuditWorker(ctx.redis, ctx.db, logger);
+	const slackMisconfigured =
+		(config.SLACK_TOKEN && !config.SLACK_CHANNEL) || (!config.SLACK_TOKEN && config.SLACK_CHANNEL);
+	if (slackMisconfigured) {
+		logger.warn(
+			"SLACK_TOKEN and SLACK_CHANNEL must both be set to enable Slack notifications — disabling",
+		);
+	}
+	const slackWorker =
+		config.SLACK_TOKEN && config.SLACK_CHANNEL
+			? createSlackWorker(ctx.redis, config.SLACK_TOKEN, config.SLACK_CHANNEL, logger)
+			: null;
+
+	const auditWorker = createAuditWorker(
+		ctx.redis,
+		ctx.db,
+		logger,
+		slackWorker
+			? {
+					slackQueue: ctx.queues.slackNotification,
+					redis: ctx.redis,
+					chainId: config.CHAIN_ID,
+					cowExplorerUrl: config.COW_EXPLORER_URL,
+				}
+			: undefined,
+	);
 
 	const validationWorker = createValidationWorker(ctx.redis, {
 		db: ctx.db,
@@ -110,14 +135,24 @@ async function main() {
 		logger: logger.child({ worker: "penalty" }),
 	});
 
-	const workers: import("bullmq").Worker[] = [
+	const workers = [
 		auditWorker,
 		validationWorker,
 		proposalValidationWorker,
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
-	];
+		slackWorker,
+	].filter(Boolean) as import("bullmq").Worker[];
+
+	// Enqueue startup notification — routed through the queue for retry semantics,
+	// not through the audit trail (no domain event for "process started").
+	if (config.SLACK_TOKEN && config.SLACK_CHANNEL) {
+		enqueueSlackNotification(
+			ctx.queues.slackNotification,
+			`🚀 BYOS service started (chain ${config.CHAIN_ID})`,
+		).catch((err) => logger.warn({ err }, "failed to enqueue startup slack notification"));
+	}
 
 	// 7. Graceful shutdown
 	const shutdown = async (signal: string) => {
@@ -163,6 +198,7 @@ async function main() {
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
 			ctx.queues.balanceRefresh.close(),
+			ctx.queues.slackNotification.close(),
 		]);
 
 		// Close Redis

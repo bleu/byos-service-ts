@@ -1,0 +1,103 @@
+name: byos-prod-local
+
+services:
+    postgres:
+      image: postgres:16-alpine
+      environment:
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        POSTGRES_DB: byos
+      volumes:
+        - postgres-data:/var/lib/postgresql/data
+      deploy:
+        resources:
+          limits:
+            memory: "256M"
+            cpus: "0.2"
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+
+    redis:
+      image: redis:7-alpine
+      command: redis-server --maxmemory 1gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+      volumes:
+        - redis-data:/data
+      deploy:
+        resources:
+          limits:
+            memory: "128M"
+            cpus: "0.1"
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 2s
+        timeout: 2s
+        retries: 15
+
+    byos:
+      image: byos-service:local
+      command: ["node", "apps/byos/dist/index.js"]
+      env_file: .env.byos
+      environment:
+        DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/byos
+        REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      ports:
+        - "9585:9585"
+        - "9586:9586"
+      deploy:
+        resources:
+          limits:
+            memory: "512M"
+            cpus: "0.5"
+      depends_on:
+        postgres:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
+      healthcheck:
+        test: ["CMD-SHELL", "wget -qO- http://localhost:9585/healthz || exit 1"]
+        interval: 3s
+        timeout: 2s
+        retries: 20
+        start_period: 10s
+    
+    private-mm-subsolver:
+      image: byos-service:local
+      command: ["node", "apps/private-mm-subsolver/dist/index.js"]
+      env_file: .env.private-mm-subsolver
+      environment:
+        BYOS_URL: http://byos:9585
+
+    # fynd:
+    #   image: ghcr.io/propeller-heads/fynd:0.99.17@sha256:84c1f4641f6ab5988bafd37544305150dd6224f975311c4b928937e263912f14
+    #   command: ["serve", "--chain", "bsc", "--tycho-url", "tycho-bsc-beta.propellerheads.xyz"]
+    #   environment:
+    #     TYCHO_API_KEY: ${TYCHO_API_KEY}
+    #   deploy:
+    #     resources:
+    #       limits:
+    #         memory: "256M"
+    #         cpus: "0.2"
+
+    # fynd-subsolver:
+    #   image: byos-service:local
+    #   command: ["node", "apps/fynd-subsolver/dist/index.js"]
+    #   env_file: .env.fynd-subsolver
+    #   environment:
+    #     FYND_URL: http://fynd:3000
+    #     BYOS_URL: http://byos:9585
+    #   deploy:
+    #     resources:
+    #       limits:
+    #         memory: "256M"
+    #         cpus: "0.2"
+    #   depends_on:
+    #     fynd:
+    #       condition: service_started
+    #     byos:
+    #       condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:

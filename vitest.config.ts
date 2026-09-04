@@ -11,6 +11,7 @@ export default defineConfig({
 					name: "unit",
 					include: ["apps/*/src/**/*.test.ts", "packages/*/src/**/*.test.ts"],
 					exclude: ["**/*.db.test.ts", "**/*.redis.test.ts"],
+					env: dotenvConfig({ path: resolve(".env") }).parsed ?? {},
 				},
 			},
 			{
