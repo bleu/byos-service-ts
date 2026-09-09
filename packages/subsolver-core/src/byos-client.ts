@@ -55,6 +55,8 @@ export class ByosClient {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: proposal.orderUid,
+				sellToken: proposal.sellToken,
+				buyToken: proposal.buyToken,
 				sellAmount: proposal.sellAmount.toString(),
 				minBuyAmount: proposal.minBuyAmount.toString(),
 				quoteBuyAmount: proposal.quoteBuyAmount.toString(),

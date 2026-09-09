@@ -81,12 +81,14 @@ export class FyndSubsolver {
 			this.logger.error({ err: error }, "failed to fetch solvable orders");
 			return;
 		}
+		this.logger.debug({ count: orders.length, liveProposals: this.live.size }, "fetched solvable sell orders");
 		const candidates = orders.filter((order) => {
 			const live = this.live.get(order.uid.toLowerCase());
 			return (
 				!live || now - live.lastSubmitted >= BigInt(this.config.proposalRefreshIntervalSeconds)
 			);
 		});
+		this.logger.debug({ total: orders.length, candidates: candidates.length }, "filtered candidates (excluding recently submitted)");
 		if (candidates.length === 0) return;
 		try {
 			if (!(await this.fynd.ready())) {
@@ -110,18 +112,37 @@ export class FyndSubsolver {
 			})),
 			(uid) => this.live.has(uid.toLowerCase()),
 		).map((ranked) => ranked.candidate);
-		for (const result of await quoteBatch(
-			this.fynd,
-			candidates,
-			this.config.fyndQuoteConcurrency,
-		)) {
+		this.logger.debug({ count: candidates.length }, "sending candidates to Fynd for quoting");
+		const results = await quoteBatch(this.fynd, candidates, this.config.fyndQuoteConcurrency);
+		let routesFound = 0;
+		let noRoute = 0;
+		let errors = 0;
+		for (const result of results) {
 			const order = byUid.get(result.order.uid.toLowerCase());
 			if (!order) continue;
 			if (result.error) {
 				this.logQuoteError(result.error, order.uid);
+				errors++;
 				continue;
 			}
-			if (!result.route) continue;
+			if (!result.route) {
+				noRoute++;
+				continue;
+			}
+			routesFound++;
+			this.logger.debug(
+				{
+					orderUid: order.uid,
+					sellToken: order.sellToken,
+					buyToken: order.buyToken,
+					remainingSell: result.order.remainingSell.toString(),
+					scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+					minBuyAmount: result.route.minBuyAmount.toString(),
+					quoteBuyAmount: result.route.quoteBuyAmount.toString(),
+					interactions: result.route.interactions.length,
+				},
+				"Fynd route found",
+			);
 			if (!this.budget.consumeSubmission()) {
 				this.logger.info("BYOS submission budget reserved for proposal state reads");
 				return;
@@ -140,7 +161,31 @@ export class FyndSubsolver {
 					this.domain,
 					this.signFn,
 				);
-				if (!proposal) continue;
+				if (!proposal) {
+					this.logger.debug(
+						{
+							orderUid: order.uid,
+							minBuyAmount: result.route.minBuyAmount.toString(),
+							scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+						},
+						"proposal rejected by buildProposalFromRoute (minBuyAmount < scaledLimitBuy or buy-order kind)",
+					);
+					continue;
+				}
+				this.logger.debug(
+					{
+						orderUid: proposal.orderUid,
+						sellToken: proposal.sellToken,
+						buyToken: proposal.buyToken,
+						sellAmount: proposal.sellAmount.toString(),
+						minBuyAmount: proposal.minBuyAmount.toString(),
+						quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+						validUntil: proposal.validUntil.toString(),
+						nonce: proposal.nonce.toString(),
+						interactions: proposal.interactions.length,
+					},
+					"submitting proposal to BYOS",
+				);
 				const id = await this.byos.submit(proposal);
 				this.live.set(order.uid.toLowerCase(), { id, validUntil, lastSubmitted: now });
 				this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
@@ -148,6 +193,10 @@ export class FyndSubsolver {
 				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
 			}
 		}
+		this.logger.info(
+			{ routesFound, noRoute, errors, total: candidates.length },
+			"poll cycle complete",
+		);
 	}
 
 	private logQuoteError(error: unknown, orderUid: Hex): void {

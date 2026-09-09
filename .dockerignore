@@ -2,7 +2,7 @@
 offline-mode
 tests
 docs
-config
+config/e2e
 scripts
 *.md
 .env*

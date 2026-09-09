@@ -84,7 +84,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 				raw["proposal-ttl-secs"] ?? raw.proposalTtl ?? 60,
 				"proposal-ttl-secs",
 			),
-			pollInterval: positiveInteger(
+			pollInterval: nonNegativeInteger(
 				raw["poll-interval-secs"] ?? raw.pollInterval ?? 2,
 				"poll-interval-secs",
 			),
@@ -97,6 +97,15 @@ function positiveInteger(value: unknown, name: string): number {
 		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
 	if (!Number.isSafeInteger(number) || number <= 0) {
 		throw new Error(`${name} must be a positive whole number`);
+	}
+	return number;
+}
+
+function nonNegativeInteger(value: unknown, name: string): number {
+	const number =
+		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
+	if (!Number.isSafeInteger(number) || number < 0) {
+		throw new Error(`${name} must be a non-negative whole number`);
 	}
 	return number;
 }
