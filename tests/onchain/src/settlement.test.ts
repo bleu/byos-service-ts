@@ -148,7 +148,6 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 					},
 				],
 				functionName: "isSolver",
-				// biome-ignore lint/style/noNonNullAssertion: anvil accounts are always populated
 				args: [chain.accounts[0]!],
 			});
 			expect(isSolver).toBe(true);
@@ -172,7 +171,6 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 				transport: http(chain.rpcUrl),
 			});
 
-			// biome-ignore lint/style/noNonNullAssertion: anvil keys are always populated
 			const userAccount = privateKeyToAccount(chain.keys[3]!);
 			const walletClient = createWalletClient({
 				chain: foundry,
@@ -180,7 +178,6 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 				account: userAccount,
 			});
 
-			// biome-ignore lint/style/noNonNullAssertion: anvil keys are always populated
 			const solverAccount = privateKeyToAccount(chain.keys[0]!);
 			const solverWallet = createWalletClient({
 				chain: foundry,

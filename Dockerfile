@@ -14,7 +14,7 @@ COPY packages/subsolver-core/package.json packages/subsolver-core/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm build
+RUN pnpm --filter=!@byos/admin -r run build
 
 # Stage 2: Runtime — only dist + node_modules
 FROM node:22-alpine
@@ -48,5 +48,7 @@ COPY --from=build /app/packages/subsolver-core/dist packages/subsolver-core/dist
 COPY --from=build /app/packages/subsolver-core/package.json packages/subsolver-core/
 COPY --from=build /app/packages/subsolver-core/node_modules packages/subsolver-core/node_modules/
 
+# Port 9587 (admin) is intentionally omitted — it is internal to the Docker
+# network and must never be published to the host (ADR-0016).
 EXPOSE 9585 9586
 CMD ["node", "apps/byos/dist/index.js"]

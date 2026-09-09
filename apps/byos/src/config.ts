@@ -20,6 +20,13 @@ export const configSchema = z.object({
 	PUBLIC_ADDR_PORT: z.coerce.number().default(9585),
 	INTERNAL_ADDR_PORT: z.coerce.number().default(9586),
 
+	// Observability
+	COW_EXPLORER_URL: z.string().url().default("https://explorer.cow.fi"),
+
+	// Slack notifications
+	SLACK_TOKEN: z.string().optional(),
+	SLACK_CHANNEL: z.string().optional(),
+
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 
@@ -128,6 +135,7 @@ export function safeConfigForLogging(config: Config): Record<string, unknown> {
 		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
 		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
 		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
+		SLACK_TOKEN: config.SLACK_TOKEN ? "<redacted>" : undefined,
 	};
 }
 

@@ -1,9 +1,13 @@
+import type { Queue } from "bullmq";
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent, AuditKind } from "../../domain/audit.js";
 import { insertAuditEvent } from "../audit.js";
+import type { SlackFormatterContext } from "../formatters.js";
+import { buildNotification } from "../notifications.js";
+import { enqueueSlackNotification } from "./slack-worker.js";
 
 interface SerializedAuditEvent {
 	occurredAt: string;
@@ -23,8 +27,20 @@ export function serializeAuditKind(kind: AuditKind): AuditKind {
 	);
 }
 
+interface SlackOpts {
+	slackQueue: Queue;
+	redis: Redis;
+	chainId: number;
+	cowExplorerUrl: string;
+}
+
 /** Creates a BullMQ worker that drains audit events to Postgres. */
-export function createAuditWorker(connection: Redis, db: Db, _logger: Logger): Worker {
+export function createAuditWorker(
+	connection: Redis,
+	db: Db,
+	logger: Logger,
+	slack?: SlackOpts,
+): Worker {
 	return new Worker(
 		"audit",
 		async (job) => {
@@ -34,6 +50,23 @@ export function createAuditWorker(connection: Redis, db: Db, _logger: Logger): W
 				kind: data.kind,
 			};
 			await insertAuditEvent(db, event);
+
+			// Dispatch Slack notifications after successful persistence
+			if (slack) {
+				try {
+					const ctx: SlackFormatterContext = {
+						chainId: slack.chainId,
+						cowExplorerUrl: slack.cowExplorerUrl,
+					};
+					const text = await buildNotification(slack.redis, event.kind, ctx);
+					if (text) {
+						await enqueueSlackNotification(slack.slackQueue, text);
+					}
+				} catch (err) {
+					// Notification failure must never fail the audit job
+					logger.warn({ err }, "failed to enqueue slack notification");
+				}
+			}
 		},
 		{
 			connection,

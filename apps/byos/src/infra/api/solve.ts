@@ -1,5 +1,6 @@
 import { encodeTrampolineInteractions } from "@byos/common";
 import { Hono } from "hono";
+import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
@@ -28,12 +29,14 @@ export interface SolveConfig {
 	db: Db;
 	gasPriceRef: GasPriceRef;
 	onAuditEvent: (event: AuditEvent) => void;
+	logger?: Logger;
 }
 
 const U64_MAX = 2n ** 64n - 1n;
 
 export function createSolveRoute(config: SolveConfig) {
 	const app = new Hono();
+	const log = config.logger?.child({ component: "solve" });
 
 	app.post("/solve", async (c) => {
 		let raw: unknown;
@@ -181,9 +184,20 @@ export function createSolveRoute(config: SolveConfig) {
 			}
 
 			solutions.push(solution);
+			log?.info(
+				{
+					proposalId: bestProposal.id,
+					orderUid: order.uid,
+					sellToken: order.sellToken,
+					buyToken: order.buyToken,
+					quoteBuyAmount: bestProposal.quoteBuyAmount.toString(),
+				},
+				"solution included",
+			);
 			solutionId++;
 		}
 
+		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);
 	});
 

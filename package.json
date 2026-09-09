@@ -10,6 +10,7 @@
 	"scripts": {
 		"build": "pnpm -r run build",
 		"dev": "docker compose up -d --wait postgres redis && pnpm --filter @byos/byos run dev",
+		"admin:dev": "./scripts/admin-dashboard-dev.sh",
 		"test": "vitest run --project unit",
 		"test:db": "vitest run --project db",
 		"test:redis": "vitest run --project redis",

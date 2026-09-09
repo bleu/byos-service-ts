@@ -46,6 +46,7 @@ E2E_SERVICES=(
   byos-db
   byos-redis
   byos-ts
+  admin
 )
 
 PROJECT_NAME="byos-e2e"

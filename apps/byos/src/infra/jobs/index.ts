@@ -34,6 +34,7 @@ export interface Queues {
 	penalty: Queue;
 	audit: Queue;
 	balanceRefresh: Queue;
+	slackNotification: Queue;
 }
 
 const PREFIX = "byos";
@@ -46,6 +47,7 @@ export function createQueues(connection: Redis): Queues {
 		penalty: new Queue("penalty", { connection, prefix: PREFIX }),
 		audit: new Queue("audit", { connection, prefix: PREFIX }),
 		balanceRefresh: new Queue("balance-refresh", { connection, prefix: PREFIX }),
+		slackNotification: new Queue("slack-notification", { connection, prefix: PREFIX }),
 	};
 }
 

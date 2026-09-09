@@ -49,6 +49,20 @@
 			"linter": { "enabled": false },
 			"formatter": { "enabled": false },
 			"assist": { "enabled": false }
+		},
+		{
+			"includes": [
+				"apps/**/*.test.ts",
+				"apps/**/*.db.test.ts",
+				"packages/**/*.test.ts",
+				"tests/**/*.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": { "noNonNullAssertion": "off" },
+					"suspicious": { "noExplicitAny": "off" }
+				}
+			}
 		}
 	]
 }

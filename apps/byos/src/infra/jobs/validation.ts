@@ -134,6 +134,9 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 
 	const now = BigInt(Math.floor(Date.now() / 1000));
 
+	let enqueued = 0;
+	let expired = 0;
+
 	for (const proposal of live) {
 		if (proposal.validUntil < now) {
 			try {
@@ -141,17 +144,25 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 				if ("auditEvent" in result) {
 					onAuditEvent(result.auditEvent);
 				}
+				logger.info(
+					{ id: proposal.id, subSolver: proposal.subSolver, orderUid: proposal.orderUid },
+					"proposal expired",
+				);
+				expired++;
 			} catch (e) {
 				logger.debug({ err: e, id: proposal.id }, "expire transition lost");
 			}
 		} else {
 			try {
 				await enqueueValidation(proposal.id);
+				enqueued++;
 			} catch (e) {
 				logger.warn({ err: e, id: proposal.id }, "failed to enqueue validation");
 			}
 		}
 	}
+
+	logger.info({ total: live.length, enqueued, expired }, "validation tick");
 }
 
 /** Validates a single proposal, re-read from the store so the state is fresh. */
@@ -190,6 +201,27 @@ export async function runProposalValidation(
 		}
 		for (const event of result.replacementAuditEvents) {
 			onAuditEvent(event);
+		}
+		if (result.status === "active") {
+			logger.info(
+				{ id: proposal.id, subSolver: proposal.subSolver, orderUid: proposal.orderUid },
+				"proposal validated",
+			);
+		} else if (result.status === "rejected") {
+			logger.info(
+				{
+					id: proposal.id,
+					subSolver: proposal.subSolver,
+					orderUid: proposal.orderUid,
+					reason: verdict.kind === "reject" ? verdict.reason : undefined,
+				},
+				"proposal rejected",
+			);
+		} else if (result.status === "simFailed") {
+			logger.warn(
+				{ id: proposal.id, subSolver: proposal.subSolver, orderUid: proposal.orderUid },
+				"proposal sim failed",
+			);
 		}
 	} catch (e) {
 		logger.warn({ err: e, id: proposal.id }, "validation failed");

@@ -67,6 +67,7 @@ function driverNotified(proposal: Proposal, notificationKind: string): AuditEven
 
 export function createNotifyRoute(config: NotifyConfig) {
 	const app = new Hono();
+	const log = config.logger?.child({ component: "notify" });
 
 	app.post("/notify", async (c) => {
 		let raw: unknown;
@@ -99,7 +100,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 			if (OUTCOME_KINDS.has(kind)) {
 				// An outcome we cannot join to a solution means the solutions
 				// record is broken or lost — alert-worthy (ADR-0010).
-				config.logger?.error(
+				log?.error(
 					{ kind, auctionId: notification.auctionId },
 					"unattributable outcome notification",
 				);
@@ -114,7 +115,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 			// only, no row mutation (ADR-0013).
 			for (const proposal of proposals) {
 				if (OUTCOME_KINDS.has(kind)) {
-					config.logger?.error(
+					log?.error(
 						{ id: proposal.id, kind },
 						"outcome notification without a tx hash; left for the executing timeout",
 					);
@@ -129,13 +130,44 @@ export function createNotifyRoute(config: NotifyConfig) {
 			if ("kind" in result) {
 				// A write we could not perform on a money path: the debit that
 				// should follow a revert now depends on the timeout backstop.
-				config.logger?.error({ id: proposal.id, kind }, "settlement outcome not recorded");
+				log?.error({ id: proposal.id, kind }, "settlement outcome not recorded");
 				continue;
 			}
 			if (result.auditEvent) {
 				config.onAuditEvent(result.auditEvent);
 				for (const auditEvent of result.cancelledAuditEvents) {
 					config.onAuditEvent(auditEvent);
+				}
+				if (outcome.kind === "succeeded") {
+					log?.info(
+						{
+							id: proposal.id,
+							subSolver: proposal.subSolver,
+							orderUid: proposal.orderUid,
+							txHash: outcome.txHash,
+						},
+						"proposal settled",
+					);
+				} else if (outcome.kind === "reverted") {
+					log?.warn(
+						{
+							id: proposal.id,
+							subSolver: proposal.subSolver,
+							orderUid: proposal.orderUid,
+							txHash: outcome.txHash,
+						},
+						"proposal reverted",
+					);
+				} else {
+					log?.info(
+						{
+							id: proposal.id,
+							subSolver: proposal.subSolver,
+							orderUid: proposal.orderUid,
+							outcome: notification.kind,
+						},
+						"proposal abandoned",
+					);
 				}
 				continue;
 			}
@@ -144,12 +176,12 @@ export function createNotifyRoute(config: NotifyConfig) {
 			// for a chargeable outcome this is a charge nobody collected.
 			config.onAuditEvent(driverNotified(proposal, kind));
 			if (isChargeable(outcome)) {
-				config.logger?.error(
+				log?.error(
 					{ id: proposal.id, kind },
 					"chargeable outcome ignored; the sub-solver may go uncharged",
 				);
 			} else {
-				config.logger?.warn(
+				log?.warn(
 					{ id: proposal.id, kind },
 					"settlement outcome not applicable to the proposal's current status",
 				);

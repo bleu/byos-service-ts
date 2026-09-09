@@ -15,6 +15,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    # AOF persistence is required so byos:known-subsolvers survives container
+    # restarts — without it every subsolver re-fires the "new subsolver" Slack
+    # notification after a Redis restart (see ADR-0017).
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     healthcheck:

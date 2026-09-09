@@ -81,6 +81,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
+		logger: ctx.logger,
 		signerLimit: {
 			limiter,
 			balances: ctx.balances ?? unknownBalances,
@@ -106,6 +107,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		db: ctx.db,
 		gasPriceRef: ctx.gasPriceRef,
 		onAuditEvent: ctx.onAuditEvent,
+		logger: ctx.logger,
 	});
 
 	const notify = createNotifyRoute({

@@ -148,7 +148,6 @@ describe("balance refresh tick", () => {
 			// Two addresses against a cap of three is over half.
 			maxActive: 3,
 			batchSize: 50,
-			// biome-ignore lint/suspicious/noExplicitAny: test double for pino
 			logger: logger as any,
 		});
 
