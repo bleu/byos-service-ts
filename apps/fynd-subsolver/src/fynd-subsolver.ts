@@ -81,14 +81,20 @@ export class FyndSubsolver {
 			this.logger.error({ err: error }, "failed to fetch solvable orders");
 			return;
 		}
-		this.logger.debug({ count: orders.length, liveProposals: this.live.size }, "fetched solvable sell orders");
+		this.logger.debug(
+			{ count: orders.length, liveProposals: this.live.size },
+			"fetched solvable sell orders",
+		);
 		const candidates = orders.filter((order) => {
 			const live = this.live.get(order.uid.toLowerCase());
 			return (
 				!live || now - live.lastSubmitted >= BigInt(this.config.proposalRefreshIntervalSeconds)
 			);
 		});
-		this.logger.debug({ total: orders.length, candidates: candidates.length }, "filtered candidates (excluding recently submitted)");
+		this.logger.debug(
+			{ total: orders.length, candidates: candidates.length },
+			"filtered candidates (excluding recently submitted)",
+		);
 		if (candidates.length === 0) return;
 		try {
 			if (!(await this.fynd.ready())) {
