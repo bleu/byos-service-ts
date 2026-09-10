@@ -9,7 +9,7 @@ See [`docs/shared/`](docs/shared/) for the normative BYOS specification, domain 
 | Path | Description | Status |
 |------|-------------|--------|
 | `apps/byos` | Main BYOS service (proposal API + solver engine + background jobs) | Complete |
-| `apps/subsolver` | Reference sub-solver (Uniswap V2 routing, orderbook polling) | Complete |
+| `apps/baseline-subsolver` | Baseline reference sub-solver (Uniswap V2 routing, orderbook polling) | Complete |
 | `packages/common` | Shared types: EIP-712, ABIs, DTOs, settlement encoding | Complete |
 | `tests/integration` | API integration tests (proposal lifecycle, /solve, /notify) | Complete |
 | `tests/e2e` | End-to-end tests (order → proposal → settlement on Anvil) | Complete |

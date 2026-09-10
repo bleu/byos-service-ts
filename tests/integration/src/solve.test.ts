@@ -127,7 +127,8 @@ describe("/solve", () => {
 		expect(status).toBe(200);
 		expect(body.solutions.length).toBeGreaterThanOrEqual(1);
 
-		const solution = body.solutions[0]!;
+		const solution = body.solutions[0];
+		if (!solution) throw new Error("expected a solution");
 		expect(solution.trades).toHaveLength(1);
 		expect(solution.interactions.length).toBeGreaterThanOrEqual(2); // transfer + execute
 		expect(solution.gas).toBeGreaterThan(0);

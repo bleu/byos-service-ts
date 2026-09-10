@@ -17,6 +17,18 @@ import {
 
 let app: TestApp;
 
+interface OwnerProposalResponse {
+	status?: string;
+	rejectionReason?: string;
+	id?: number;
+	sellAmount?: string;
+	minBuyAmount?: string;
+	quoteBuyAmount?: string;
+	penaltyTxHash?: string;
+	settlementTxHash?: string;
+	proposals?: Array<{ subSolver: string }>;
+}
+
 beforeAll(async () => {
 	app = await createTestApp();
 });
@@ -25,12 +37,12 @@ afterAll(async () => {
 	await app.ctx.cleanup();
 });
 
-async function ownerGet(id: number): Promise<{ status: number; body: any }> {
+async function ownerGet(id: number): Promise<{ status: number; body: OwnerProposalResponse }> {
 	const sig = await readAuthHeader();
 	const resp = await app.publicApp.request(`/proposal/${id}`, {
 		headers: { "X-Signature": sig },
 	});
-	return { status: resp.status, body: await resp.json() };
+	return { status: resp.status, body: (await resp.json()) as OwnerProposalResponse };
 }
 
 async function submitAndReject(
@@ -83,7 +95,8 @@ describe("owner-scoped reads", () => {
 		});
 		const stored = await store.get(app.ctx.db, id);
 		expect(stored).not.toBeNull();
-		await store.recordPenalty(app.ctx.db, stored!, 16_000_000_000_000_000n, penaltyTx);
+		if (!stored) throw new Error(`proposal ${id} missing`);
+		await store.recordPenalty(app.ctx.db, stored, 16_000_000_000_000_000n, penaltyTx);
 
 		const { status, body } = await ownerGet(id);
 		expect(status).toBe(200);
@@ -129,8 +142,10 @@ describe("owner-scoped reads", () => {
 		});
 		expect(resp.status).toBe(200);
 		const body = await resp.json();
-		expect(body.proposals, "competitor's proposal must not leak").toHaveLength(1);
-		expect(body.proposals[0].subSolver.toLowerCase()).toBe(SIGNER_ACCOUNT.address.toLowerCase());
+		const proposals = body.proposals;
+		expect(proposals, "competitor's proposal must not leak").toHaveLength(1);
+		if (!proposals?.[0]) throw new Error("expected the owner's proposal");
+		expect(proposals[0].subSolver.toLowerCase()).toBe(SIGNER_ACCOUNT.address.toLowerCase());
 	});
 
 	// The signature covers the interactions hash, so a route that survives

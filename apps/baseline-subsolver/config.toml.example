@@ -1,0 +1,10 @@
+# Copy this to config.toml, replace every placeholder, then start the Compose profile.
+# For a differently located file, set SUBSOLVER_CONFIG_PATH before running Compose.
+chain-id = 56
+trampoline-factory = "0x0000000000000000000000000000000000000000"
+uniswap-router = "0x0000000000000000000000000000000000000000"
+uniswap-factory = "0x0000000000000000000000000000000000000000"
+pair-init-code-hash = "0x0000000000000000000000000000000000000000000000000000000000000000"
+proposal-ttl-secs = 60
+poll-interval-secs = 2
+append-revert = false

@@ -145,11 +145,12 @@ describe("fee transform verification (COW-1240)", () => {
 			(i) => (i.target as string).toLowerCase() === (trampolineAddress as string).toLowerCase(),
 		);
 		expect(executeInteraction).toBeDefined();
+		if (!executeInteraction) throw new Error("execute interaction missing");
 
 		// 8. Decode the execute() calldata
 		const execDecoded = decodeFunctionData({
 			abi: TrampolineAbi,
-			data: executeInteraction!.callData as Hex,
+			data: executeInteraction.callData as Hex,
 		});
 		const execProposal = execDecoded.args[0] as {
 			orderUidHash: Hex;

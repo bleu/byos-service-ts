@@ -1,0 +1,5 @@
+# Copy this to config.toml and replace the contract-address placeholders.
+chain-id = 56
+trampoline-factory = "0x0000000000000000000000000000000000000000"
+proposal-ttl-secs = 60
+poll-interval-secs = 2

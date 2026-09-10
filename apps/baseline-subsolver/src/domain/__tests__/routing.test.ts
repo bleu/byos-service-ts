@@ -30,10 +30,12 @@ describe("Uniswap V2 routing", () => {
 			// How much input to get 906 output from 10000/10000 reserves?
 			const input = amountIn(906n, 10000n, 10000n);
 			expect(input).not.toBeNull();
+			if (input === null) throw new Error("expected a valid input amount");
 			// Verify round-trip: amountOut(input, ...) >= 906
-			const output = amountOut(input!, 10000n, 10000n);
+			const output = amountOut(input, 10000n, 10000n);
 			expect(output).not.toBeNull();
-			expect(output!).toBeGreaterThanOrEqual(906n);
+			if (output === null) throw new Error("expected a valid output amount");
+			expect(output).toBeGreaterThanOrEqual(906n);
 		});
 
 		it("returns null when output exceeds reserve", () => {
