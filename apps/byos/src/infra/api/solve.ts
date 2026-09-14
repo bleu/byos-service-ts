@@ -39,6 +39,9 @@ export function createSolveRoute(config: SolveConfig) {
 	const log = config.logger?.child({ component: "solve" });
 
 	app.post("/solve", async (c) => {
+		log?.info(
+			"/solve received",
+		);
 		let raw: unknown;
 		try {
 			raw = await c.req.json();
@@ -66,6 +69,11 @@ export function createSolveRoute(config: SolveConfig) {
 		} catch {
 			// If it doesn't parse, leave previous value
 		}
+
+		log?.info(
+			{ auctionId: auction.id ?? null, orderCount: auction.orders.length },
+			"/solve received",
+		);
 
 		// Auctions without an id are quote requests: never settled, so there
 		// is nothing to attribute. A present id must be a decimal integer —
