@@ -27,6 +27,7 @@ export interface RoutesConfig {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
+	enqueueProposalValidation: (proposalId: number) => Promise<void>;
 	signerLimit: SignerLimitConfig;
 	logger?: Logger;
 }
@@ -148,6 +149,9 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
+		config.enqueueProposalValidation(inserted.id).catch((err) => {
+			log?.warn({ err, id: inserted.id }, "failed to enqueue immediate proposal validation");
+		});
 		log?.info(
 			{
 				id: inserted.id,

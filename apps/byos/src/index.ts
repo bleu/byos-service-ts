@@ -45,6 +45,8 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
+		enqueueProposalValidation: (proposalId) =>
+			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
 		logger,
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,

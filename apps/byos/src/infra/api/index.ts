@@ -52,6 +52,7 @@ export interface PublicAppContext extends AppContext {
 	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
 	 */
 	rateLimits: RateLimitSettings;
+	enqueueProposalValidation: (proposalId: number) => Promise<void>;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
@@ -82,6 +83,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
+		enqueueProposalValidation: ctx.enqueueProposalValidation,
 		logger: ctx.logger,
 		signerLimit: {
 			limiter,
