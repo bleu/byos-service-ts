@@ -1,11 +1,11 @@
 import "dotenv/config";
 import type { ContractInteraction } from "@byos/common";
-import { byosDomain, signProposal } from "@byos/common";
+import { Erc20Abi, TrampolineFactoryAbi, byosDomain, signProposal } from "@byos/common";
 import type { OrderbookOrder, ProposalMetadata } from "@byos/subsolver-core";
-import { ByosClient, OrderbookClient } from "@byos/subsolver-core";
+import { ByosClient, OrderbookClient, randomNonce } from "@byos/subsolver-core";
 import pino from "pino";
-import type { Hex } from "viem";
-import { encodeFunctionData, keccak256 } from "viem";
+import type { Address, Hex } from "viem";
+import { createPublicClient, encodeFunctionData, http, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { filterCandidates } from "./filter.js";
@@ -27,6 +27,8 @@ interface CachedProposal {
 	proposalId: number;
 	validUntil: bigint;
 	status: "active" | "deactivated";
+	buyToken: string; // lowercased — needed to un-reserve on deactivation
+	sellAmount: bigint; // amount reserved in reservedBalance
 }
 
 async function main() {
@@ -34,12 +36,62 @@ async function main() {
 
 	const logger = pino({
 		level: config.logLevel,
-		transport: { target: "pino-pretty" },
+		...(config.logPretty ? { transport: { target: "pino-pretty" } } : {}),
 	});
 
 	const account = privateKeyToAccount(config.privateKey);
 	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 	const signFn = (params: any) => account.signTypedData(params);
+
+	const transport = http(config.rpcUrl);
+	const publicClient = createPublicClient({ transport });
+
+	// Resolve the trampoline address for this subsolver account once at startup
+	const trampolineAddress = await publicClient.readContract({
+		address: config.trampolineFactory,
+		abi: TrampolineFactoryAbi,
+		functionName: "addressOf",
+		args: [account.address],
+	});
+	logger.info({ trampolineAddress, subSolver: account.address }, "resolved trampoline");
+
+	// Reads the on-chain ERC20 balance of the trampoline for a given token
+	const fetchOnChainBalance = (token: Address): Promise<bigint> =>
+		publicClient.readContract({
+			address: token,
+			abi: Erc20Abi,
+			functionName: "balanceOf",
+			args: [trampolineAddress],
+		});
+
+	// Read both token balances at startup in a single multicall
+	const [usdcBalance, usdtBalance] = await publicClient.multicall({
+		allowFailure: false,
+		contracts: [
+			{ address: config.usdcAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
+			{ address: config.usdtAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
+		],
+	});
+	const availableBalance = new Map<string, bigint>([
+		[config.usdcAddress.toLowerCase(), usdcBalance],
+		[config.usdtAddress.toLowerCase(), usdtBalance],
+	]);
+	logger.info(
+		{
+			usdc: availableBalance.get(config.usdcAddress.toLowerCase())?.toString(),
+			usdt: availableBalance.get(config.usdtAddress.toLowerCase())?.toString(),
+		},
+		"initial trampoline balances",
+	);
+
+	// Tracks amounts locked in active proposals (not yet settled/deactivated)
+	const reservedBalance = new Map<string, bigint>([
+		[config.usdcAddress.toLowerCase(), 0n],
+		[config.usdtAddress.toLowerCase(), 0n],
+	]);
+
+	const netAvailable = (token: string): bigint =>
+		(availableBalance.get(token) ?? 0n) - (reservedBalance.get(token) ?? 0n);
 
 	const domain = byosDomain(config.chainId, config.trampolineFactory);
 	const orderbook = new OrderbookClient(config.orderbookUrl);
@@ -47,20 +99,6 @@ async function main() {
 
 	// Keyed by orderUid.toLowerCase()
 	const proposals = new Map<string, CachedProposal>();
-
-	// Nonce: timestamp at startup + incrementing counter to survive restarts safely
-	let nonce = BigInt(Date.now());
-	const nextNonce = (): bigint => {
-		const current = nonce;
-		nonce += 1n;
-		return current;
-	};
-
-	// Static trampoline balances — no RPC needed for shadow competition
-	const trampolineBalance = new Map<string, bigint>([
-		[config.usdcAddress.toLowerCase(), config.usdcBalance],
-		[config.usdtAddress.toLowerCase(), config.usdtBalance],
-	]);
 
 	// --- Main orderbook polling loop ---
 	const pollOrderbook = async (): Promise<void> => {
@@ -74,17 +112,44 @@ async function main() {
 			return;
 		}
 
+		// Filter uses in-memory net available — no RPC per poll
 		const candidates = filterCandidates(orders, {
 			usdcAddress: config.usdcAddress,
 			usdtAddress: config.usdtAddress,
-			trampolineBalance,
+			trampolineBalance: new Map([
+				[config.usdcAddress.toLowerCase(), netAvailable(config.usdcAddress.toLowerCase())],
+				[config.usdtAddress.toLowerCase(), netAvailable(config.usdtAddress.toLowerCase())],
+			]),
 			trackedUids: new Set(proposals.keys()),
 		});
 
 		logger.info({ total: orders.length, candidates: candidates.length }, "orderbook fetched");
 
 		for (const order of candidates) {
+			const buy = order.buyToken.toLowerCase();
 			const validUntil = nowSecs + config.maxProposalLifetimeSecs;
+
+			// Re-read on-chain balance for the token we must deliver before committing
+			let freshBalance: bigint;
+			try {
+				freshBalance = await fetchOnChainBalance(order.buyToken);
+			} catch (err) {
+				logger.warn({ err, orderUid: order.uid }, "failed to read on-chain balance, skipping");
+				continue;
+			}
+			availableBalance.set(buy, freshBalance);
+
+			const net = netAvailable(buy);
+			if (order.sellAmount > net) {
+				logger.warn(
+					{ orderUid: order.uid, net: net.toString(), required: order.sellAmount.toString() },
+					"insufficient balance after RPC re-read, skipping",
+				);
+				continue;
+			}
+
+			// Reserve the amount optimistically before submitting
+			reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) + order.sellAmount);
 
 			const interactions: ContractInteraction[] = [
 				{
@@ -106,14 +171,15 @@ async function main() {
 				minBuyAmount: order.sellAmount, // 1:1
 				quoteBuyAmount: order.sellAmount, // 1:1
 				validUntil,
-				nonce: nextNonce(),
+				nonce: randomNonce(),
 			};
 
 			let signature: Hex;
 			try {
 				signature = await signProposal(signFn, domain, proposal, interactions);
 			} catch (err) {
-				logger.warn({ err, orderUid: order.uid }, "failed to sign proposal");
+				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - order.sellAmount);
+				logger.warn({ err, orderUid: order.uid }, "failed to sign proposal, releasing reservation");
 				continue;
 			}
 
@@ -130,7 +196,13 @@ async function main() {
 					nonce: proposal.nonce,
 					signature,
 				});
-				proposals.set(order.uid.toLowerCase(), { proposalId: id, validUntil, status: "active" });
+				proposals.set(order.uid.toLowerCase(), {
+					proposalId: id,
+					validUntil,
+					status: "active",
+					buyToken: buy,
+					sellAmount: order.sellAmount,
+				});
 				logger.info(
 					{
 						id,
@@ -147,7 +219,8 @@ async function main() {
 					"proposal submitted",
 				);
 			} catch (err) {
-				logger.warn({ err, orderUid: order.uid }, "failed to submit proposal");
+				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - order.sellAmount);
+				logger.warn({ err, orderUid: order.uid }, "failed to submit proposal, releasing reservation");
 			}
 		}
 	};
@@ -169,7 +242,14 @@ async function main() {
 		for (const [uid, cached] of proposals) {
 			if (cached.status === "active" && !activeIds.has(cached.proposalId)) {
 				proposals.set(uid, { ...cached, status: "deactivated" });
-				logger.info({ proposalId: cached.proposalId, orderUid: uid }, "proposal deactivated");
+				reservedBalance.set(
+					cached.buyToken,
+					(reservedBalance.get(cached.buyToken) ?? 0n) - cached.sellAmount,
+				);
+				logger.info(
+					{ proposalId: cached.proposalId, orderUid: uid },
+					"proposal deactivated, reservation released",
+				);
 			}
 			if (cached.status === "deactivated" && nowSecs > cached.validUntil) {
 				proposals.delete(uid);
