@@ -15,6 +15,7 @@ import {
 	createProposalValidationWorker,
 	createValidationWorker,
 	enqueueProposalValidation,
+	runProposalValidation,
 } from "./infra/jobs/validation.js";
 
 async function main() {
@@ -45,8 +46,16 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
-		enqueueProposalValidation: (proposalId) =>
-			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
+		runImmediateValidation: (proposalId) =>
+			runProposalValidation(
+				{
+					db: ctx.db,
+					validator: ctx.validator,
+					onAuditEvent: ctx.onAuditEvent,
+					logger: logger.child({ worker: "immediate-validation" }),
+				},
+				proposalId,
+			),
 		logger,
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,
