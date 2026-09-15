@@ -57,6 +57,7 @@ export const configSchema = z.object({
 	RETENTION_SWEEP_INTERVAL_SECS: z.coerce.number().default(300),
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
 	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
+	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Rate limiting (ADR-0015). All are operational tuning parameters —

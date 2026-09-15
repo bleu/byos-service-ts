@@ -31,6 +31,7 @@ export interface AppContext {
 	cL: bigint;
 	gasPriceRef: GasPriceRef;
 	solveBearerToken?: string;
+	holdbackMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
 }
@@ -107,6 +108,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		db: ctx.db,
 		gasPriceRef: ctx.gasPriceRef,
 		onAuditEvent: ctx.onAuditEvent,
+		holdbackMs: ctx.holdbackMs,
 		logger: ctx.logger,
 	});
 
