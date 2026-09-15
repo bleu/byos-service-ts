@@ -1,4 +1,5 @@
 import { OrderKind, TrampolineFactoryAbi } from "@byos/common";
+import type { Logger } from "pino";
 import type { Address, PublicClient } from "viem";
 import { checkEnvelope, type OrderRecord } from "../../domain/order.js";
 import type { Proposal } from "../../domain/proposal.js";
@@ -13,6 +14,37 @@ import type { ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
 import { buildSimulation, DUMMY_SUBMITTER } from "./simulation.js";
+
+function buildTenderlyUrl({
+	chainId,
+	blockNumber,
+	from,
+	to,
+	calldata,
+}: {
+	chainId: number;
+	blockNumber: bigint;
+	from: string;
+	to: string;
+	calldata: string;
+}): string {
+	try {
+		const params = new URLSearchParams({
+			block: blockNumber.toString(),
+			blockIndex: "0",
+			from,
+			gas: "8000000",
+			gasPrice: "0",
+			value: "0",
+			contractAddress: to,
+			network: chainId.toString(),
+			rawFunctionInput: calldata,
+		});
+		return `https://dashboard.tenderly.co/simulator/new?${params.toString()}`;
+	} catch {
+		return "";
+	}
+}
 
 /** ABI for the settlement contract's authenticator() view function. */
 const settlementAuthenticatorAbi = [
@@ -37,6 +69,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly trampolineFactory: Address,
 		private readonly gasPriceRef: GasPriceRef,
 		private readonly minScore: bigint,
+		private readonly logger?: Logger,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -176,7 +209,41 @@ export class SimulationValidator implements ValidateProposal {
 				stateOverride: sim.stateOverride,
 			});
 		} catch (e) {
-			if (isRevertError(e)) return { kind: "simFailed" };
+			if (isRevertError(e)) {
+				if (this.logger) {
+					const chainId = this.publicClient.chain?.id;
+					let blockNumber: bigint | undefined;
+					try {
+						blockNumber = await this.publicClient.getBlockNumber();
+					} catch {
+						// best-effort
+					}
+					const tenderlyUrl =
+						chainId && blockNumber !== undefined
+							? buildTenderlyUrl({
+									chainId,
+									blockNumber,
+									from: DUMMY_SUBMITTER,
+									to: this.settlementAddress,
+									calldata: sim.calldata,
+								})
+							: "";
+					this.logger.warn(
+						{
+							proposalId: proposal.id,
+							orderUid: proposal.orderUid,
+							timestamp: Math.floor(Date.now() / 1000),
+							blockNumber: blockNumber?.toString(),
+							from: DUMMY_SUBMITTER,
+							to: this.settlementAddress,
+							calldata: sim.calldata,
+							tenderlyUrl,
+						},
+						"simulation revert debug",
+					);
+				}
+				return { kind: "simFailed" };
+			}
 			return null; // transport error, defer
 		}
 
