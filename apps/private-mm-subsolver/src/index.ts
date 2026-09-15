@@ -1,6 +1,6 @@
 import "dotenv/config";
 import type { ContractInteraction } from "@byos/common";
-import { Erc20Abi, TrampolineFactoryAbi, byosDomain, signProposal } from "@byos/common";
+import { byosDomain, Erc20Abi, signProposal, TrampolineFactoryAbi } from "@byos/common";
 import type { OrderbookOrder, ProposalMetadata } from "@byos/subsolver-core";
 import { ByosClient, OrderbookClient, randomNonce } from "@byos/subsolver-core";
 import pino from "pino";
@@ -71,8 +71,18 @@ async function main() {
 		allowFailure: false,
 		multicallAddress: "0xcA11bde05977b3631167028862bE2a173976CA11",
 		contracts: [
-			{ address: config.usdcAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
-			{ address: config.usdtAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
+			{
+				address: config.usdcAddress,
+				abi: Erc20Abi,
+				functionName: "balanceOf",
+				args: [trampolineAddress],
+			},
+			{
+				address: config.usdtAddress,
+				abi: Erc20Abi,
+				functionName: "balanceOf",
+				args: [trampolineAddress],
+			},
 		],
 	});
 	const availableBalance = new Map<string, bigint>([
@@ -223,7 +233,10 @@ async function main() {
 				);
 			} catch (err) {
 				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - order.sellAmount);
-				logger.warn({ err, orderUid: order.uid }, "failed to submit proposal, releasing reservation");
+				logger.warn(
+					{ err, orderUid: order.uid },
+					"failed to submit proposal, releasing reservation",
+				);
 			}
 		}
 	};
