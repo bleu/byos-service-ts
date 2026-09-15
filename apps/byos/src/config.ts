@@ -37,6 +37,13 @@ export const configSchema = z.object({
 	/** Escrow contract address for this deployment. Set once per chain by the
 	 * operator who deployed the contract. */
 	ESCROW_ADDRESS: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
+	/** When set, used as the `from` address for simulation and skips the
+	 * dummy-submitter state override — the address must already hold
+	 * SUBMITTER_ROLE on the Escrow contract. */
+	SUBMITTER_ADDRESS: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
 	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()

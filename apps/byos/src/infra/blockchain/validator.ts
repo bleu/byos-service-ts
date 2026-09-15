@@ -13,7 +13,7 @@ import {
 import type { ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
-import { buildSimulation, DUMMY_SUBMITTER } from "./simulation.js";
+import { buildSimulation } from "./simulation.js";
 
 function buildTenderlyUrl({
 	chainId,
@@ -70,6 +70,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly gasPriceRef: GasPriceRef,
 		private readonly minScore: bigint,
 		private readonly logger?: Logger,
+		private readonly submitter?: Address,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -197,13 +198,14 @@ export class SimulationValidator implements ValidateProposal {
 			signature: proposal.signature,
 			preInteractions: record.preInteractions,
 			postInteractions: record.postInteractions,
+			submitter: this.submitter,
 		});
 
 		// Step 6: Dispatch eth_estimateGas with state overrides
 		let gas: bigint;
 		try {
 			gas = await this.publicClient.estimateGas({
-				account: DUMMY_SUBMITTER,
+				account: sim.submitter,
 				to: this.settlementAddress,
 				data: sim.calldata,
 				stateOverride: sim.stateOverride,
@@ -223,7 +225,7 @@ export class SimulationValidator implements ValidateProposal {
 							? buildTenderlyUrl({
 									chainId,
 									blockNumber,
-									from: DUMMY_SUBMITTER,
+									from: sim.submitter,
 									to: this.settlementAddress,
 									calldata: sim.calldata,
 								})
@@ -234,7 +236,7 @@ export class SimulationValidator implements ValidateProposal {
 							orderUid: proposal.orderUid,
 							timestamp: Math.floor(Date.now() / 1000),
 							blockNumber: blockNumber?.toString(),
-							from: DUMMY_SUBMITTER,
+							from: sim.submitter,
 							to: this.settlementAddress,
 							calldata: sim.calldata,
 							tenderlyUrl,
