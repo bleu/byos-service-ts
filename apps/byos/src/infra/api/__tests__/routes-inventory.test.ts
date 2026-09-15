@@ -39,6 +39,7 @@ function publicRoutes(): string[] {
 			tier: { rateUnitWei: 10n ** 17n, ratePerUnit: 300, minRate: 120, maxRate: 3000 },
 			floorWei: 10n ** 16n,
 		},
+		runImmediateValidation: async () => {},
 	};
 
 	const app = createPublicApp(ctx);
