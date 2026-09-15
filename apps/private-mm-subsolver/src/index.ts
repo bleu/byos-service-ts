@@ -64,9 +64,12 @@ async function main() {
 			args: [trampolineAddress],
 		});
 
-	// Read both token balances at startup in a single multicall
+	// Read both token balances at startup in a single multicall.
+	// multicallAddress is required because the client has no chain definition — Multicall3
+	// is deployed at this address on all major EVM chains.
 	const [usdcBalance, usdtBalance] = await publicClient.multicall({
 		allowFailure: false,
+		multicallAddress: "0xcA11bde05977b3631167028862bE2a173976CA11",
 		contracts: [
 			{ address: config.usdcAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
 			{ address: config.usdtAddress, abi: Erc20Abi, functionName: "balanceOf", args: [trampolineAddress] },
