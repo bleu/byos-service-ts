@@ -12,6 +12,7 @@ const envSchema = z.object({
 	CHAIN_ID: z.string(),
 	TRAMPOLINE_FACTORY: z.string(),
 	MAX_PROPOSAL_LIFETIME_MS: z.string().default("600000"),
+	FORCED_SURPLUS: z.string().regex(/^\d+$/, "Must be a decimal integer").default("0"),
 	ORDERBOOK_POLL_INTERVAL_MS: z.string().default("2000"),
 	PROPOSAL_SYNC_INTERVAL_MS: z.string().default("10000"),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
@@ -33,6 +34,7 @@ export interface Config {
 	proposalSyncIntervalMs: number;
 	logLevel: string;
 	logPretty: boolean;
+	forcedSurplus: bigint;
 }
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -57,5 +59,6 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalSyncIntervalMs: Number(data.PROPOSAL_SYNC_INTERVAL_MS),
 		logLevel: data.LOG_LEVEL,
 		logPretty: data.LOG_PRETTY === "true",
+		forcedSurplus: BigInt(data.FORCED_SURPLUS),
 	};
 }

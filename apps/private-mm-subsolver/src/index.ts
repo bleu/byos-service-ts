@@ -10,9 +10,6 @@ import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { filterCandidates } from "./filter.js";
 
-// 0.02 USDC/USDT bonus added to every proposal (both tokens have 18 decimals on BSC)
-const BONUS = 20_000_000_000_000_000n;
-
 const erc20TransferAbi = [
 	{
 		name: "transfer",
@@ -155,7 +152,7 @@ async function main() {
 			}
 			availableBalance.set(buy, freshBalance);
 
-			const deliveryAmount = order.sellAmount + BONUS;
+			const deliveryAmount = order.sellAmount + config.forcedSurplus;
 
 			const net = netAvailable(buy);
 			if (deliveryAmount > net) {
