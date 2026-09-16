@@ -10,6 +10,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { filterCandidates } from "./filter.js";
 
+// 0.02 USDC/USDT bonus added to every proposal (both tokens have 18 decimals on BSC)
+const BONUS = 20_000_000_000_000_000n;
+
 const erc20TransferAbi = [
 	{
 		name: "transfer",
@@ -152,17 +155,19 @@ async function main() {
 			}
 			availableBalance.set(buy, freshBalance);
 
+			const deliveryAmount = order.sellAmount + BONUS;
+
 			const net = netAvailable(buy);
-			if (order.sellAmount > net) {
+			if (deliveryAmount > net) {
 				logger.warn(
-					{ orderUid: order.uid, net: net.toString(), required: order.sellAmount.toString() },
+					{ orderUid: order.uid, net: net.toString(), required: deliveryAmount.toString() },
 					"insufficient balance after RPC re-read, skipping",
 				);
 				continue;
 			}
 
-			// Reserve the amount optimistically before submitting
-			reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) + order.sellAmount);
+			// Reserve the delivery amount (including bonus) optimistically before submitting
+			reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) + deliveryAmount);
 
 			const interactions: ContractInteraction[] = [
 				{
@@ -171,7 +176,7 @@ async function main() {
 					callData: encodeFunctionData({
 						abi: erc20TransferAbi,
 						functionName: "transfer",
-						args: [config.settlementAddress, order.sellAmount],
+						args: [config.settlementAddress, deliveryAmount],
 					}) as Hex,
 				},
 			];
@@ -181,8 +186,8 @@ async function main() {
 				sellToken: order.sellToken,
 				buyToken: order.buyToken,
 				sellAmount: order.sellAmount,
-				minBuyAmount: order.sellAmount, // 1:1
-				quoteBuyAmount: order.sellAmount, // 1:1
+				minBuyAmount: deliveryAmount,
+				quoteBuyAmount: deliveryAmount,
 				validUntil,
 				nonce: randomNonce(),
 			};
@@ -191,7 +196,7 @@ async function main() {
 			try {
 				signature = await signProposal(signFn, domain, proposal, interactions);
 			} catch (err) {
-				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - order.sellAmount);
+				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - deliveryAmount);
 				logger.warn({ err, orderUid: order.uid }, "failed to sign proposal, releasing reservation");
 				continue;
 			}
@@ -214,7 +219,7 @@ async function main() {
 					validUntil,
 					status: "active",
 					buyToken: buy,
-					sellAmount: order.sellAmount,
+					sellAmount: deliveryAmount,
 				});
 				logger.info(
 					{
@@ -232,7 +237,7 @@ async function main() {
 					"proposal submitted",
 				);
 			} catch (err) {
-				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - order.sellAmount);
+				reservedBalance.set(buy, (reservedBalance.get(buy) ?? 0n) - deliveryAmount);
 				logger.warn(
 					{ err, orderUid: order.uid },
 					"failed to submit proposal, releasing reservation",
