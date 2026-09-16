@@ -537,6 +537,7 @@ export async function resolveVerdict(
 		let trampoline: string | null = null;
 		let sellToken: string | null = null;
 		let buyToken: string | null = null;
+		let simulationFailureParams: unknown | null = null;
 
 		switch (verdict.kind) {
 			case "accept":
@@ -567,6 +568,7 @@ export async function resolveVerdict(
 				break;
 			case "simFailed":
 				toStatus = "simFailed";
+				simulationFailureParams = verdict.simulationFailureParams ?? null;
 				break;
 		}
 
@@ -581,6 +583,7 @@ export async function resolveVerdict(
 				...(trampoline ? { trampoline } : {}),
 				...(sellToken ? { sellToken } : {}),
 				...(buyToken ? { buyToken } : {}),
+				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
@@ -1215,6 +1218,7 @@ export async function solutionProposals(
 			settlementTxHash: proposals.settlementTxHash,
 			penaltyTxHash: proposals.penaltyTxHash,
 			pendingCancellation: proposals.pendingCancellation,
+			simulationFailureParams: proposals.simulationFailureParams,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

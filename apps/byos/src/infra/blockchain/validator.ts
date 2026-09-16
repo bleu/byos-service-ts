@@ -9,7 +9,7 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
-import type { ValidateProposal, Verdict } from "../../domain/validator.js";
+import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
 import { buildSimulation, DUMMY_SUBMITTER } from "./simulation.js";
@@ -66,6 +66,25 @@ export class SimulationValidator implements ValidateProposal {
 
 		this.authenticator = addr;
 		return addr;
+	}
+
+	/** Captures block context at revert time for permanent debug access. Best-effort: returns
+	 *  undefined if the block fetch fails (e.g. transport error after the revert). */
+	private async buildFailureParams(calldata: `0x${string}`): Promise<SimulationFailureParams | undefined> {
+		try {
+			const chainId = await this.publicClient.getChainId();
+			const block = await this.publicClient.getBlock({ blockTag: "latest" });
+			return {
+				chainId,
+				blockNumber: block.number.toString(),
+				timestamp: Number(block.timestamp),
+				from: DUMMY_SUBMITTER,
+				to: this.settlementAddress,
+				calldata,
+			};
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async profitability(
@@ -176,7 +195,10 @@ export class SimulationValidator implements ValidateProposal {
 				stateOverride: sim.stateOverride,
 			});
 		} catch (e) {
-			if (isRevertError(e)) return { kind: "simFailed" };
+			if (isRevertError(e)) {
+				const simulationFailureParams = await this.buildFailureParams(sim.calldata);
+				return { kind: "simFailed", simulationFailureParams };
+			}
 			return null; // transport error, defer
 		}
 
