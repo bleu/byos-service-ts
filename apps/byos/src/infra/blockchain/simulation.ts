@@ -70,20 +70,24 @@ export function buildSimulation(
 
 	const submitter = params.submitter ?? DUMMY_SUBMITTER;
 
-	const stateOverride: SimulationResult["stateOverride"] = [
-		{
-			address: params.authenticator,
-			code: ANYONE_AUTHENTICATOR_CODE,
-		},
-	];
+	const stateOverride: SimulationResult["stateOverride"] = [];
 
-	// Only override the escrow role when using the dummy submitter — a real
-	// submitter address already holds SUBMITTER_ROLE on-chain.
+	// When using a real submitter address, skip all state overrides: the address
+	// already holds SUBMITTER_ROLE on the Escrow and is on the solver allowlist,
+	// making the simulation fully production-faithful.
+	// With the dummy submitter, override both the authenticator (AnyoneAuthenticator
+	// so isSolver() returns true) and the escrow role storage slot.
 	if (!params.submitter) {
-		stateOverride.push({
-			address: params.escrow,
-			stateDiff: [{ slot: submitterRoleSlot(submitter), value: pad(toHex(1), { size: 32 }) }],
-		});
+		stateOverride.push(
+			{
+				address: params.authenticator,
+				code: ANYONE_AUTHENTICATOR_CODE,
+			},
+			{
+				address: params.escrow,
+				stateDiff: [{ slot: submitterRoleSlot(submitter), value: pad(toHex(1), { size: 32 }) }],
+			},
+		);
 	}
 
 	return { calldata, stateOverride, submitter };

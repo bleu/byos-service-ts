@@ -149,6 +149,17 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
+		// Fire-and-forget simulation: runs concurrently with the HTTP response so
+		// the proposal is often already active by the time the driver polls. This
+		// is a deliberate departure from ADR-0001's "async-only" invariant — see
+		// ADR-0001 §Alternatives for the tradeoff discussion.
+		//
+		// Known limitation: runImmediateValidation calls validator.validate()
+		// directly, bypassing the beginTick() cache-clear that runs at the start
+		// of each background tick. The escrow balance seen here may be stale by
+		// up to one tick interval (default 12s). The background tick re-validates
+		// every live proposal, so any mis-accepted proposal will be caught and
+		// rejected within one tick.
 		void (async () => {
 			log?.info({ id: inserted.id }, "immediate simulation triggered");
 			try {
