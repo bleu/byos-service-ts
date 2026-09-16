@@ -27,6 +27,7 @@ export interface RoutesConfig {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
+	runImmediateValidation: (proposalId: number) => Promise<void>;
 	signerLimit: SignerLimitConfig;
 	logger?: Logger;
 }
@@ -148,6 +149,15 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
+		void (async () => {
+			log?.info({ id: inserted.id }, "immediate simulation triggered");
+			try {
+				await config.runImmediateValidation(inserted.id);
+				log?.info({ id: inserted.id }, "immediate simulation finished");
+			} catch (err) {
+				log?.warn({ err, id: inserted.id }, "immediate simulation error");
+			}
+		})();
 		log?.info(
 			{
 				id: inserted.id,
