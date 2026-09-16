@@ -70,7 +70,9 @@ export class SimulationValidator implements ValidateProposal {
 
 	/** Captures block context at revert time for permanent debug access. Best-effort: returns
 	 *  undefined if the block fetch fails (e.g. transport error after the revert). */
-	private async buildFailureParams(calldata: `0x${string}`): Promise<SimulationFailureParams | undefined> {
+	private async buildFailureParams(
+		calldata: `0x${string}`,
+	): Promise<SimulationFailureParams | undefined> {
 		try {
 			const chainId = await this.publicClient.getChainId();
 			const block = await this.publicClient.getBlock({ blockTag: "latest" });
