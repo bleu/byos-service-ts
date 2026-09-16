@@ -177,6 +177,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		trampolineFactory,
 		gasPriceRef,
 		BigInt(config.MIN_PROPOSAL_SCORE),
+		logger.child({ component: "simulation" }),
+		config.SUBMITTER_ADDRESS as Address | undefined,
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);
