@@ -39,6 +39,20 @@ async function main() {
 		...(config.logPretty ? { transport: { target: "pino-pretty" } } : {}),
 	});
 
+	// BYOS rejects proposals with validUntil more than MAX_PROPOSAL_LIFETIME_SECS
+	// (default 300s) in the future (ADR-0013). Warn early so misconfiguration
+	// doesn't cause every submission to be silently rejected at ingestion.
+	const BYOS_DEFAULT_MAX_LIFETIME_SECS = 300n;
+	if (config.maxProposalLifetimeSecs > BYOS_DEFAULT_MAX_LIFETIME_SECS) {
+		logger.warn(
+			{
+				maxProposalLifetimeSecs: config.maxProposalLifetimeSecs.toString(),
+				byosDefaultCap: BYOS_DEFAULT_MAX_LIFETIME_SECS.toString(),
+			},
+			"MAX_PROPOSAL_LIFETIME_MS exceeds BYOS default cap — proposals will be rejected at ingestion unless BYOS is configured with a higher MAX_PROPOSAL_LIFETIME_SECS",
+		);
+	}
+
 	const account = privateKeyToAccount(config.privateKey);
 	// biome-ignore lint/suspicious/noExplicitAny: viem overloaded signTypedData types
 	const signFn = (params: any) => account.signTypedData(params);

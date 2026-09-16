@@ -11,7 +11,10 @@ const envSchema = z.object({
 	USDT_ADDRESS: z.string(),
 	CHAIN_ID: z.string(),
 	TRAMPOLINE_FACTORY: z.string(),
-	MAX_PROPOSAL_LIFETIME_MS: z.string().default("600000"),
+	// Default 240s (4 min) stays within BYOS's default MAX_PROPOSAL_LIFETIME_SECS=300.
+	// Proposals with validUntil more than MAX_PROPOSAL_LIFETIME_SECS in the future
+	// are rejected at ingestion (ADR-0013).
+	MAX_PROPOSAL_LIFETIME_MS: z.string().default("240000"),
 	FORCED_SURPLUS: z.string().regex(/^\d+$/, "Must be a decimal integer").default("0"),
 	ORDERBOOK_POLL_INTERVAL_MS: z.string().default("2000"),
 	PROPOSAL_SYNC_INTERVAL_MS: z.string().default("10000"),
