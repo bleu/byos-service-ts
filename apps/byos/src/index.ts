@@ -15,6 +15,7 @@ import {
 	createProposalValidationWorker,
 	createValidationWorker,
 	enqueueProposalValidation,
+	runProposalValidation,
 } from "./infra/jobs/validation.js";
 
 async function main() {
@@ -36,6 +37,12 @@ async function main() {
 		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
+	// Semaphore for fire-and-forget immediate validations. Capped well below the
+	// background worker's VALIDATION_CONCURRENCY=8 so concurrent submissions
+	// cannot starve the scheduled validator of RPC budget.
+	let activeImmediateValidations = 0;
+	const IMMEDIATE_VALIDATION_CONCURRENCY = 2;
+
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
@@ -45,6 +52,28 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
+		runImmediateValidation: async (proposalId) => {
+			if (activeImmediateValidations >= IMMEDIATE_VALIDATION_CONCURRENCY) {
+				logger
+					.child({ worker: "immediate-validation" })
+					.debug({ id: proposalId }, "immediate validation skipped — concurrency limit");
+				return;
+			}
+			activeImmediateValidations++;
+			try {
+				await runProposalValidation(
+					{
+						db: ctx.db,
+						validator: ctx.validator,
+						onAuditEvent: ctx.onAuditEvent,
+						logger: logger.child({ worker: "immediate-validation" }),
+					},
+					proposalId,
+				);
+			} finally {
+				activeImmediateValidations--;
+			}
+		},
 		logger,
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,
@@ -59,6 +88,7 @@ async function main() {
 		cL,
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
+		holdbackMs: config.SOLVE_HOLDBACK_MS,
 		onAuditEvent: ctx.onAuditEvent,
 		logger,
 	});

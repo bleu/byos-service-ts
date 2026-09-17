@@ -15,7 +15,10 @@ COPY apps/admin/ apps/admin/
 COPY packages/common/ packages/common/
 
 RUN pnpm --filter=@byos/common run build
-RUN pnpm --filter=@byos/admin run build
+# DATABASE_URL is required at build time only to satisfy the module-level
+# check in db.ts during Next.js page analysis — no real connection is made.
+RUN DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/byos \
+    pnpm --filter=@byos/admin run build
 
 # Stage 2: Runtime (standalone output is self-contained)
 FROM node:22-slim AS runner

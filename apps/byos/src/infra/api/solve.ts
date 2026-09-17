@@ -29,6 +29,7 @@ export interface SolveConfig {
 	db: Db;
 	gasPriceRef: GasPriceRef;
 	onAuditEvent: (event: AuditEvent) => void;
+	holdbackMs?: number;
 	logger?: Logger;
 }
 
@@ -39,6 +40,7 @@ export function createSolveRoute(config: SolveConfig) {
 	const log = config.logger?.child({ component: "solve" });
 
 	app.post("/solve", async (c) => {
+		log?.info("/solve received");
 		let raw: unknown;
 		try {
 			raw = await c.req.json();
@@ -67,6 +69,11 @@ export function createSolveRoute(config: SolveConfig) {
 			// If it doesn't parse, leave previous value
 		}
 
+		log?.info(
+			{ auctionId: auction.id ?? null, orderCount: auction.orders.length },
+			"/solve received",
+		);
+
 		// Auctions without an id are quote requests: never settled, so there
 		// is nothing to attribute. A present id must be a decimal integer —
 		// Rust rejects anything else at deserialization.
@@ -83,6 +90,10 @@ export function createSolveRoute(config: SolveConfig) {
 		const orderUids = auction.orders.map((o) => o.uid);
 		if (orderUids.length === 0) {
 			return c.json({ solutions: [] } satisfies SolveResponse);
+		}
+
+		if (config.holdbackMs && config.holdbackMs > 0) {
+			await new Promise((resolve) => setTimeout(resolve, config.holdbackMs));
 		}
 
 		// Batch lookup: single query for all active proposals

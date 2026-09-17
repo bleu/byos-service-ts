@@ -1,4 +1,5 @@
 import { OrderKind, TrampolineFactoryAbi } from "@byos/common";
+import type { Logger } from "pino";
 import type { Address, PublicClient } from "viem";
 import { checkEnvelope, type OrderRecord } from "../../domain/order.js";
 import type { Proposal } from "../../domain/proposal.js";
@@ -12,7 +13,38 @@ import {
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
-import { buildSimulation, DUMMY_SUBMITTER } from "./simulation.js";
+import { buildSimulation } from "./simulation.js";
+
+function buildTenderlyUrl({
+	chainId,
+	blockNumber,
+	from,
+	to,
+	calldata,
+}: {
+	chainId: number;
+	blockNumber: bigint;
+	from: string;
+	to: string;
+	calldata: string;
+}): string {
+	try {
+		const params = new URLSearchParams({
+			block: blockNumber.toString(),
+			blockIndex: "0",
+			from,
+			gas: "8000000",
+			gasPrice: "0",
+			value: "0",
+			contractAddress: to,
+			network: chainId.toString(),
+			rawFunctionInput: calldata,
+		});
+		return `https://dashboard.tenderly.co/simulator/new?${params.toString()}`;
+	} catch {
+		return "";
+	}
+}
 
 /** ABI for the settlement contract's authenticator() view function. */
 const settlementAuthenticatorAbi = [
@@ -37,6 +69,8 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly trampolineFactory: Address,
 		private readonly gasPriceRef: GasPriceRef,
 		private readonly minScore: bigint,
+		private readonly logger?: Logger,
+		private readonly submitter?: Address,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -66,27 +100,6 @@ export class SimulationValidator implements ValidateProposal {
 
 		this.authenticator = addr;
 		return addr;
-	}
-
-	/** Captures block context at revert time for permanent debug access. Best-effort: returns
-	 *  undefined if the block fetch fails (e.g. transport error after the revert). */
-	private async buildFailureParams(
-		calldata: `0x${string}`,
-	): Promise<SimulationFailureParams | undefined> {
-		try {
-			const chainId = await this.publicClient.getChainId();
-			const block = await this.publicClient.getBlock({ blockTag: "latest" });
-			return {
-				chainId,
-				blockNumber: block.number.toString(),
-				timestamp: Number(block.timestamp),
-				from: DUMMY_SUBMITTER,
-				to: this.settlementAddress,
-				calldata,
-			};
-		} catch {
-			return undefined;
-		}
 	}
 
 	private async profitability(
@@ -185,20 +198,58 @@ export class SimulationValidator implements ValidateProposal {
 			signature: proposal.signature,
 			preInteractions: record.preInteractions,
 			postInteractions: record.postInteractions,
+			submitter: this.submitter,
 		});
 
 		// Step 6: Dispatch eth_estimateGas with state overrides
 		let gas: bigint;
 		try {
 			gas = await this.publicClient.estimateGas({
-				account: DUMMY_SUBMITTER,
+				account: sim.submitter,
 				to: this.settlementAddress,
 				data: sim.calldata,
 				stateOverride: sim.stateOverride,
 			});
 		} catch (e) {
 			if (isRevertError(e)) {
-				const simulationFailureParams = await this.buildFailureParams(sim.calldata);
+				const chainId = this.publicClient.chain?.id;
+				let blockNumber: bigint | undefined;
+				try {
+					blockNumber = await this.publicClient.getBlockNumber();
+				} catch {
+					// best-effort
+				}
+				const simulationFailureParams: SimulationFailureParams | undefined =
+					chainId && blockNumber !== undefined
+						? {
+								chainId,
+								blockNumber: blockNumber.toString(),
+								timestamp: Math.floor(Date.now() / 1000),
+								from: sim.submitter,
+								to: this.settlementAddress,
+								calldata: sim.calldata,
+							}
+						: undefined;
+				if (this.logger) {
+					const tenderlyUrl = simulationFailureParams
+						? buildTenderlyUrl({
+								chainId: simulationFailureParams.chainId,
+								blockNumber: blockNumber as bigint,
+								from: sim.submitter,
+								to: this.settlementAddress,
+								calldata: sim.calldata,
+							})
+						: "";
+					this.logger.warn(
+						{
+							proposalId: proposal.id,
+							orderUid: proposal.orderUid,
+							...simulationFailureParams,
+							tenderlyUrl,
+						},
+						"simulation revert debug",
+					);
+				}
 				return { kind: "simFailed", simulationFailureParams };
 			}
 			return null; // transport error, defer
