@@ -37,6 +37,13 @@ export const configSchema = z.object({
 	/** Escrow contract address for this deployment. Set once per chain by the
 	 * operator who deployed the contract. */
 	ESCROW_ADDRESS: z.string().regex(addressPattern, "Must be a valid 0x-prefixed address"),
+	/** When set, used as the `from` address for simulation and skips the
+	 * dummy-submitter state override — the address must already hold
+	 * SUBMITTER_ROLE on the Escrow contract. */
+	SUBMITTER_ADDRESS: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
 	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()
@@ -57,6 +64,7 @@ export const configSchema = z.object({
 	RETENTION_SWEEP_INTERVAL_SECS: z.coerce.number().default(300),
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
 	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
+	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Rate limiting (ADR-0015). All are operational tuning parameters —

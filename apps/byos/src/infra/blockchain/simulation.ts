@@ -28,6 +28,10 @@ export interface SimulationParams {
 	signature: Hex;
 	preInteractions: readonly SettlementInteraction[];
 	postInteractions: readonly SettlementInteraction[];
+	/** When provided, used as the simulation sender instead of DUMMY_SUBMITTER.
+	 * The address must already hold SUBMITTER_ROLE on the Escrow — no state
+	 * override is emitted for it. */
+	submitter?: Address;
 }
 
 export interface SimulationResult {
@@ -51,7 +55,9 @@ function submitterRoleSlot(account: Address): Hex {
 }
 
 /** Builds the simulation parameters for eth_estimateGas with state overrides. */
-export function buildSimulation(params: SimulationParams): SimulationResult {
+export function buildSimulation(
+	params: SimulationParams,
+): SimulationResult & { submitter: Address } {
 	const calldata = encodeSettle(
 		params.order,
 		params.proposal,
@@ -62,19 +68,27 @@ export function buildSimulation(params: SimulationParams): SimulationResult {
 		params.postInteractions,
 	);
 
-	const slot = submitterRoleSlot(DUMMY_SUBMITTER);
+	const submitter = params.submitter ?? DUMMY_SUBMITTER;
 
-	return {
-		calldata,
-		stateOverride: [
+	const stateOverride: SimulationResult["stateOverride"] = [];
+
+	// When using a real submitter address, skip all state overrides: the address
+	// already holds SUBMITTER_ROLE on the Escrow and is on the solver allowlist,
+	// making the simulation fully production-faithful.
+	// With the dummy submitter, override both the authenticator (AnyoneAuthenticator
+	// so isSolver() returns true) and the escrow role storage slot.
+	if (!params.submitter) {
+		stateOverride.push(
 			{
 				address: params.authenticator,
 				code: ANYONE_AUTHENTICATOR_CODE,
 			},
 			{
 				address: params.escrow,
-				stateDiff: [{ slot, value: pad(toHex(1), { size: 32 }) }],
+				stateDiff: [{ slot: submitterRoleSlot(submitter), value: pad(toHex(1), { size: 32 }) }],
 			},
-		],
-	};
+		);
+	}
+
+	return { calldata, stateOverride, submitter };
 }
