@@ -46,6 +46,29 @@ export function tenderlyTxUrl(txHash: string): string | null {
 	return `https://dashboard.tenderly.co/tx/${slug}/${txHash}`;
 }
 
+export interface SimulationFailureParams {
+	chainId: number;
+	blockNumber: string;
+	timestamp: number;
+	from: string;
+	to: string;
+	calldata: string;
+}
+
+/** Builds a Tenderly "new simulation" URL pre-filled with the failed call's parameters. */
+export function tenderlySimulationUrl(params: SimulationFailureParams): string | null {
+	const slug = TENDERLY_NETWORK_SLUGS[params.chainId];
+	if (!slug) return null;
+	const q = new URLSearchParams({
+		network: String(params.chainId),
+		blockNumber: params.blockNumber,
+		from: params.from,
+		contractAddress: params.to,
+		rawFunctionInput: params.calldata,
+	});
+	return `https://dashboard.tenderly.co/simulator/new?${q.toString()}`;
+}
+
 export function formatNativeAmount(amountWei: string): string {
 	const bn = BigInt(amountWei);
 	const symbol = getChain(getChainId())?.nativeCurrency?.symbol ?? "ETH";
