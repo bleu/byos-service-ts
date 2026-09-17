@@ -5,7 +5,7 @@ import { filterCandidates } from "./filter.js";
 // Addresses matching the real USDC/USDT on mainnet — lowercased in assertions
 const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as const;
 const USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7" as const;
-const OTHER = "0x6b175474e89094c44da98b954eedeac495271d0f" as const; // DAI
+const DAI = "0x6b175474e89094c44da98b954eedeac495271d0f" as const; // DAI
 
 const TRAMPOLINE_BALANCE = 50_000_000n; // 50 USDC / 50 USDT (6 decimals)
 
@@ -58,17 +58,17 @@ describe("filterCandidates", () => {
 	});
 
 	it("rejects orders where the sell token is not USDC or USDT", () => {
-		const order = makeOrder({ sellToken: OTHER, buyToken: USDT });
+		const order = makeOrder({ sellToken: DAI, buyToken: USDT });
 		expect(filterCandidates([order], filterConfig)).toEqual([]);
 	});
 
 	it("rejects orders where the buy token is not USDC or USDT", () => {
-		const order = makeOrder({ sellToken: USDC, buyToken: OTHER });
+		const order = makeOrder({ sellToken: USDC, buyToken: DAI });
 		expect(filterCandidates([order], filterConfig)).toEqual([]);
 	});
 
 	it("rejects orders where neither token is USDC or USDT", () => {
-		const order = makeOrder({ sellToken: OTHER, buyToken: OTHER });
+		const order = makeOrder({ sellToken: DAI, buyToken: DAI });
 		expect(filterCandidates([order], filterConfig)).toEqual([]);
 	});
 
@@ -106,7 +106,7 @@ describe("filterCandidates", () => {
 			sellAmount: 5_000_000n,
 			fullSellAmount: 10_000_000n,
 		});
-		const wrongPair = makeOrder({ uid: "0x05", sellToken: OTHER, buyToken: USDT });
+		const wrongPair = makeOrder({ uid: "0x05", sellToken: DAI, buyToken: USDT });
 		const overBalance = makeOrder({
 			uid: "0x06",
 			sellAmount: TRAMPOLINE_BALANCE + 1n,
