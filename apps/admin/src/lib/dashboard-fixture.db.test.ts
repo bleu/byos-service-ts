@@ -62,6 +62,16 @@ describe("dashboard fixture", () => {
 			expect(
 				(await getProposalDetail(db, penalized!.id))?.auditTrail.map((event) => event.eventType),
 			).toContain("penalized");
+			const simFailed = proposals.items.find((proposal) => proposal.status === "simFailed");
+			expect(simFailed).toBeDefined();
+			const simFailedDetail = await getProposalDetail(db, simFailed!.id);
+			expect(simFailedDetail?.proposal.simulationFailureParams).toMatchObject({
+				chainId: 100,
+				blockNumber: "12345678",
+				from: expect.stringMatching(/^0x/),
+				to: expect.stringMatching(/^0x/),
+				calldata: expect.stringMatching(/^0x/),
+			});
 		} finally {
 			await client.end();
 		}
