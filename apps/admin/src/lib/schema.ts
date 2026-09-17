@@ -46,6 +46,43 @@ export const proposals = pgTable(
 	],
 );
 
+// Permanent mirror of proposals — rows are never deleted.
+// Admin dashboard reads from here instead of proposals so swept rows remain visible.
+export const proposalsLog = pgTable(
+	"proposals_log",
+	{
+		id: bigint({ mode: "number" }).primaryKey().notNull(),
+		subSolver: text("sub_solver").notNull(),
+		orderUid: text("order_uid").notNull(),
+		orderUidHash: text("order_uid_hash").notNull(),
+		sellAmount: text("sell_amount").notNull(),
+		minBuyAmount: text("min_buy_amount").notNull(),
+		quoteBuyAmount: text("quote_buy_amount").notNull(),
+		sellToken: text("sell_token").notNull(),
+		buyToken: text("buy_token").notNull(),
+		interactions: jsonb().notNull(),
+		interactionsHash: text("interactions_hash").notNull(),
+		validUntil: text("valid_until").notNull(),
+		nonce: text().notNull(),
+		signature: text().notNull(),
+		status: text().notNull(),
+		rejectionReason: text("rejection_reason"),
+		gasUsed: bigint("gas_used", { mode: "number" }),
+		trampoline: text(),
+		settlementTxHash: text("settlement_tx_hash"),
+		penaltyTxHash: text("penalty_tx_hash"),
+		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
+		simulationFailureParams: jsonb("simulation_failure_params"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		index("proposals_log_created_at_idx").on(table.createdAt),
+		index("proposals_log_sub_solver_idx").on(table.subSolver),
+		index("proposals_log_status_idx").on(table.status),
+	],
+);
+
 export const auditEvents = pgTable(
 	"audit_events",
 	{

@@ -10,11 +10,21 @@ export interface SimulationOutcome {
 	buyToken: Address;
 }
 
+/** Parameters captured at simulation revert time — stored for permanent debug access. */
+export interface SimulationFailureParams {
+	chainId: number;
+	blockNumber: string;
+	timestamp: number;
+	from: string;
+	to: string;
+	calldata: string;
+}
+
 /** Outcome of validating a single proposal. */
 export type Verdict =
 	| { kind: "accept"; simulation: SimulationOutcome | null }
 	| { kind: "reject"; reason: RejectionReason }
-	| { kind: "simFailed" };
+	| { kind: "simFailed"; simulationFailureParams?: SimulationFailureParams };
 
 /** Validates a single proposal. Returns null to skip (retry next tick). */
 export interface ValidateProposal {

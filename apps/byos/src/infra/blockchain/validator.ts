@@ -10,7 +10,7 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
-import type { ValidateProposal, Verdict } from "../../domain/validator.js";
+import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
 import { buildSimulation } from "./simulation.js";
@@ -212,39 +212,45 @@ export class SimulationValidator implements ValidateProposal {
 			});
 		} catch (e) {
 			if (isRevertError(e)) {
+				const chainId = this.publicClient.chain?.id;
+				let blockNumber: bigint | undefined;
+				try {
+					blockNumber = await this.publicClient.getBlockNumber();
+				} catch {
+					// best-effort
+				}
+				const simulationFailureParams: SimulationFailureParams | undefined =
+					chainId && blockNumber !== undefined
+						? {
+								chainId,
+								blockNumber: blockNumber.toString(),
+								timestamp: Math.floor(Date.now() / 1000),
+								from: sim.submitter,
+								to: this.settlementAddress,
+								calldata: sim.calldata,
+							}
+						: undefined;
 				if (this.logger) {
-					const chainId = this.publicClient.chain?.id;
-					let blockNumber: bigint | undefined;
-					try {
-						blockNumber = await this.publicClient.getBlockNumber();
-					} catch {
-						// best-effort
-					}
-					const tenderlyUrl =
-						chainId && blockNumber !== undefined
-							? buildTenderlyUrl({
-									chainId,
-									blockNumber,
-									from: sim.submitter,
-									to: this.settlementAddress,
-									calldata: sim.calldata,
-								})
-							: "";
+					const tenderlyUrl = simulationFailureParams
+						? buildTenderlyUrl({
+								chainId: simulationFailureParams.chainId,
+								blockNumber: blockNumber as bigint,
+								from: sim.submitter,
+								to: this.settlementAddress,
+								calldata: sim.calldata,
+							})
+						: "";
 					this.logger.warn(
 						{
 							proposalId: proposal.id,
 							orderUid: proposal.orderUid,
-							timestamp: Math.floor(Date.now() / 1000),
-							blockNumber: blockNumber?.toString(),
-							from: sim.submitter,
-							to: this.settlementAddress,
-							calldata: sim.calldata,
+							...simulationFailureParams,
 							tenderlyUrl,
 						},
 						"simulation revert debug",
 					);
 				}
-				return { kind: "simFailed" };
+				return { kind: "simFailed", simulationFailureParams };
 			}
 			return null; // transport error, defer
 		}

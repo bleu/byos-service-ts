@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { blockExplorerAddressUrl, cowExplorerOrderUrl, tenderlyTxUrl } from "@/lib/formatters";
+import {
+  blockExplorerAddressUrl,
+  cowExplorerOrderUrl,
+  type SimulationFailureParams,
+  tenderlySimulationUrl,
+  tenderlyTxUrl,
+} from "@/lib/formatters";
 import { listProposals } from "@/lib/queries";
 
 const STATUSES = ["submitted", "active", "rejected", "simFailed", "executing", "settled", "settleFailed", "penalized", "cancelled", "expired"];
@@ -22,7 +28,11 @@ export default async function ProposalsPage({
     ...p,
     subSolverUrl: blockExplorerAddressUrl(p.subSolver),
     orderUidUrl: cowExplorerOrderUrl(p.orderUid),
-    tenderlyUrl: p.settlementTxHash ? tenderlyTxUrl(p.settlementTxHash) : null,
+    tenderlyUrl: p.settlementTxHash
+      ? tenderlyTxUrl(p.settlementTxHash)
+      : p.status === "simFailed" && p.simulationFailureParams
+        ? tenderlySimulationUrl(p.simulationFailureParams as SimulationFailureParams)
+        : null,
   }));
   const totalPages = Math.ceil(total / 50);
 

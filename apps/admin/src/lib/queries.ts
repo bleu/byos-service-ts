@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { auditEvents, bufferEntries, penalties, proposals } from "./schema";
+import { auditEvents, bufferEntries, penalties, proposalsLog } from "./schema";
 
 export interface DateRange {
 	from: Date;
@@ -33,22 +33,22 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 
 	const [statusRows, rejectionRows, [penaltyStats]] = await Promise.all([
 		db
-			.select({ status: proposals.status, count: count() })
-			.from(proposals)
-			.where(and(gte(proposals.createdAt, from), lt(proposals.createdAt, to)))
-			.groupBy(proposals.status),
+			.select({ status: proposalsLog.status, count: count() })
+			.from(proposalsLog)
+			.where(and(gte(proposalsLog.createdAt, from), lt(proposalsLog.createdAt, to)))
+			.groupBy(proposalsLog.status),
 
 		db
-			.select({ reason: proposals.rejectionReason, count: count() })
-			.from(proposals)
+			.select({ reason: proposalsLog.rejectionReason, count: count() })
+			.from(proposalsLog)
 			.where(
 				and(
-					gte(proposals.createdAt, from),
-					lt(proposals.createdAt, to),
-					isNotNull(proposals.rejectionReason),
+					gte(proposalsLog.createdAt, from),
+					lt(proposalsLog.createdAt, to),
+					isNotNull(proposalsLog.rejectionReason),
 				),
 			)
-			.groupBy(proposals.rejectionReason),
+			.groupBy(proposalsLog.rejectionReason),
 
 		db
 			.select({
@@ -182,6 +182,7 @@ export interface ProposalListItem {
 	status: string;
 	rejectionReason: string | null;
 	settlementTxHash: string | null;
+	simulationFailureParams: unknown | null;
 	createdAt: Date;
 	statusChangedAt: Date;
 }
@@ -201,30 +202,31 @@ export async function listProposals(
 	const offset = (page - 1) * limit;
 
 	const conditions = [];
-	if (subSolver) conditions.push(eq(proposals.subSolver, subSolver.toLowerCase()));
-	if (status) conditions.push(eq(proposals.status, status));
+	if (subSolver) conditions.push(eq(proposalsLog.subSolver, subSolver.toLowerCase()));
+	if (status) conditions.push(eq(proposalsLog.status, status));
 
 	const where = conditions.length > 0 ? and(...conditions) : undefined;
 
 	const [items, totalRows] = await Promise.all([
 		db
 			.select({
-				id: proposals.id,
-				subSolver: proposals.subSolver,
-				orderUid: proposals.orderUid,
-				status: proposals.status,
-				rejectionReason: proposals.rejectionReason,
-				settlementTxHash: proposals.settlementTxHash,
-				createdAt: proposals.createdAt,
-				statusChangedAt: proposals.statusChangedAt,
+				id: proposalsLog.id,
+				subSolver: proposalsLog.subSolver,
+				orderUid: proposalsLog.orderUid,
+				status: proposalsLog.status,
+				rejectionReason: proposalsLog.rejectionReason,
+				settlementTxHash: proposalsLog.settlementTxHash,
+				simulationFailureParams: proposalsLog.simulationFailureParams,
+				createdAt: proposalsLog.createdAt,
+				statusChangedAt: proposalsLog.statusChangedAt,
 			})
-			.from(proposals)
+			.from(proposalsLog)
 			.where(where)
-			.orderBy(desc(proposals.createdAt))
+			.orderBy(desc(proposalsLog.createdAt))
 			.limit(limit)
 			.offset(offset),
 
-		db.select({ count: count() }).from(proposals).where(where),
+		db.select({ count: count() }).from(proposalsLog).where(where),
 	]);
 
 	return { items, total: totalRows[0]?.count ?? 0 };
@@ -247,6 +249,7 @@ export interface ProposalDetail {
 		sellAmount: string;
 		minBuyAmount: string;
 		penaltyTxHash: string | null;
+		simulationFailureParams: unknown | null;
 	};
 	auditTrail: AuditEventRow[];
 }
@@ -254,22 +257,23 @@ export interface ProposalDetail {
 export async function getProposalDetail(db: Db, id: number): Promise<ProposalDetail | null> {
 	const [proposal] = await db
 		.select({
-			id: proposals.id,
-			subSolver: proposals.subSolver,
-			orderUid: proposals.orderUid,
-			status: proposals.status,
-			rejectionReason: proposals.rejectionReason,
-			createdAt: proposals.createdAt,
-			statusChangedAt: proposals.statusChangedAt,
-			sellToken: proposals.sellToken,
-			buyToken: proposals.buyToken,
-			sellAmount: proposals.sellAmount,
-			minBuyAmount: proposals.minBuyAmount,
-			settlementTxHash: proposals.settlementTxHash,
-			penaltyTxHash: proposals.penaltyTxHash,
+			id: proposalsLog.id,
+			subSolver: proposalsLog.subSolver,
+			orderUid: proposalsLog.orderUid,
+			status: proposalsLog.status,
+			rejectionReason: proposalsLog.rejectionReason,
+			createdAt: proposalsLog.createdAt,
+			statusChangedAt: proposalsLog.statusChangedAt,
+			sellToken: proposalsLog.sellToken,
+			buyToken: proposalsLog.buyToken,
+			sellAmount: proposalsLog.sellAmount,
+			minBuyAmount: proposalsLog.minBuyAmount,
+			settlementTxHash: proposalsLog.settlementTxHash,
+			penaltyTxHash: proposalsLog.penaltyTxHash,
+			simulationFailureParams: proposalsLog.simulationFailureParams,
 		})
-		.from(proposals)
-		.where(eq(proposals.id, id));
+		.from(proposalsLog)
+		.where(eq(proposalsLog.id, id));
 
 	if (!proposal) return null;
 

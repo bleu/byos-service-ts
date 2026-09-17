@@ -113,8 +113,20 @@ export async function seedDashboardFixture(sql: Sql, now = new Date()): Promise<
 				rejectionReason: fixture.rejectionReason,
 			});
 		}
-		if (fixture.status === "simFailed")
+		if (fixture.status === "simFailed") {
+			const simFailureParams = {
+				chainId: 100,
+				blockNumber: "12345678",
+				timestamp: Math.floor(createdAt.getTime() / 1000) + 60,
+				from: "0x1111111111111111111111111111111111111111",
+				to: "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+				calldata: hex(index + 201, 100),
+			};
+			await sql`
+				UPDATE proposals SET simulation_failure_params = ${JSON.stringify(simFailureParams)} WHERE id = ${proposal.id}
+			`;
 			await addEvent("sim_failed", { from: "active", to: "simFailed" });
+		}
 		if (["executing", "settled", "settleFailed", "penalized"].includes(fixture.status)) {
 			await addEvent("settlement_started", { from: "active", to: "executing" }, 2);
 		}
