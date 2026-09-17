@@ -182,6 +182,7 @@ export interface ProposalListItem {
 	status: string;
 	rejectionReason: string | null;
 	settlementTxHash: string | null;
+	simulationFailureParams: unknown | null;
 	createdAt: Date;
 	statusChangedAt: Date;
 }
@@ -215,6 +216,7 @@ export async function listProposals(
 				status: proposalsLog.status,
 				rejectionReason: proposalsLog.rejectionReason,
 				settlementTxHash: proposalsLog.settlementTxHash,
+				simulationFailureParams: proposalsLog.simulationFailureParams,
 				createdAt: proposalsLog.createdAt,
 				statusChangedAt: proposalsLog.statusChangedAt,
 			})
