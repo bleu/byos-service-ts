@@ -80,8 +80,8 @@ services:
       deploy:
         resources:
           limits:
-            memory: "512M"
-            cpus: "0.5"
+            memory: "2G"
+            cpus: "1"
 
     fynd-subsolver:
       image: byos-service:local
@@ -100,6 +100,22 @@ services:
       depends_on:
         fynd:
           condition: service_started
+        byos:
+          condition: service_healthy
+
+    private-mm-subsolver:
+      image: byos-service:local
+      restart: unless-stopped
+      command: ["node", "apps/private-mm-subsolver/dist/index.js"]
+      env_file: .env.private-mm-subsolver
+      environment:
+        BYOS_URL: http://byos:9585
+      deploy:
+        resources:
+          limits:
+            memory: "128M"
+            cpus: "0.2"
+      depends_on:
         byos:
           condition: service_healthy
 
