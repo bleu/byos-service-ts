@@ -56,4 +56,10 @@ COPY --from=build /app/apps/private-mm-subsolver/node_modules apps/private-mm-su
 # Port 9587 (admin) is intentionally omitted — it is internal to the Docker
 # network and must never be published to the host (ADR-0016).
 EXPOSE 9585 9586
+
+# Health check baked into the image so it applies regardless of orchestrator
+# (bare docker run, Kubernetes, ECS — not just the compose file).
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:9585/healthz || exit 1
+
 CMD ["node", "apps/byos/dist/index.js"]

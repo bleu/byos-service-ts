@@ -25,7 +25,10 @@ services:
     redis:
       image: redis:7-alpine
       restart: unless-stopped
-      command: redis-server --maxmemory 1gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+      # --appendonly yes is required so the byos:known-subsolvers set survives
+      # container restarts (ADR-0017). Without it, every restart re-triggers
+      # the "new sub-solver" Slack notification for every known subsolver.
+      command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
       volumes:
         - redis-data:/data
       ports:
