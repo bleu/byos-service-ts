@@ -108,7 +108,7 @@ The `docker-compose.prod-local.yml` file uses offset port numbers to avoid confl
 
 To use standard port numbers on a dedicated server, update the `ports` mappings in `docker-compose.prod-local.yml` (e.g. change `59585:9585` to `9585:9585`).
 
-> **Security.** The BYOS internal API (port 9586) must not be exposed to the public internet. It accepts driver `/solve` and `/notify` requests and has no authentication by default. Use a firewall rule or reverse proxy to restrict access.
+> **Security.** The BYOS internal API (port 9586) and the admin dashboard (port 53001) must not be exposed to the public internet. Use a firewall rule or a network overlay such as [Tailscale](https://tailscale.com/) to restrict access. The public API (port 59585) is the only port that should be reachable externally.
 
 ## Access logs
 
