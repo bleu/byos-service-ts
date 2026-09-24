@@ -110,6 +110,10 @@ The e2e stack is defined in [`docker-compose.e2e.yml`](docker-compose.e2e.yml) (
 | Tests | Vitest |
 | Lint + format | Biome |
 
+## Deployment
+
+For production deployment, see [`docs/deploy.md`](docs/deploy.md).
+
 ## Configuration
 
 All configuration is via environment variables. See [`.env.example`](.env.example) for the full list with defaults.
