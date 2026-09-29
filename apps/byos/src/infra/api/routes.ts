@@ -8,10 +8,10 @@ import {
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
-import type { Db } from "../../db/index.js";
-import type { AuditEvent } from "../../domain/audit.js";
 // @ts-expect-error — tsup loader: { '.yml': 'text' } inlines this as a string at build time
 import _openapiYaml from "../../../openapi.yml";
+import type { Db } from "../../db/index.js";
+import type { AuditEvent } from "../../domain/audit.js";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
