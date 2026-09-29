@@ -1046,19 +1046,37 @@ export async function sweepDropped(db: Db, olderThanSecs: number): Promise<numbe
 	return result.length;
 }
 
+export interface SolutionPrices {
+	buyTokenRefPrice: string;
+	sellTokenRefPrice: string;
+	surplusTokenRefPrice: string;
+	auctionGasPrice: string;
+	/** Clearing prices map: { [tokenAddress]: decimalString } */
+	clearingPrices: Record<string, string>;
+}
+
+/** Zero-value prices for use in tests that don't care about price data. */
+export const ZERO_SOLUTION_PRICES: SolutionPrices = {
+	buyTokenRefPrice: "0",
+	sellTokenRefPrice: "0",
+	surplusTokenRefPrice: "0",
+	auctionGasPrice: "0",
+	clearingPrices: {},
+};
+
 export async function recordSolution(
 	db: Db,
 	auctionId: number,
 	solutionId: number,
 	proposalId: number,
-	buyTokenRefPrice: string,
+	prices: SolutionPrices,
 ): Promise<void> {
 	await db
 		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
+		.values({ auctionId, solutionId, proposalId, ...prices })
 		.onConflictDoUpdate({
 			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId, buyTokenRefPrice },
+			set: { proposalId, ...prices },
 		});
 }
 

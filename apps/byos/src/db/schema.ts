@@ -173,6 +173,10 @@ export const solutions = pgTable(
 			.notNull()
 			.references(() => proposals.id, { onDelete: "cascade" }),
 		buyTokenRefPrice: text("buy_token_ref_price").notNull(),
+		sellTokenRefPrice: text("sell_token_ref_price"),
+		surplusTokenRefPrice: text("surplus_token_ref_price"),
+		auctionGasPrice: text("auction_gas_price"),
+		clearingPrices: jsonb("clearing_prices"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [

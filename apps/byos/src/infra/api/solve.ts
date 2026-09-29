@@ -180,15 +180,15 @@ export function createSolveRoute(config: SolveConfig) {
 			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
 				const buyTokenInfo = auction.tokens[order.buyToken];
-				const buyTokenRefPrice = buyTokenInfo?.referencePrice ? buyTokenInfo.referencePrice : "0";
+				const prices: store.SolutionPrices = {
+					buyTokenRefPrice: buyTokenInfo?.referencePrice ?? "0",
+					sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+					surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+					auctionGasPrice: auctionGasPrice.toString(),
+					clearingPrices: solution.prices,
+				};
 				try {
-					await store.recordSolution(
-						config.db,
-						auctionId,
-						solutionId,
-						bestProposal.id,
-						buyTokenRefPrice,
-					);
+					await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id, prices);
 				} catch {
 					continue;
 				}
