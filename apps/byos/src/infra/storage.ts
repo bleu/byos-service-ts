@@ -595,9 +595,15 @@ export async function resolveVerdict(
 				rejectionReason = verdict.reason;
 				break;
 			case "simFailed":
-				toStatus = "simFailed";
-				simulationFailureParams = verdict.simulationFailureParams ?? null;
-				rejectionReason = (verdict.revertReason as RejectionReason) ?? null;
+				// "GPv2: order filled" means an external solver won the CoW auction.
+				// Promote to rejected: SolverOutbid so sub-solvers get a clear signal.
+				if (verdict.revertReason === "GPv2: order filled") {
+					toStatus = "rejected";
+					rejectionReason = "SolverOutbid" as RejectionReason;
+				} else {
+					toStatus = "simFailed";
+					simulationFailureParams = verdict.simulationFailureParams ?? null;
+				}
 				break;
 		}
 
@@ -1028,6 +1034,35 @@ export async function recordSolution(
 			target: [solutions.auctionId, solutions.solutionId],
 			set: { proposalId, buyTokenRefPrice },
 		});
+}
+
+/**
+ * Marks all active/submitted proposals for `orderUid` from sub-solvers OTHER
+ * than `winningSubSolver` as rejected: SubsolverOutbid. Proposals from the same
+ * sub-solver are left untouched — the existing replacement-group logic handles
+ * those, and /solve may legitimately fall back to a same-solver runner-up.
+ *
+ * Fire-and-forget: failures are swallowed so a DB hiccup never blocks /solve.
+ */
+export async function rejectOutbidProposals(
+	db: Db,
+	orderUid: string,
+	winningSubSolver: string,
+): Promise<void> {
+	await db
+		.update(proposals)
+		.set({
+			status: "rejected" as Status,
+			rejectionReason: "SubsolverOutbid" as RejectionReason,
+			statusChangedAt: sql`now()`,
+		})
+		.where(
+			and(
+				eq(proposals.orderUid, orderUid.toLowerCase()),
+				sql`lower(${proposals.subSolver}) != lower(${winningSubSolver})`,
+				inArray(proposals.status, ["submitted", "active"]),
+			),
+		);
 }
 
 /** Fetches the buy-token reference price stored at solution-build time for a proposal. */

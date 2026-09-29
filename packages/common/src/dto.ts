@@ -115,6 +115,10 @@ export const RejectionReason = {
 	TokenMismatch: "TokenMismatch",
 	OrderNotFound: "OrderNotFound",
 	Unprofitable: "Unprofitable",
+	/** Another sub-solver's proposal was selected by BYOS for the same order at /solve time. */
+	SubsolverOutbid: "SubsolverOutbid",
+	/** An external solver won the CoW auction — the on-chain settlement reverted with "GPv2: order filled". */
+	SolverOutbid: "SolverOutbid",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -127,6 +131,8 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.TokenMismatch,
 	RejectionReason.OrderNotFound,
 	RejectionReason.Unprofitable,
+	RejectionReason.SubsolverOutbid,
+	RejectionReason.SolverOutbid,
 ]);
 
 // --- Proposal Metadata ---
