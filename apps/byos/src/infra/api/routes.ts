@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	byosDomain,
 	createProposalRequestSchema,
@@ -31,12 +34,19 @@ export interface RoutesConfig {
 	logger?: Logger;
 }
 
+const _dir = dirname(fileURLToPath(import.meta.url));
+const _openapiYaml = readFileSync(resolve(_dir, "../../../openapi.yml"), "utf8");
+
 export function createPublicRoutes(config: RoutesConfig) {
 	const app = new Hono();
 	const domain = byosDomain(config.chainId, config.trampolineFactory);
 	const log = config.logger?.child({ component: "ingestion" });
 
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
+
+	app.get("/openapi.yaml", (c) =>
+		c.text(_openapiYaml, 200, { "Content-Type": "application/yaml" }),
+	);
 
 	// POST /proposals — Create proposal
 	app.post("/proposals", async (c) => {
