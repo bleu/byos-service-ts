@@ -180,15 +180,15 @@ export function createSolveRoute(config: SolveConfig) {
 			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
 				const buyTokenInfo = auction.tokens[order.buyToken];
-				const prices: store.SolutionPrices = {
-					buyTokenRefPrice: buyTokenInfo?.referencePrice ?? "0",
-					sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
-					surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
-					auctionGasPrice: auctionGasPrice.toString(),
-					clearingPrices: solution.prices,
-				};
+				const buyTokenRefPrice = buyTokenInfo?.referencePrice ?? "0";
 				try {
-					await store.recordSolution(config.db, auctionId, solutionId, bestProposal.id, prices);
+					await store.recordSolution(
+						config.db,
+						auctionId,
+						solutionId,
+						bestProposal.id,
+						buyTokenRefPrice,
+					);
 				} catch {
 					continue;
 				}
@@ -197,6 +197,16 @@ export function createSolveRoute(config: SolveConfig) {
 				// rejected: SubsolverOutbid. Best-effort: we never block /solve for this.
 				store
 					.rejectOutbidProposals(config.db, order.uid, bestProposal.subSolver)
+					.catch(() => undefined);
+
+				// Fire-and-forget: price snapshot on the proposal row; failure is non-fatal.
+				store
+					.saveSolutionPrices(config.db, bestProposal.id, {
+						sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+						surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+						auctionGasPrice: auctionGasPrice.toString(),
+						clearingPrices: solution.prices,
+					})
 					.catch(() => undefined);
 			}
 

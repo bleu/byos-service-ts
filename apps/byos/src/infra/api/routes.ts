@@ -133,6 +133,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 			settlementTxHash: null,
 			penaltyTxHash: null,
 			pendingCancellation: false,
+			sellTokenRefPrice: null,
+			surplusTokenRefPrice: null,
+			auctionGasPrice: null,
+			clearingPrices: null,
 		};
 		const fingerprint = store.signedProposalFingerprint(proposal);
 		const inserted = await store.insertIfUnused(config.db, proposal);

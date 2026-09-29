@@ -1,5 +1,5 @@
 import type { Status } from "@byos/common";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TestContext } from "../../../test/setup.js";
@@ -46,6 +46,10 @@ function sampleProposal(overrides?: Partial<store.ProposalInput>): store.Proposa
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 		...overrides,
 	};
 }
@@ -402,17 +406,16 @@ describe("proposal store", () => {
 
 	it("records and retrieves solutions", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
-		await store.recordSolution(ctx.db, 100, 1, id, store.ZERO_SOLUTION_PRICES);
+		await store.recordSolution(ctx.db, 100, 1, id, "0");
 
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
 		expect(found[0]?.id).toBe(id);
 	});
 
-	it("persists all price fields on the solution row", async () => {
+	it("saveSolutionPrices round-trips price fields through the proposal row", async () => {
 		const { id } = await store.insert(ctx.db, sampleProposal());
 		const prices: store.SolutionPrices = {
-			buyTokenRefPrice: "1000000000000000000",
 			sellTokenRefPrice: "2000000000000000000",
 			surplusTokenRefPrice: "1500000000000000000",
 			auctionGasPrice: "10000000000",
@@ -421,15 +424,13 @@ describe("proposal store", () => {
 				"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "1000000000000000000",
 			},
 		};
-		await store.recordSolution(ctx.db, 200, 1, id, prices);
+		await store.saveSolutionPrices(ctx.db, id, prices);
 
-		const [row] = await ctx.db.select().from(solutions).where(eq(solutions.proposalId, id));
-
-		expect(row?.buyTokenRefPrice).toBe(prices.buyTokenRefPrice);
-		expect(row?.sellTokenRefPrice).toBe(prices.sellTokenRefPrice);
-		expect(row?.surplusTokenRefPrice).toBe(prices.surplusTokenRefPrice);
-		expect(row?.auctionGasPrice).toBe(prices.auctionGasPrice);
-		expect(row?.clearingPrices).toEqual(prices.clearingPrices);
+		const proposal = await store.get(ctx.db, id);
+		expect(proposal?.sellTokenRefPrice).toBe(prices.sellTokenRefPrice);
+		expect(proposal?.surplusTokenRefPrice).toBe(prices.surplusTokenRefPrice);
+		expect(proposal?.auctionGasPrice).toBe(prices.auctionGasPrice);
+		expect(proposal?.clearingPrices).toEqual(prices.clearingPrices);
 	});
 
 	it("defers cancellation of executing proposal", async () => {
@@ -601,8 +602,8 @@ describe("retention sweep", () => {
 	it("cascades solutions rows of dropped proposals only", async () => {
 		const dropped = await insertAged("cancelled", 1);
 		const settled = await insertAged("settled", 2);
-		await store.recordSolution(sweep.db, 1, 1, dropped, store.ZERO_SOLUTION_PRICES);
-		await store.recordSolution(sweep.db, 2, 1, settled, store.ZERO_SOLUTION_PRICES);
+		await store.recordSolution(sweep.db, 1, 1, dropped, "0");
+		await store.recordSolution(sweep.db, 2, 1, settled, "0");
 
 		expect(await store.sweepDropped(sweep.db, WINDOW_SECS)).toBe(1);
 

@@ -220,9 +220,14 @@ export async function seedProposal(
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
+		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 		...overrides,
 		orderUid,
-	};
+	} as Omit<Proposal, "id">;
 	const { id } = await store.insert(db, proposal);
 	return id;
 }

@@ -53,6 +53,10 @@ function sampleProposal(): store.ProposalInput {
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 	};
 }
 
@@ -479,10 +483,7 @@ describe("buffer debits", () => {
 		});
 
 		// Record a solution with the buy-token reference price
-		await store.recordSolution(ctx.db, 9000 + id, 1, id, {
-			...store.ZERO_SOLUTION_PRICES,
-			buyTokenRefPrice: refPrice,
-		});
+		await store.recordSolution(ctx.db, 9000 + id, 1, id, refPrice);
 
 		return { id, tx };
 	}
@@ -694,10 +695,7 @@ describe("buffer debits", () => {
 			kind: "succeeded",
 			txHash: tx,
 		});
-		await store.recordSolution(ctx.db, 8000 + id, 1, id, {
-			...store.ZERO_SOLUTION_PRICES,
-			buyTokenRefPrice: refPrice,
-		});
+		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
 
 		const raw = `0x${"ab".repeat(96)}` as Hex;
 		let signCalls = 0;
@@ -762,10 +760,7 @@ describe("buffer debits", () => {
 			kind: "succeeded",
 			txHash: tx,
 		});
-		await store.recordSolution(ctx.db, 7000 + id, 1, id, {
-			...store.ZERO_SOLUTION_PRICES,
-			buyTokenRefPrice: refPrice,
-		});
+		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
 
 		// Operator that reads delta fine but fails on debit
 		const failingOperator: LegacyDebitEscrow = {

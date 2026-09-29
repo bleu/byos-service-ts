@@ -36,6 +36,10 @@ function sampleProposal(): Proposal {
 		simulationFailureParams: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 	};
 }
 

@@ -293,6 +293,10 @@ function rowToProposal(row: ProposalRow): Proposal {
 		simulationFailureParams: row.simulationFailureParams ?? null,
 		createdAt: row.createdAt,
 		statusChangedAt: row.statusChangedAt,
+		sellTokenRefPrice: row.sellTokenRefPrice ?? null,
+		surplusTokenRefPrice: row.surplusTokenRefPrice ?? null,
+		auctionGasPrice: row.auctionGasPrice ?? null,
+		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
 	};
 }
 
@@ -1046,8 +1050,23 @@ export async function sweepDropped(db: Db, olderThanSecs: number): Promise<numbe
 	return result.length;
 }
 
+export async function recordSolution(
+	db: Db,
+	auctionId: number,
+	solutionId: number,
+	proposalId: number,
+	buyTokenRefPrice: string,
+): Promise<void> {
+	await db
+		.insert(solutions)
+		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
+		.onConflictDoUpdate({
+			target: [solutions.auctionId, solutions.solutionId],
+			set: { proposalId, buyTokenRefPrice },
+		});
+}
+
 export interface SolutionPrices {
-	buyTokenRefPrice: string;
 	sellTokenRefPrice: string;
 	surplusTokenRefPrice: string;
 	auctionGasPrice: string;
@@ -1055,29 +1074,21 @@ export interface SolutionPrices {
 	clearingPrices: Record<string, string>;
 }
 
-/** Zero-value prices for use in tests that don't care about price data. */
-export const ZERO_SOLUTION_PRICES: SolutionPrices = {
-	buyTokenRefPrice: "0",
-	sellTokenRefPrice: "0",
-	surplusTokenRefPrice: "0",
-	auctionGasPrice: "0",
-	clearingPrices: {},
-};
-
-export async function recordSolution(
+/** Writes the auction-time price snapshot to the proposal row (and mirror to proposals_log via trigger). */
+export async function saveSolutionPrices(
 	db: Db,
-	auctionId: number,
-	solutionId: number,
 	proposalId: number,
 	prices: SolutionPrices,
 ): Promise<void> {
 	await db
-		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId, ...prices })
-		.onConflictDoUpdate({
-			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId, ...prices },
-		});
+		.update(proposals)
+		.set({
+			sellTokenRefPrice: prices.sellTokenRefPrice,
+			surplusTokenRefPrice: prices.surplusTokenRefPrice,
+			auctionGasPrice: prices.auctionGasPrice,
+			clearingPrices: prices.clearingPrices,
+		})
+		.where(eq(proposals.id, proposalId));
 }
 
 /**
@@ -1363,6 +1374,10 @@ export async function solutionProposals(
 			penaltyTxHash: proposals.penaltyTxHash,
 			pendingCancellation: proposals.pendingCancellation,
 			simulationFailureParams: proposals.simulationFailureParams,
+			sellTokenRefPrice: proposals.sellTokenRefPrice,
+			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
+			auctionGasPrice: proposals.auctionGasPrice,
+			clearingPrices: proposals.clearingPrices,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

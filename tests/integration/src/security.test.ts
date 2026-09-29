@@ -164,7 +164,7 @@ describe("bearer token enforcement", () => {
 				onAuditEvent: () => {},
 			});
 			const id = await seedProposal(ctx.db, { orderUid: `0x${"aa".repeat(56)}` });
-			await store.recordSolution(ctx.db, 77, 1, id, store.ZERO_SOLUTION_PRICES);
+			await store.recordSolution(ctx.db, 77, 1, id, "0");
 			const notification = JSON.stringify({
 				auctionId: "77",
 				solutionId: 1,
