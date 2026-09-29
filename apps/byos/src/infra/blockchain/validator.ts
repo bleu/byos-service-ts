@@ -165,7 +165,8 @@ export class SimulationValidator implements ValidateProposal {
 		try {
 			trampoline = proposal.trampoline ?? (await this.resolveTrampoline(proposal.subSolver));
 		} catch (e) {
-			if (isRevertError(e)) return { kind: "simFailed" };
+			if (isRevertError(e))
+				return { kind: "simFailed", revertReason: extractRevertReason(e) ?? undefined };
 			return null; // transport error, defer
 		}
 
@@ -250,7 +251,11 @@ export class SimulationValidator implements ValidateProposal {
 						"simulation revert debug",
 					);
 				}
-				return { kind: "simFailed", simulationFailureParams };
+				return {
+					kind: "simFailed",
+					simulationFailureParams,
+					revertReason: extractRevertReason(e) ?? undefined,
+				};
 			}
 			return null; // transport error, defer
 		}
@@ -317,4 +322,38 @@ function isRevertError(e: unknown): boolean {
 	if ("cause" in err && isRevertError(err.cause)) return true;
 
 	return false;
+}
+
+/**
+ * Walks the viem error chain to extract a human-readable revert reason.
+ *
+ * Handles two cases:
+ * - `ContractFunctionRevertedError.reason` — decoded `Error(string)` from viem
+ * - RPC error code 3 with raw `data` starting with `0x08c379a0` — manual decode
+ */
+function extractRevertReason(e: unknown): string | null {
+	if (typeof e !== "object" || e === null) return null;
+	const err = e as Record<string, unknown>;
+
+	// viem decoded it already
+	if (err.name === "ContractFunctionRevertedError" && typeof err.reason === "string") {
+		return err.reason;
+	}
+
+	// Raw RPC revert with data — decode Error(string) selector 0x08c379a0
+	if (err.code === 3 && typeof err.data === "string" && err.data.startsWith("0x08c379a0")) {
+		try {
+			const hex = err.data.slice(10);
+			const buf = Buffer.from(hex, "hex");
+			const len = Number(BigInt(`0x${buf.slice(32, 64).toString("hex")}`));
+			return buf.slice(64, 64 + len).toString("utf8");
+		} catch {
+			// fall through
+		}
+	}
+
+	// Walk the cause chain
+	if ("cause" in err) return extractRevertReason(err.cause);
+
+	return null;
 }

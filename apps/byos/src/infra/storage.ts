@@ -597,6 +597,7 @@ export async function resolveVerdict(
 			case "simFailed":
 				toStatus = "simFailed";
 				simulationFailureParams = verdict.simulationFailureParams ?? null;
+				rejectionReason = (verdict.revertReason as RejectionReason) ?? null;
 				break;
 		}
 
