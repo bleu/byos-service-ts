@@ -1,6 +1,4 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
 	byosDomain,
 	createProposalRequestSchema,
@@ -34,8 +32,7 @@ export interface RoutesConfig {
 	logger?: Logger;
 }
 
-const _dir = dirname(fileURLToPath(import.meta.url));
-const _openapiYaml = readFileSync(resolve(_dir, "../../../openapi.yml"), "utf8");
+const _openapiYaml = readFileSync("apps/byos/openapi.yml", "utf8");
 
 export function createPublicRoutes(config: RoutesConfig) {
 	const app = new Hono();
