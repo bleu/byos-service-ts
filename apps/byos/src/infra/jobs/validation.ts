@@ -162,7 +162,9 @@ export async function runValidationTick(config: ValidationTickConfig): Promise<v
 		}
 	}
 
-	logger.info({ total: live.length, enqueued, expired }, "validation tick");
+	if (live.length > 0) {
+		logger.info({ total: live.length, enqueued, expired }, "validation tick");
+	}
 }
 
 /** Validates a single proposal, re-read from the store so the state is fresh. */
