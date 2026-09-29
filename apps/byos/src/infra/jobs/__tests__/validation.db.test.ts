@@ -43,8 +43,12 @@ function sampleProposal(overrides?: Partial<store.ProposalInput>): store.Proposa
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 		...overrides,
-	};
+	} as Omit<Proposal, "id">;
 }
 
 function tickConfig(enqueued: number[], executingTimeoutSecs = 3600) {

@@ -46,6 +46,10 @@ function sampleProposal(overrides?: Partial<store.ProposalInput>): store.Proposa
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 		...overrides,
 	};
 }
@@ -407,6 +411,26 @@ describe("proposal store", () => {
 		const found = await store.solutionProposals(ctx.db, 100, [1]);
 		expect(found).toHaveLength(1);
 		expect(found[0]?.id).toBe(id);
+	});
+
+	it("saveSolutionPrices round-trips price fields through the proposal row", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal());
+		const prices: store.SolutionPrices = {
+			sellTokenRefPrice: "2000000000000000000",
+			surplusTokenRefPrice: "1500000000000000000",
+			auctionGasPrice: "10000000000",
+			clearingPrices: {
+				"0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1": "2000000000000000000",
+				"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "1000000000000000000",
+			},
+		};
+		await store.saveSolutionPrices(ctx.db, id, prices);
+
+		const proposal = await store.get(ctx.db, id);
+		expect(proposal?.sellTokenRefPrice).toBe(prices.sellTokenRefPrice);
+		expect(proposal?.surplusTokenRefPrice).toBe(prices.surplusTokenRefPrice);
+		expect(proposal?.auctionGasPrice).toBe(prices.auctionGasPrice);
+		expect(proposal?.clearingPrices).toEqual(prices.clearingPrices);
 	});
 
 	it("defers cancellation of executing proposal", async () => {

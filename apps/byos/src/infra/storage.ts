@@ -293,6 +293,10 @@ function rowToProposal(row: ProposalRow): Proposal {
 		simulationFailureParams: row.simulationFailureParams ?? null,
 		createdAt: row.createdAt,
 		statusChangedAt: row.statusChangedAt,
+		sellTokenRefPrice: row.sellTokenRefPrice ?? null,
+		surplusTokenRefPrice: row.surplusTokenRefPrice ?? null,
+		auctionGasPrice: row.auctionGasPrice ?? null,
+		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
 	};
 }
 
@@ -1062,6 +1066,31 @@ export async function recordSolution(
 		});
 }
 
+export interface SolutionPrices {
+	sellTokenRefPrice: string;
+	surplusTokenRefPrice: string;
+	auctionGasPrice: string;
+	/** Clearing prices map: { [tokenAddress]: decimalString } */
+	clearingPrices: Record<string, string>;
+}
+
+/** Writes the auction-time price snapshot to the proposal row (and mirror to proposals_log via trigger). */
+export async function saveSolutionPrices(
+	db: Db,
+	proposalId: number,
+	prices: SolutionPrices,
+): Promise<void> {
+	await db
+		.update(proposals)
+		.set({
+			sellTokenRefPrice: prices.sellTokenRefPrice,
+			surplusTokenRefPrice: prices.surplusTokenRefPrice,
+			auctionGasPrice: prices.auctionGasPrice,
+			clearingPrices: prices.clearingPrices,
+		})
+		.where(eq(proposals.id, proposalId));
+}
+
 /**
  * Marks all active/submitted proposals for `orderUid` from sub-solvers OTHER
  * than `winningSubSolver` as rejected: SubsolverOutbid. Proposals from the same
@@ -1345,6 +1374,10 @@ export async function solutionProposals(
 			penaltyTxHash: proposals.penaltyTxHash,
 			pendingCancellation: proposals.pendingCancellation,
 			simulationFailureParams: proposals.simulationFailureParams,
+			sellTokenRefPrice: proposals.sellTokenRefPrice,
+			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
+			auctionGasPrice: proposals.auctionGasPrice,
+			clearingPrices: proposals.clearingPrices,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

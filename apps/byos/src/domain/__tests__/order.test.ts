@@ -56,8 +56,12 @@ function matchingProposal(overrides?: Partial<Proposal>): Proposal {
 		simulationFailureParams: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 		...overrides,
-	};
+	} as Proposal;
 }
 
 describe("order envelope", () => {

@@ -69,7 +69,7 @@ describe("/notify", () => {
 		const id = await seedActiveProposal(300n);
 
 		// Record solution attribution
-		await store.recordSolution(app.ctx.db, 100, 1, id);
+		await store.recordSolution(app.ctx.db, 100, 1, id, "0");
 
 		// Move to executing
 		const proposal = await getProposal(id);
@@ -104,7 +104,7 @@ describe("/notify", () => {
 			status: "active",
 			pendingCancellation: false,
 		});
-		await store.recordSolution(app.ctx.db, 104, 1, id);
+		await store.recordSolution(app.ctx.db, 104, 1, id, "0");
 
 		await store.applySettlementOutcome(app.ctx.db, original, { kind: "started" });
 		await postNotify({
@@ -129,7 +129,7 @@ describe("/notify", () => {
 
 	it("revert notification transitions to settleFailed", async () => {
 		const id = await seedActiveProposal(301n);
-		await store.recordSolution(app.ctx.db, 101, 1, id);
+		await store.recordSolution(app.ctx.db, 101, 1, id, "0");
 
 		const proposal = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
@@ -148,7 +148,7 @@ describe("/notify", () => {
 
 	it("attributable non-outcome kind changes nothing, kept as audit evidence", async () => {
 		const id = await seedActiveProposal(302n);
-		await store.recordSolution(app.ctx.db, 102, 1, id);
+		await store.recordSolution(app.ctx.db, 102, 1, id, "0");
 
 		const { status } = await postNotify({
 			auctionId: "102",
@@ -206,7 +206,7 @@ describe("/notify", () => {
 
 	it("malformed transaction hash is rejected and nothing is persisted", async () => {
 		const id = await seedActiveProposal(303n);
-		await store.recordSolution(app.ctx.db, 103, 1, id);
+		await store.recordSolution(app.ctx.db, 103, 1, id, "0");
 		const proposal = await getProposal(id);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
@@ -247,7 +247,7 @@ describe("/notify settlement outcomes", () => {
 			status,
 			...(subSolver ? { subSolver } : {}),
 		});
-		await store.recordSolution(app.ctx.db, auctionId, 1, id);
+		await store.recordSolution(app.ctx.db, auctionId, 1, id, "0");
 		return id;
 	}
 

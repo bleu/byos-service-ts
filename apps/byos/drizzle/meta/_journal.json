@@ -57,6 +57,13 @@
 			"when": 1787780803000,
 			"tag": "0007_proposals_log",
 			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "7",
+			"when": 1787780804000,
+			"tag": "0008_solution_prices",
+			"breakpoints": true
 		}
 	]
 }

@@ -31,6 +31,11 @@ export interface Proposal {
 	simulationFailureParams: unknown | null;
 	createdAt: Date;
 	statusChangedAt: Date;
+	sellTokenRefPrice: string | null;
+	surplusTokenRefPrice: string | null;
+	auctionGasPrice: string | null;
+	/** Clearing prices map at settlement time: { [tokenAddress]: decimalString } */
+	clearingPrices: Record<string, string> | null;
 }
 
 /** What the driver reported about a settlement. */

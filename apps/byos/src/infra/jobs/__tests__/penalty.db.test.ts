@@ -53,6 +53,10 @@ function sampleProposal(): store.ProposalInput {
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		sellTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
 	};
 }
 
