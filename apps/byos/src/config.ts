@@ -62,6 +62,7 @@ export const configSchema = z.object({
 	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
 	DROPPED_RETENTION_SECS: z.coerce.number().default(3600),
 	RETENTION_SWEEP_INTERVAL_SECS: z.coerce.number().default(300),
+	LOG_REDACTION_AFTER_SECS: z.coerce.number().default(604800), // 7 days
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
 	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
 	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),

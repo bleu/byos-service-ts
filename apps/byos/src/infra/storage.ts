@@ -1006,6 +1006,32 @@ export async function releaseStaleExecuting(db: Db, olderThanSecs: number): Prom
 
 const SWEEPABLE_STATUSES: Status[] = ["rejected", "simFailed", "expired", "cancelled"];
 
+/**
+ * Redacts bulk debug data from old `proposals_log` rows to keep the table lean.
+ * Sets `interactions` to `[]` and `simulation_failure_params` to `null` for rows
+ * whose `created_at` is older than `olderThanSecs`. The rest of the row (amounts,
+ * tokens, status, rejection reason, tx hashes, gas) is preserved forever.
+ *
+ * Returns the number of rows updated.
+ */
+export async function redactOldLogEntries(db: Db, olderThanSecs: number): Promise<number> {
+	const result = await db
+		.update(proposalsLog)
+		.set({
+			interactions: sql`'[]'::jsonb`,
+			simulationFailureParams: null,
+		})
+		.where(
+			and(
+				sql`created_at < now() - make_interval(secs => ${olderThanSecs})`,
+				or(sql`jsonb_array_length(interactions) > 0`, sql`simulation_failure_params is not null`),
+			),
+		)
+		.returning({ id: proposalsLog.id });
+
+	return result.length;
+}
+
 export async function sweepDropped(db: Db, olderThanSecs: number): Promise<number> {
 	const result = await db
 		.delete(proposals)
