@@ -10,10 +10,18 @@ Deploy the [BYOS contracts](https://github.com/bleu/byos-contracts/blob/main/doc
 - [Docker Compose](https://docs.docker.com/compose/install/)
 - Git
 
-## Build the image
+## Build the images
+
+Build the BYOS service image:
 
 ```bash
 docker build -t byos-service:local .
+```
+
+Build the admin dashboard image (must be rebuilt separately whenever admin code changes):
+
+```bash
+docker compose -f docker-compose.prod-local.yml build admin
 ```
 
 ## Configure environment variables
