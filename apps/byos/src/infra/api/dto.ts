@@ -62,15 +62,31 @@ export function proposalToGetResponse(p: Proposal) {
 		id: p.id,
 		subSolver: p.subSolver,
 		orderUid: p.orderUid,
+		sellToken: p.sellToken,
+		buyToken: p.buyToken,
 		sellAmount: p.sellAmount.toString(),
 		minBuyAmount: p.minBuyAmount.toString(),
 		quoteBuyAmount: p.quoteBuyAmount.toString(),
+		interactions: p.interactions.map((i) => ({
+			target: i.target,
+			value: i.value.toString(),
+			callData: i.callData,
+		})),
 		validUntil: p.validUntil.toString(),
+		nonce: p.nonce.toString(),
+		signature: p.signature,
 		status: p.status,
+		createdAt: p.createdAt.toISOString(),
+		statusChangedAt: p.statusChangedAt.toISOString(),
 		...(p.rejectionReason ? { rejectionReason: p.rejectionReason } : {}),
+		...(p.gasUsed != null ? { gasUsed: p.gasUsed.toString() } : {}),
+		...(p.trampoline ? { trampoline: p.trampoline } : {}),
 		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
 		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
 		...(p.pendingCancellation ? { pendingCancellation: true } : {}),
+		...(p.simulationFailureParams != null
+			? { simulationFailureParams: p.simulationFailureParams }
+			: {}),
 	};
 }
 
@@ -80,8 +96,21 @@ export function proposalToMetadata(p: Proposal) {
 		id: p.id,
 		subSolver: p.subSolver,
 		orderUid: p.orderUid,
+		sellToken: p.sellToken,
+		buyToken: p.buyToken,
+		sellAmount: p.sellAmount.toString(),
+		minBuyAmount: p.minBuyAmount.toString(),
+		quoteBuyAmount: p.quoteBuyAmount.toString(),
 		validUntil: p.validUntil.toString(),
 		status: p.status,
+		createdAt: p.createdAt.toISOString(),
+		statusChangedAt: p.statusChangedAt.toISOString(),
+		...(p.rejectionReason ? { rejectionReason: p.rejectionReason } : {}),
+		...(p.gasUsed != null ? { gasUsed: p.gasUsed.toString() } : {}),
+		...(p.trampoline ? { trampoline: p.trampoline } : {}),
+		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
+		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
+		...(p.pendingCancellation ? { pendingCancellation: true } : {}),
 	};
 }
 

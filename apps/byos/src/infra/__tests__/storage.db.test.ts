@@ -5,7 +5,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { TestContext } from "../../../test/setup.js";
 import { createTestDb } from "../../../test/setup.js";
 import { solutions } from "../../db/schema.js";
-import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 
 let ctx: TestContext;
@@ -19,7 +18,7 @@ afterAll(async () => {
 	await ctx.cleanup();
 });
 
-function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposal, "id"> {
+function sampleProposal(overrides?: Partial<store.ProposalInput>): store.ProposalInput {
 	return {
 		subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,
 		orderUid: `0x${"ab".repeat(56)}`,

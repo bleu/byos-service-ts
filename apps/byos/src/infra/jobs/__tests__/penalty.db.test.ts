@@ -30,7 +30,7 @@ const PENALTY_TX: Hex = `0x${"77".repeat(32)}`;
 let uidCounter = 0;
 let nonceCounter = 0n;
 
-function sampleProposal(): Omit<Proposal, "id"> {
+function sampleProposal(): store.ProposalInput {
 	const uid = (uidCounter++).toString(16).padStart(2, "0");
 	return {
 		subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,

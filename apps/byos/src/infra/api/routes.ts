@@ -10,7 +10,6 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
@@ -107,7 +106,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.ProposalLifetimeExceeded);
 		}
 
-		const proposal: Omit<Proposal, "id"> = {
+		const proposal: store.ProposalInput = {
 			subSolver,
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
@@ -222,7 +221,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		await enforceSignerLimit(config.signerLimit, reader);
 
-		const proposals = await store.listBySubSolver(config.db, reader);
+		const includeArchived = c.req.query("includeArchived") === "true";
+		const proposals = await store.listBySubSolver(config.db, reader, includeArchived);
 		return c.json(proposalToListResponse(proposals));
 	});
 
@@ -239,7 +239,13 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		await enforceSignerLimit(config.signerLimit, reader);
 
-		const proposals = await store.listByOrderUidForOwner(config.db, orderUid, reader);
+		const includeArchived = c.req.query("includeArchived") === "true";
+		const proposals = await store.listByOrderUidForOwner(
+			config.db,
+			orderUid,
+			reader,
+			includeArchived,
+		);
 		return c.json(proposalToListResponse(proposals));
 	});
 
