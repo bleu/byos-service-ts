@@ -140,15 +140,7 @@ The Redis tier shares one Redis, so each test namespaces its keys and sweeps the
 
 ### Keeping `openapi.yml` in sync
 
-**Any change to the proposals API interface must be accompanied by an update to `apps/byos/openapi.yml`.** This includes:
-
-- Adding, removing, or renaming a field in any request or response body
-- Adding or removing an endpoint
-- Adding or removing a query parameter
-- Changing a status code or error `kind`
-- Changing authentication or security requirements
-
-The spec is served at `GET /openapi.yaml` and is the authoritative wire contract for sub-solvers. A code change that is not reflected there silently breaks clients.
+Any change to the proposals API interface (endpoints, fields, query params, status codes, auth) **must** be reflected in `apps/byos/openapi.yml`. The spec is served at `GET /openapi.yaml` — drift silently breaks clients.
 
 ## Domain language
 
