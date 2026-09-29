@@ -35,18 +35,21 @@ export default defineConfig({
 				},
 			},
 			{
+				plugins: [yamlTextPlugin],
 				test: {
 					name: "db",
 					include: ["apps/*/src/**/*.db.test.ts"],
 				},
 			},
 			{
+				plugins: [yamlTextPlugin],
 				test: {
 					name: "redis",
 					include: ["apps/*/src/**/*.redis.test.ts"],
 				},
 			},
 			{
+				plugins: [yamlTextPlugin],
 				test: {
 					name: "integration",
 					root: "tests/integration",
@@ -54,6 +57,7 @@ export default defineConfig({
 				},
 			},
 			{
+				plugins: [yamlTextPlugin],
 				test: {
 					name: "onchain",
 					root: "tests/onchain",
@@ -62,6 +66,7 @@ export default defineConfig({
 				},
 			},
 			{
+				plugins: [yamlTextPlugin],
 				test: {
 					name: "e2e",
 					root: "tests/e2e",
