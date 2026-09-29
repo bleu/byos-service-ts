@@ -192,6 +192,12 @@ export function createSolveRoute(config: SolveConfig) {
 				} catch {
 					continue;
 				}
+
+				// Mark all competing sub-solver proposals for the same order as
+				// rejected: SubsolverOutbid. Best-effort: we never block /solve for this.
+				store
+					.rejectOutbidProposals(config.db, order.uid, bestProposal.subSolver)
+					.catch(() => undefined);
 			}
 
 			solutions.push(solution);

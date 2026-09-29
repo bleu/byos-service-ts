@@ -241,14 +241,19 @@ export class SimulationValidator implements ValidateProposal {
 								calldata: sim.calldata,
 							})
 						: "";
+					// Omit calldata from the log — it can be kilobytes long.
+					// The full params (including calldata) are stored in simulationFailureParams
+					// on the proposal row for permanent debug access.
+					const { calldata: _calldata, ...logParams } = simulationFailureParams ?? {};
 					this.logger.warn(
 						{
 							proposalId: proposal.id,
 							orderUid: proposal.orderUid,
-							...simulationFailureParams,
+							revertReason: extractRevertReason(e),
+							...logParams,
 							tenderlyUrl,
 						},
-						"simulation revert debug",
+						"simulation revert",
 					);
 				}
 				return {

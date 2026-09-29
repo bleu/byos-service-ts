@@ -7,6 +7,7 @@ import * as store from "../storage.js";
 export interface RetentionWorkerConfig {
 	db: Db;
 	droppedRetentionSecs: number;
+	logRedactionAfterSecs: number;
 	logger: Logger;
 }
 
@@ -21,6 +22,15 @@ export function createRetentionWorker(connection: Redis, config: RetentionWorker
 				}
 			} catch (e) {
 				config.logger.error({ err: e }, "retention sweep failed");
+			}
+
+			try {
+				const redacted = await store.redactOldLogEntries(config.db, config.logRedactionAfterSecs);
+				if (redacted > 0) {
+					config.logger.info({ redacted }, "retention redacted old log entries");
+				}
+			} catch (e) {
+				config.logger.error({ err: e }, "retention redaction failed");
 			}
 		},
 		{

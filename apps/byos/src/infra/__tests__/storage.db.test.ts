@@ -1,10 +1,10 @@
 import type { Status } from "@byos/common";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TestContext } from "../../../test/setup.js";
 import { createTestDb } from "../../../test/setup.js";
-import { solutions } from "../../db/schema.js";
+import { proposalsLog, solutions } from "../../db/schema.js";
 import * as store from "../storage.js";
 
 let ctx: TestContext;
@@ -588,5 +588,73 @@ describe("retention sweep", () => {
 			.from(solutions)
 			.orderBy(solutions.proposalId);
 		expect(remaining).toEqual([{ proposalId: settled }]);
+	});
+});
+
+describe("log redaction", () => {
+	const WINDOW_SECS = 3600;
+	let redactCtx: TestContext;
+
+	beforeEach(async () => {
+		redactCtx = await createTestDb();
+	});
+
+	afterEach(async () => {
+		await redactCtx.cleanup();
+	});
+
+	const uid = (seed: number) => `0x${seed.toString(16).padStart(2, "0").repeat(56)}`;
+
+	/** Insert a proposal and backdate its created_at in proposals_log. */
+	async function insertAgedLog(seed: number): Promise<number> {
+		const { id } = await store.insert(redactCtx.db, sampleProposal({ orderUid: uid(seed) }));
+		await redactCtx.db.execute(
+			sql`UPDATE proposals_log SET created_at = now() - make_interval(secs => ${WINDOW_SECS * 2}) WHERE id = ${id}`,
+		);
+		return id;
+	}
+
+	async function logRow(id: number) {
+		const [row] = await redactCtx.db
+			.select({
+				interactions: proposalsLog.interactions,
+				simulationFailureParams: proposalsLog.simulationFailureParams,
+			})
+			.from(proposalsLog)
+			.where(eq(proposalsLog.id, id));
+		return row;
+	}
+
+	it("clears interactions and simulationFailureParams on aged rows", async () => {
+		const id = await insertAgedLog(1);
+		await redactCtx.db.execute(
+			sql`UPDATE proposals_log SET simulation_failure_params = '{"chainId":1,"calldata":"0xdeadbeef"}'::jsonb WHERE id = ${id}`,
+		);
+
+		expect(await store.redactOldLogEntries(redactCtx.db, WINDOW_SECS)).toBe(1);
+
+		const row = await logRow(id);
+		expect(row?.interactions).toEqual([]);
+		expect(row?.simulationFailureParams).toBeNull();
+	});
+
+	it("skips rows younger than the window", async () => {
+		const { id } = await store.insert(redactCtx.db, sampleProposal({ orderUid: uid(2) }));
+
+		expect(await store.redactOldLogEntries(redactCtx.db, WINDOW_SECS)).toBe(0);
+
+		const row = await logRow(id);
+		expect(row?.interactions).toBeDefined();
+	});
+
+	it("is idempotent — already-redacted rows are not counted twice", async () => {
+		const id = await insertAgedLog(3);
+		await store.redactOldLogEntries(redactCtx.db, WINDOW_SECS);
+
+		expect(await store.redactOldLogEntries(redactCtx.db, WINDOW_SECS)).toBe(0);
+
+		const row = await logRow(id);
+		expect(row?.interactions).toEqual([]);
+		expect(row?.simulationFailureParams).toBeNull();
 	});
 });

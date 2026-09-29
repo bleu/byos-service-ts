@@ -151,6 +151,7 @@ async function main() {
 	const retentionWorker = createRetentionWorker(ctx.redis, {
 		db: ctx.db,
 		droppedRetentionSecs: config.DROPPED_RETENTION_SECS,
+		logRedactionAfterSecs: config.LOG_REDACTION_AFTER_SECS,
 		logger: logger.child({ worker: "retention" }),
 	});
 
