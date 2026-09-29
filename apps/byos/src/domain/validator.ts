@@ -24,7 +24,7 @@ export interface SimulationFailureParams {
 export type Verdict =
 	| { kind: "accept"; simulation: SimulationOutcome | null }
 	| { kind: "reject"; reason: RejectionReason }
-	| { kind: "simFailed"; simulationFailureParams?: SimulationFailureParams };
+	| { kind: "simFailed"; simulationFailureParams?: SimulationFailureParams; revertReason?: string };
 
 /** Validates a single proposal. Returns null to skip (retry next tick). */
 export interface ValidateProposal {
