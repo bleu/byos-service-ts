@@ -8,9 +8,10 @@ import {
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
+// @ts-expect-error — tsup loader: { '.yml': 'text' } inlines this as a string at build time
+import _openapiYaml from "../../../openapi.yml";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import type { Proposal } from "../../domain/proposal.js";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
@@ -38,6 +39,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 	const log = config.logger?.child({ component: "ingestion" });
 
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
+
+	app.get("/openapi.yaml", (c) =>
+		c.text(_openapiYaml, 200, { "Content-Type": "application/yaml" }),
+	);
 
 	// POST /proposals — Create proposal
 	app.post("/proposals", async (c) => {
@@ -107,7 +112,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.ProposalLifetimeExceeded);
 		}
 
-		const proposal: Omit<Proposal, "id"> = {
+		const proposal: store.ProposalInput = {
 			subSolver,
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
@@ -222,7 +227,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		await enforceSignerLimit(config.signerLimit, reader);
 
-		const proposals = await store.listBySubSolver(config.db, reader);
+		const includeArchived = c.req.query("includeArchived") === "true";
+		const proposals = await store.listBySubSolver(config.db, reader, includeArchived);
 		return c.json(proposalToListResponse(proposals));
 	});
 
@@ -239,7 +245,13 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		await enforceSignerLimit(config.signerLimit, reader);
 
-		const proposals = await store.listByOrderUidForOwner(config.db, orderUid, reader);
+		const includeArchived = c.req.query("includeArchived") === "true";
+		const proposals = await store.listByOrderUidForOwner(
+			config.db,
+			orderUid,
+			reader,
+			includeArchived,
+		);
 		return c.json(proposalToListResponse(proposals));
 	});
 

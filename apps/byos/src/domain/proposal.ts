@@ -28,6 +28,9 @@ export interface Proposal {
 	settlementTxHash: Hex | null;
 	penaltyTxHash: Hex | null;
 	pendingCancellation: boolean;
+	simulationFailureParams: unknown | null;
+	createdAt: Date;
+	statusChangedAt: Date;
 }
 
 /** What the driver reported about a settlement. */

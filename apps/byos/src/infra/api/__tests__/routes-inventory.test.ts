@@ -18,6 +18,7 @@ const EXPECTED_ROUTES = [
 	"DELETE /proposal/:id",
 	"GET /buffer-balance",
 	"GET /healthz",
+	"GET /openapi.yaml",
 	"GET /proposal/:id",
 	"GET /proposals/:orderUid",
 	"GET /proposals/by-sub-solver",
@@ -53,9 +54,11 @@ describe("public route inventory", () => {
 		expect(publicRoutes()).toEqual(EXPECTED_ROUTES);
 	});
 
-	it("exempts only the liveness probe from the per-IP backstop", () => {
+	it("exempts only static/liveness routes from the per-IP backstop", () => {
 		// Mirrors the exemptPaths list in createPublicApp. Anything else added
 		// there is a route that stops being rate limited.
-		expect(EXPECTED_ROUTES.filter((r) => r.endsWith("/healthz"))).toEqual(["GET /healthz"]);
+		expect(
+			EXPECTED_ROUTES.filter((r) => r.endsWith("/healthz") || r.endsWith("/openapi.yaml")),
+		).toEqual(["GET /healthz", "GET /openapi.yaml"]);
 	});
 });

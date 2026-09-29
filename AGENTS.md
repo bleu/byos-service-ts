@@ -138,6 +138,10 @@ The Redis tier shares one Redis, so each test namespaces its keys and sweeps the
 - **Addresses and order UIDs as `0x`-prefixed hex strings**.
 - This matches the API contract defined in `apps/byos/openapi.yml` — do not change it.
 
+### Keeping `openapi.yml` in sync
+
+Any change to the proposals API interface (endpoints, fields, query params, status codes, auth) **must** be reflected in `apps/byos/openapi.yml`. The spec is served at `GET /openapi.yaml` — drift silently breaks clients.
+
 ## Domain language
 
 The glossary lives in [`CONTEXT.md`](CONTEXT.md) — sub-solver, proposal, ingestion, proposal store, audit trail, gatekeeping, attribution, Track A/B, `c_l`, operator. Use those terms exactly in code, test names, and documentation. Key distinctions:

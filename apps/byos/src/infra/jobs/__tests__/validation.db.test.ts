@@ -21,7 +21,7 @@ afterAll(async () => {
 const logger = pino({ level: "silent" });
 let nonceCounter = 0n;
 
-function sampleProposal(overrides?: Partial<Omit<Proposal, "id">>): Omit<Proposal, "id"> {
+function sampleProposal(overrides?: Partial<store.ProposalInput>): store.ProposalInput {
 	return {
 		subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,
 		orderUid: `0x${"ab".repeat(56)}`,

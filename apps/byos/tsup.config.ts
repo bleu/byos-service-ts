@@ -8,4 +8,5 @@ export default defineConfig({
 	clean: true,
 	sourcemap: true,
 	splitting: false,
+	loader: { ".yml": "text" },
 });

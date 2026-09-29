@@ -32,6 +32,9 @@ function submittedProposal(overrides: Partial<Proposal> = {}): Proposal {
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		simulationFailureParams: null,
+		createdAt: new Date(0),
+		statusChangedAt: new Date(0),
 		...overrides,
 	};
 }

@@ -1,5 +1,5 @@
 import type { RejectionReason, Status } from "@byos/common";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
 import {
@@ -7,6 +7,7 @@ import {
 	debitOperations,
 	penalties,
 	proposals,
+	proposalsLog,
 	serviceState,
 	solutions,
 } from "../db/schema.js";
@@ -256,7 +257,7 @@ export async function openDebitOperations(db: Db, sourceKind: string): Promise<D
 
 // --- Row Codec ---
 
-type ProposalRow = typeof proposals.$inferSelect;
+type ProposalRow = typeof proposals.$inferSelect | typeof proposalsLog.$inferSelect;
 
 function rowToProposal(row: ProposalRow): Proposal {
 	const interactions = (
@@ -289,6 +290,9 @@ function rowToProposal(row: ProposalRow): Proposal {
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
 		penaltyTxHash: (row.penaltyTxHash as Hex) ?? null,
 		pendingCancellation: row.pendingCancellation,
+		simulationFailureParams: row.simulationFailureParams ?? null,
+		createdAt: row.createdAt,
+		statusChangedAt: row.statusChangedAt,
 	};
 }
 
@@ -320,7 +324,7 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 	}));
 }
 
-function proposalValues(proposal: Omit<Proposal, "id">) {
+function proposalValues(proposal: ProposalInput) {
 	return {
 		subSolver: proposal.subSolver.toLowerCase(),
 		orderUid: proposal.orderUid.toLowerCase(),
@@ -349,7 +353,7 @@ function proposalValues(proposal: Omit<Proposal, "id">) {
  * It is deliberately derived rather than persisted so replay checks cannot
  * drift from the actual signed payload as the row shape evolves.
  */
-export function signedProposalFingerprint(proposal: Omit<Proposal, "id"> | Proposal): string {
+export function signedProposalFingerprint(proposal: ProposalInput | Proposal): string {
 	return JSON.stringify({
 		subSolver: proposal.subSolver.toLowerCase(),
 		orderUid: proposal.orderUid.toLowerCase(),
@@ -369,9 +373,19 @@ export function signedProposalFingerprint(proposal: Omit<Proposal, "id"> | Propo
 
 // --- Writes ---
 
+/**
+ * Fields a caller must supply when creating a proposal. DB-managed fields
+ * (createdAt, statusChangedAt, simulationFailureParams) are excluded because
+ * they are set by the database or populated only after simulation.
+ */
+export type ProposalInput = Omit<
+	Proposal,
+	"id" | "createdAt" | "statusChangedAt" | "simulationFailureParams"
+>;
+
 export async function insert(
 	db: Db,
-	proposal: Omit<Proposal, "id">,
+	proposal: ProposalInput,
 ): Promise<{ id: number; auditEvent: AuditEvent }> {
 	const [row] = await db
 		.insert(proposals)
@@ -381,7 +395,14 @@ export async function insert(
 	// INSERT ... RETURNING always returns exactly one row
 	if (!row) throw new Error("INSERT RETURNING returned no rows");
 	const { id } = row;
-	const fullProposal: Proposal = { ...proposal, id };
+	const now = new Date();
+	const fullProposal: Proposal = {
+		...proposal,
+		id,
+		createdAt: now,
+		statusChangedAt: now,
+		simulationFailureParams: null,
+	};
 
 	const auditEvent: AuditEvent = {
 		occurredAt: new Date(),
@@ -397,7 +418,7 @@ export async function insert(
  */
 export async function insertIfUnused(
 	db: Db,
-	proposal: Omit<Proposal, "id">,
+	proposal: ProposalInput,
 ): Promise<{ id: number; auditEvent: AuditEvent } | { existing: Proposal }> {
 	const rows = await db
 		.insert(proposals)
@@ -410,7 +431,14 @@ export async function insertIfUnused(
 		if (!existing) throw new Error("nonce conflict returned no proposal");
 		return { existing };
 	}
-	const fullProposal: Proposal = { ...proposal, id: row.id };
+	const now = new Date();
+	const fullProposal: Proposal = {
+		...proposal,
+		id: row.id,
+		createdAt: now,
+		statusChangedAt: now,
+		simulationFailureParams: null,
+	};
 	return {
 		id: row.id,
 		auditEvent: { occurredAt: new Date(), kind: { type: "received", proposal: fullProposal } },
@@ -1069,10 +1097,18 @@ export async function getForOwner(
 		.from(proposals)
 		.where(and(eq(proposals.id, id), eq(proposals.subSolver, subSolver.toLowerCase())));
 
-	if (!row) {
+	if (row) return rowToProposal(row);
+
+	// Proposal may have been swept from the active store — check the permanent log.
+	const [logRow] = await db
+		.select()
+		.from(proposalsLog)
+		.where(and(eq(proposalsLog.id, id), eq(proposalsLog.subSolver, subSolver.toLowerCase())));
+
+	if (!logRow) {
 		return { kind: "notFound", id };
 	}
-	return rowToProposal(row);
+	return rowToProposal(logRow);
 }
 
 export async function listByOrderUid(db: Db, orderUid: string): Promise<Proposal[]> {
@@ -1089,7 +1125,22 @@ export async function listByOrderUidForOwner(
 	db: Db,
 	orderUid: string,
 	owner: Address,
+	includeArchived = false,
 ): Promise<Proposal[]> {
+	if (includeArchived) {
+		const rows = await db
+			.select()
+			.from(proposalsLog)
+			.where(
+				and(
+					eq(proposalsLog.orderUid, orderUid.toLowerCase()),
+					eq(proposalsLog.subSolver, owner.toLowerCase()),
+				),
+			)
+			.orderBy(desc(proposalsLog.id));
+		return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
+	}
+
 	const rows = await db
 		.select()
 		.from(proposals)
@@ -1105,7 +1156,20 @@ export async function listByOrderUidForOwner(
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
 }
 
-export async function listBySubSolver(db: Db, subSolver: Address): Promise<Proposal[]> {
+export async function listBySubSolver(
+	db: Db,
+	subSolver: Address,
+	includeArchived = false,
+): Promise<Proposal[]> {
+	if (includeArchived) {
+		const rows = await db
+			.select()
+			.from(proposalsLog)
+			.where(eq(proposalsLog.subSolver, subSolver.toLowerCase()))
+			.orderBy(desc(proposalsLog.id));
+		return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
+	}
+
 	const rows = await db
 		.select()
 		.from(proposals)

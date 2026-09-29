@@ -147,12 +147,14 @@ paths:
       operationId: getProposal
       summary: Get one of the caller's proposals.
       description: |
-        Returns the proposal's amounts, status, and, depending on `status`,
-        the machine-readable `rejectionReason` (`rejected`), the
-        `settlementTxHash` (`settled`/`settleFailed`/`penalized`), or the
-        `penaltyTxHash` (`penalized`). The
-        submitted `interactions`, `nonce`, and `signature` are not echoed
-        back.
+        Returns the full proposal: amounts, tokens, interactions, status, and
+        all post-validation fields (`gasUsed`, `trampoline`,
+        `simulationFailureParams`, `settlementTxHash`, etc.).
+
+        If the proposal has been swept from the active store it is fetched
+        from the permanent log instead — so this endpoint returns a proposal
+        regardless of how old it is.
+
         Owner-scoped: the proposal is only returned if the `X-Signature`
         signer is its sub-solver.
       security:
@@ -232,11 +234,18 @@ paths:
         Lists the caller's proposals across all orders. Identity comes
         entirely from the `X-Signature` header — there is no address
         parameter.
+
+        By default only in-flight proposals (`submitted`, `active`) are
+        returned. Pass `includeArchived=true` to fetch from the permanent
+        log instead, which includes all statuses and proposals that have
+        already been swept from the active store.
       security:
         - readAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IncludeArchived"
       responses:
         "200":
-          description: The caller's proposals (metadata only).
+          description: The caller's proposals.
           content:
             application/json:
               schema:
@@ -293,6 +302,11 @@ paths:
         Owner-scoped: returns only the caller's own proposals on
         the given order. Competitors' proposals on the same order are
         invisible.
+
+        By default only active proposals are returned. Pass
+        `includeArchived=true` to fetch from the permanent log instead,
+        which includes all statuses and proposals that have already been
+        swept from the active store.
       security:
         - readAuth: []
       parameters:
@@ -302,9 +316,10 @@ paths:
           description: 56-byte CoW Protocol order UID as a hex string.
           schema:
             $ref: "#/components/schemas/OrderUid"
+        - $ref: "#/components/parameters/IncludeArchived"
       responses:
         "200":
-          description: The caller's proposals on this order (metadata only).
+          description: The caller's proposals on this order.
           content:
             application/json:
               schema:
@@ -394,6 +409,17 @@ components:
       description: Server-assigned proposal id.
       schema:
         $ref: "#/components/schemas/ProposalId"
+    IncludeArchived:
+      name: includeArchived
+      in: query
+      required: false
+      description: |
+        When `true`, fetch from the permanent proposals log instead of the
+        active store. The log is never swept, so this returns proposals at
+        all statuses including terminal ones. Default: `false`.
+      schema:
+        type: boolean
+        default: false
 
   schemas:
     Address:
@@ -586,10 +612,18 @@ components:
         - id
         - subSolver
         - orderUid
+        - sellToken
+        - buyToken
         - sellAmount
-        - buyAmount
+        - minBuyAmount
+        - quoteBuyAmount
+        - interactions
         - validUntil
+        - nonce
+        - signature
         - status
+        - createdAt
+        - statusChangedAt
       properties:
         id:
           $ref: "#/components/schemas/ProposalId"
@@ -599,18 +633,61 @@ components:
             - $ref: "#/components/schemas/Address"
         orderUid:
           $ref: "#/components/schemas/OrderUid"
+        sellToken:
+          $ref: "#/components/schemas/Address"
+        buyToken:
+          $ref: "#/components/schemas/Address"
         sellAmount:
           $ref: "#/components/schemas/U256"
-        buyAmount:
-          $ref: "#/components/schemas/U256"
+        minBuyAmount:
+          description: Minimum buy-token amount the proposal must deliver on-chain.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        quoteBuyAmount:
+          description: |
+            The orderbook quote amount at submission time, used for buffer
+            accounting. May differ from `minBuyAmount`.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        interactions:
+          description: The sub-solver's settlement route.
+          type: array
+          items:
+            $ref: "#/components/schemas/Interaction"
         validUntil:
           $ref: "#/components/schemas/UnixTimestamp"
+        nonce:
+          $ref: "#/components/schemas/U256"
+        signature:
+          $ref: "#/components/schemas/Signature"
         status:
           $ref: "#/components/schemas/ProposalStatus"
+        createdAt:
+          description: ISO-8601 timestamp of when the proposal was received.
+          type: string
+          format: date-time
+          example: "2025-07-01T12:00:00.000Z"
+        statusChangedAt:
+          description: ISO-8601 timestamp of the last status transition.
+          type: string
+          format: date-time
+          example: "2025-07-01T12:00:05.000Z"
         rejectionReason:
           description: Only present when `status` is `rejected`.
           allOf:
             - $ref: "#/components/schemas/RejectionReason"
+        gasUsed:
+          description: |
+            Gas estimate from the settlement simulation. Only present once
+            the proposal has been simulated (`active` or later).
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        trampoline:
+          description: |
+            The Trampoline contract address used in the simulation. Only
+            present once the proposal has been simulated.
+          allOf:
+            - $ref: "#/components/schemas/Address"
         settlementTxHash:
           description: |
             Only present on settlement outcomes: the landed transaction for
@@ -627,18 +704,37 @@ components:
           type: string
           pattern: "^0x[0-9a-f]{64}$"
           example: "0x7b1f3a9c5d8e2f4a6b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a"
+        pendingCancellation:
+          description: |
+            Only present (and `true`) when a cancellation has been
+            requested while the proposal is `executing`. The proposal will
+            be cancelled once the executing state resolves.
+          type: boolean
+        simulationFailureParams:
+          description: |
+            Debug parameters captured when the simulation reverted. Only
+            present when `status` is `simFailed`.
+          type: object
+          additionalProperties: true
     ProposalMetadata:
       description: |
-        Metadata only — no amounts, no interactions. List views never expose
-        full proposal contents; fetch `GET /proposal/{id}` for
-        amounts and the rejection reason.
+        List-view representation of a proposal. Includes amounts and status
+        fields but omits heavy payload fields (`interactions`, `signature`).
+        Fetch `GET /proposal/{id}` for the full payload.
       type: object
       required:
         - id
         - subSolver
         - orderUid
+        - sellToken
+        - buyToken
+        - sellAmount
+        - minBuyAmount
+        - quoteBuyAmount
         - validUntil
         - status
+        - createdAt
+        - statusChangedAt
       properties:
         id:
           $ref: "#/components/schemas/ProposalId"
@@ -646,10 +742,63 @@ components:
           $ref: "#/components/schemas/Address"
         orderUid:
           $ref: "#/components/schemas/OrderUid"
+        sellToken:
+          $ref: "#/components/schemas/Address"
+        buyToken:
+          $ref: "#/components/schemas/Address"
+        sellAmount:
+          $ref: "#/components/schemas/U256"
+        minBuyAmount:
+          $ref: "#/components/schemas/U256"
+        quoteBuyAmount:
+          $ref: "#/components/schemas/U256"
         validUntil:
           $ref: "#/components/schemas/UnixTimestamp"
         status:
           $ref: "#/components/schemas/ProposalStatus"
+        createdAt:
+          description: ISO-8601 timestamp of when the proposal was received.
+          type: string
+          format: date-time
+          example: "2025-07-01T12:00:00.000Z"
+        statusChangedAt:
+          description: ISO-8601 timestamp of the last status transition.
+          type: string
+          format: date-time
+          example: "2025-07-01T12:00:05.000Z"
+        rejectionReason:
+          description: Only present when `status` is `rejected`.
+          allOf:
+            - $ref: "#/components/schemas/RejectionReason"
+        gasUsed:
+          description: |
+            Gas estimate from the settlement simulation. Only present once
+            the proposal has been simulated.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        trampoline:
+          description: |
+            The Trampoline contract address used in the simulation. Only
+            present once the proposal has been simulated.
+          allOf:
+            - $ref: "#/components/schemas/Address"
+        settlementTxHash:
+          description: |
+            Only present on settlement outcomes.
+          type: string
+          pattern: "^0x[0-9a-f]{64}$"
+          example: "0x2d6cea6413a3b2e37a1a5c1780e17dee056bd63c2fd0fd60d75bfa9ea38e2e28"
+        penaltyTxHash:
+          description: |
+            Only present when `status` is `penalized`.
+          type: string
+          pattern: "^0x[0-9a-f]{64}$"
+          example: "0x7b1f3a9c5d8e2f4a6b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a"
+        pendingCancellation:
+          description: |
+            Only present (and `true`) when cancellation is pending while
+            `executing`.
+          type: boolean
     ListProposalsResponse:
       type: object
       required:

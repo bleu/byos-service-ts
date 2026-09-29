@@ -33,6 +33,9 @@ function sampleProposal(): Proposal {
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
+		simulationFailureParams: null,
+		createdAt: new Date(0),
+		statusChangedAt: new Date(0),
 	};
 }
 
