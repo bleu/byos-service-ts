@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
 	byosDomain,
 	createProposalRequestSchema,
@@ -11,6 +10,8 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+// @ts-expect-error — tsup loader: { '.yml': 'text' } inlines this as a string at build time
+import _openapiYaml from "../../../openapi.yml";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
@@ -31,8 +32,6 @@ export interface RoutesConfig {
 	signerLimit: SignerLimitConfig;
 	logger?: Logger;
 }
-
-const _openapiYaml = readFileSync("apps/byos/openapi.yml", "utf8");
 
 export function createPublicRoutes(config: RoutesConfig) {
 	const app = new Hono();

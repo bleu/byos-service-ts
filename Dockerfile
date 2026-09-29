@@ -29,7 +29,6 @@ COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=build /app/node_modules node_modules/
 # Built app + migrations + its local node_modules
 COPY --from=build /app/apps/byos/dist apps/byos/dist/
-COPY --from=build /app/apps/byos/openapi.yml apps/byos/openapi.yml
 COPY --from=build /app/apps/byos/drizzle apps/byos/drizzle/
 COPY --from=build /app/apps/byos/package.json apps/byos/
 COPY --from=build /app/apps/byos/node_modules apps/byos/node_modules/
