@@ -1,5 +1,5 @@
 import type { Status } from "@byos/common";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TestContext } from "../../../test/setup.js";

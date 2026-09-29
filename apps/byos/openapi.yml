@@ -154,10 +154,15 @@ paths:
         **Note**: `interactions`, `nonce`, and `signature` are now included.
         Earlier versions of this API did not echo them back.
 
+        Once the proposal has been selected in an auction, the response also
+        includes auction-time price snapshot fields (`sellTokenRefPrice`,
+        `surplusTokenRefPrice`, `auctionGasPrice`, `clearingPrices`).
+
         If the proposal has been swept from the active store it is fetched
         from the permanent log instead — so this endpoint returns a proposal
         regardless of how old it is. The log fallback is automatic; no query
         parameter is needed.
+
 
         Owner-scoped: the proposal is only returned if the `X-Signature`
         signer is its sub-solver.
@@ -721,6 +726,39 @@ components:
             present only when `status` is `simFailed`.
           type: object
           additionalProperties: true
+        sellTokenRefPrice:
+          description: |
+            Native-token reference price of the sell token at the time BYOS
+            built the solution. Absent until the proposal has competed in an
+            auction. Decimal string, in wei (1e18 = 1 ETH per token).
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        surplusTokenRefPrice:
+          description: |
+            Native-token reference price of the surplus token (buy token on
+            sell orders, sell token on buy orders) at the time BYOS built the
+            solution. Absent until the proposal has competed in an auction.
+            Decimal string, in wei.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        auctionGasPrice:
+          description: |
+            Effective gas price from the auction (`effectiveGasPrice`) used
+            to score this proposal. Absent until the proposal has competed in
+            an auction. Decimal string, in wei.
+          allOf:
+            - $ref: "#/components/schemas/U256"
+        clearingPrices:
+          description: |
+            Clearing prices submitted with the solution, as a map from token
+            address to decimal string amount. Absent until the proposal has
+            competed in an auction.
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/U256"
+          example:
+            "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1": "2000000000000000000"
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "1000000000000000000"
     ProposalMetadata:
       description: |
         List-view representation of a proposal. Includes amounts and status
