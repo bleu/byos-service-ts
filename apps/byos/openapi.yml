@@ -151,9 +151,13 @@ paths:
         all post-validation fields (`gasUsed`, `trampoline`,
         `simulationFailureParams`, `settlementTxHash`, etc.).
 
+        **Note**: `interactions`, `nonce`, and `signature` are now included.
+        Earlier versions of this API did not echo them back.
+
         If the proposal has been swept from the active store it is fetched
         from the permanent log instead — so this endpoint returns a proposal
-        regardless of how old it is.
+        regardless of how old it is. The log fallback is automatic; no query
+        parameter is needed.
 
         Owner-scoped: the proposal is only returned if the `X-Signature`
         signer is its sub-solver.
@@ -712,8 +716,9 @@ components:
           type: boolean
         simulationFailureParams:
           description: |
-            Debug parameters captured when the simulation reverted. Only
-            present when `status` is `simFailed`.
+            Debug parameters captured when the simulation reverted. Set only
+            during `simFailed` transitions, so in practice this field is
+            present only when `status` is `simFailed`.
           type: object
           additionalProperties: true
     ProposalMetadata:
