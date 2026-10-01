@@ -1382,6 +1382,7 @@ export async function solutionProposals(
 			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
 			auctionGasPrice: proposals.auctionGasPrice,
 			clearingPrices: proposals.clearingPrices,
+			simulationBuyAmount: proposals.simulationBuyAmount,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

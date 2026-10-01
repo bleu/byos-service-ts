@@ -1,8 +1,8 @@
 import { type CowOrder, encodeSettle, OrderKind, SigningScheme, TrampolineAbi } from "@byos/common";
 import {
+	type Address,
 	encodeAbiParameters,
 	encodeEventTopics,
-	type Address,
 	type Hex,
 	type PublicClient,
 } from "viem";
@@ -287,17 +287,24 @@ describe("SimulationValidator", () => {
 		});
 
 		expect(node.simulateCalls).toHaveLength(1);
-		const args = node.simulateCalls[0] as { method: string; params: [Record<string, unknown>, string] };
+		const args = node.simulateCalls[0] as {
+			method: string;
+			params: [Record<string, unknown>, string];
+		};
 		expect(args.method).toBe("eth_simulateV1");
 		expect(args.params[1]).toBe("latest");
 
-		const blockStateCall = (args.params[0] as { blockStateCalls: Array<{
-			calls: Array<{ from: string; to: string; data: string }>;
-			stateOverrides: Record<string, { code?: string; stateDiff?: Record<string, string> }>;
-		}> }).blockStateCalls[0];
+		const blockStateCall = (
+			args.params[0] as {
+				blockStateCalls: Array<{
+					calls: Array<{ from: string; to: string; data: string }>;
+					stateOverrides: Record<string, { code?: string; stateDiff?: Record<string, string> }>;
+				}>;
+			}
+		).blockStateCalls[0]!;
 
 		// Verify call envelope
-		const call = blockStateCall.calls[0];
+		const call = blockStateCall.calls[0]!;
 		expect(call.from).toBe(DUMMY_SUBMITTER);
 		expect(call.to).toBe(SETTLEMENT);
 		expect(call.data).toBe(
@@ -322,7 +329,7 @@ describe("SimulationValidator", () => {
 		);
 
 		// Verify state overrides: AnyoneAuthenticator at authenticator, SUBMITTER_ROLE at escrow
-		const overrides = blockStateCall.stateOverrides;
+		const overrides = blockStateCall.stateOverrides ?? {};
 		expect(overrides[AUTHENTICATOR]?.code).toMatch(/^0x6080/);
 		const escrowStateDiff = overrides[ESCROW]?.stateDiff ?? {};
 		const slots = Object.keys(escrowStateDiff);

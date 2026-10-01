@@ -48,6 +48,7 @@ function sampleProposal(overrides?: Partial<store.ProposalInput>): store.Proposa
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		simulationBuyAmount: null,
 		...overrides,
 	};
 }
@@ -125,7 +126,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 		const json = await postSolve(createSolveApp(), buildAuction());
 
 		expect(json.solutions).toHaveLength(1);
-		const prices = json.solutions[0].prices;
+		const prices = json.solutions[0]!.prices;
 		// Clearing price for sellToken must use simulationBuyAmount (800_000),
 		// not quoteBuyAmount (1_000_000).
 		expect(prices[SELL_TOKEN]).toBe("800000");
@@ -152,13 +153,10 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 			},
 		});
 
-		const json = await postSolve(
-			createSolveApp(),
-			buildAuction(`0x${"cd".repeat(56)}`),
-		);
+		const json = await postSolve(createSolveApp(), buildAuction(`0x${"cd".repeat(56)}`));
 
 		expect(json.solutions).toHaveLength(1);
-		const prices = json.solutions[0].prices;
+		const prices = json.solutions[0]!.prices;
 		// Over-delivery: effectiveBuyAmount falls back to quoteBuyAmount
 		expect(prices[SELL_TOKEN]).toBe("1000000");
 	});
@@ -167,10 +165,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 		const quoteBuyAmount = 1_000_000n;
 		const orderUid = `0x${"ef".repeat(56)}`;
 
-		const { id } = await store.insert(
-			ctx.db,
-			sampleProposal({ quoteBuyAmount, orderUid }),
-		);
+		const { id } = await store.insert(ctx.db, sampleProposal({ quoteBuyAmount, orderUid }));
 
 		// Activate via resolveVerdict, then clear simulationBuyAmount to simulate
 		// a pre-feature proposal that was validated before this column existed.
@@ -186,14 +181,12 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 		});
 
 		// Null out the column directly to mimic a pre-feature row
-		await ctx.db.execute(
-			sql`UPDATE proposals SET simulation_buy_amount = NULL WHERE id = ${id}`,
-		);
+		await ctx.db.execute(sql`UPDATE proposals SET simulation_buy_amount = NULL WHERE id = ${id}`);
 
 		const json = await postSolve(createSolveApp(), buildAuction(orderUid));
 
 		expect(json.solutions).toHaveLength(1);
-		const prices = json.solutions[0].prices;
+		const prices = json.solutions[0]!.prices;
 		// effectiveBuyAmount falls back to quoteBuyAmount when simulationBuyAmount is null
 		expect(prices[SELL_TOKEN]).toBe("1000000");
 	});

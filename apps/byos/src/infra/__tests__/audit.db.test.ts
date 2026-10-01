@@ -48,6 +48,7 @@ function sampleProposal(): Proposal {
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		simulationBuyAmount: null,
 	};
 }
 

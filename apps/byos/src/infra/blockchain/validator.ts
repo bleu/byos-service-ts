@@ -341,21 +341,18 @@ export class SimulationValidator implements ValidateProposal {
 					"latest",
 				] as never,
 			});
-		} catch (e) {
+		} catch {
 			return null; // transport error, defer
 		}
 
-		if (
-			!Array.isArray(result) ||
-			!Array.isArray((result as { calls?: unknown[] }[])[0]?.calls)
-		) {
-			this.logger?.error(
-				{ proposalId: proposal.id },
-				"eth_simulateV1 unexpected response shape",
-			);
+		const firstBlock = Array.isArray(result)
+			? (result as { calls?: SimulateV1CallResult[] }[])[0]
+			: undefined;
+		if (!firstBlock || !Array.isArray(firstBlock.calls) || !firstBlock.calls[0]) {
+			this.logger?.error({ proposalId: proposal.id }, "eth_simulateV1 unexpected response shape");
 			return null;
 		}
-		const call = (result as { calls: SimulateV1CallResult[] }[])[0].calls[0];
+		const call = firstBlock.calls[0];
 
 		// Step 8: Handle revert
 		if (call.status === "0x0") {

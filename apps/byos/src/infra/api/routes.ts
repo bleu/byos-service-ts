@@ -137,6 +137,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			surplusTokenRefPrice: null,
 			auctionGasPrice: null,
 			clearingPrices: null,
+			simulationBuyAmount: null,
 		};
 		const fingerprint = store.signedProposalFingerprint(proposal);
 		const inserted = await store.insertIfUnused(config.db, proposal);

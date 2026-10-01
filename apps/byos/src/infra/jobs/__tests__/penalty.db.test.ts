@@ -57,6 +57,7 @@ function sampleProposal(): store.ProposalInput {
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		simulationBuyAmount: null,
 	};
 }
 

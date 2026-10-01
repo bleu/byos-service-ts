@@ -50,6 +50,7 @@ function sampleProposal(overrides?: Partial<store.ProposalInput>): store.Proposa
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		simulationBuyAmount: null,
 		...overrides,
 	};
 }
