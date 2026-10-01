@@ -94,6 +94,7 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 			trampoline: "0x0000000000000000000000000000000000001234" as Address,
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
+			simulationBuyAmount: 2n * 10n ** 18n,
 		},
 	});
 
@@ -165,6 +166,7 @@ async function seedSimulatedProposalOther(nonce: bigint, orderUid: `0x${string}`
 			trampoline: "0x0000000000000000000000000000000000001234" as Address,
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
+			simulationBuyAmount: 3n * 10n ** 18n,
 		},
 	});
 
