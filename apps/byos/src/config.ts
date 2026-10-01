@@ -70,10 +70,7 @@ export const configSchema = z.object({
 
 	// Slippage protection (ADR-0019)
 	/** Maximum allowed gap between minBuyAmount and quoteBuyAmount, in basis points. */
-	MAX_PROPOSAL_SLIPPAGE_BPS: z
-		.string()
-		.regex(/^\d+$/, "Must be a decimal integer")
-		.default("100"),
+	MAX_PROPOSAL_SLIPPAGE_BPS: z.string().regex(/^\d+$/, "Must be a decimal integer").default("100"),
 	/** Maximum allowed gap between minBuyAmount and quoteBuyAmount, in native token wei. */
 	MAX_PROPOSAL_SLIPPAGE_NATIVE: z
 		.string()
