@@ -120,6 +120,7 @@ describe("proposal store", () => {
 				trampoline: "0x0000000000000000000000000000000000001234" as Address,
 				sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
 				buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
+				simulationBuyAmount: 990_000n,
 			},
 		});
 

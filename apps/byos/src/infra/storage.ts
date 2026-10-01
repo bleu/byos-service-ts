@@ -594,7 +594,10 @@ export async function resolveVerdict(
 					trampoline = verdict.simulation.trampoline.toLowerCase();
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
-					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
+					simulationBuyAmount =
+						verdict.simulation.simulationBuyAmount != null
+							? verdict.simulation.simulationBuyAmount.toString()
+							: null;
 				}
 				break;
 			case "reject":
