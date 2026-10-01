@@ -247,7 +247,7 @@ export class SimulationValidator implements ValidateProposal {
 			if (record.order.kind === OrderKind.SELL) {
 				// Sell orders need the price to evaluate the native-amount gap cap.
 				// Fail closed: if price is missing we cannot assess, so reject.
-				if (err.kind === "notFound") return { kind: "reject", reason: "ProposedSlippageOutrange" };
+				if (err.kind === "notFound") return { kind: "reject", reason: "NativePriceUnavailable" };
 				return null; // transient, defer
 			}
 			// Buy orders skip the gap check entirely — price is not needed.
@@ -317,9 +317,9 @@ export class SimulationValidator implements ValidateProposal {
 		});
 
 		// Step 7: Dispatch eth_simulateV1
-		let call: SimulateV1CallResult;
+		let result: unknown;
 		try {
-			const result = await this.publicClient.request({
+			result = await this.publicClient.request({
 				method: "eth_simulateV1" as never,
 				params: [
 					{
@@ -341,10 +341,21 @@ export class SimulationValidator implements ValidateProposal {
 					"latest",
 				] as never,
 			});
-			call = (result as { calls: SimulateV1CallResult[] }[])[0].calls[0];
 		} catch (e) {
 			return null; // transport error, defer
 		}
+
+		if (
+			!Array.isArray(result) ||
+			!Array.isArray((result as { calls?: unknown[] }[])[0]?.calls)
+		) {
+			this.logger?.error(
+				{ proposalId: proposal.id },
+				"eth_simulateV1 unexpected response shape",
+			);
+			return null;
+		}
+		const call = (result as { calls: SimulateV1CallResult[] }[])[0].calls[0];
 
 		// Step 8: Handle revert
 		if (call.status === "0x0") {

@@ -594,10 +594,7 @@ export async function resolveVerdict(
 					trampoline = verdict.simulation.trampoline.toLowerCase();
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
-					simulationBuyAmount =
-						verdict.simulation.simulationBuyAmount != null
-							? verdict.simulation.simulationBuyAmount.toString()
-							: null;
+					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
 				}
 				break;
 			case "reject":
@@ -629,7 +626,7 @@ export async function resolveVerdict(
 				...(sellToken ? { sellToken } : {}),
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
-				...(simulationBuyAmount != null ? { simulationBuyAmount } : {}),
+				simulationBuyAmount,
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));

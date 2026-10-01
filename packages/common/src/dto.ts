@@ -123,6 +123,8 @@ export const RejectionReason = {
 	ProposedSlippageOutrange: "ProposedSlippageOutrange",
 	/** Simulation succeeded but the trampoline did not emit an Executed event. */
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
+	/** Buy-token native price is unavailable — cannot evaluate the native-amount slippage cap. */
+	NativePriceUnavailable: "NativePriceUnavailable",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -139,6 +141,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.SolverOutbid,
 	RejectionReason.ProposedSlippageOutrange,
 	RejectionReason.SimulationMissingExecutedEvent,
+	RejectionReason.NativePriceUnavailable,
 ]);
 
 // --- Proposal Metadata ---
