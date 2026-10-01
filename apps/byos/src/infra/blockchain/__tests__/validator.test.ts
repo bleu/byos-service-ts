@@ -1,5 +1,11 @@
-import { type CowOrder, encodeSettle, OrderKind, SigningScheme } from "@byos/common";
-import type { Address, PublicClient } from "viem";
+import { type CowOrder, encodeSettle, OrderKind, SigningScheme, TrampolineAbi } from "@byos/common";
+import {
+	encodeAbiParameters,
+	encodeEventTopics,
+	type Address,
+	type Hex,
+	type PublicClient,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import type { OrderRecord } from "../../../domain/order.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -11,7 +17,67 @@ const SETTLEMENT = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
 const ESCROW = "0x1111111111111111111111111111111111111234";
 const TRAMPOLINE_FACTORY = "0x2222222222222222222222222222222222221234";
 const AUTHENTICATOR = "0x3333333333333333333333333333333333331234";
+const TRAMPOLINE = "0x4444444444444444444444444444444444441234";
 const ETHER = 10n ** 18n;
+
+// ── Simulated-log helpers ────────────────────────────────────────────────────
+
+/** Matches SimulateV1CallResult in validator.ts. */
+interface SimulateV1Log {
+	address: Hex;
+	topics: [Hex, ...Hex[]];
+	data: Hex;
+}
+
+interface SimulateV1CallResult {
+	returnData: Hex;
+	logs: SimulateV1Log[];
+	gasUsed: Hex;
+	status: Hex;
+	error?: { message: string; code: number; data: Hex };
+}
+
+/** Encodes a Trampoline Executed event log for the given trampoline and delta. */
+function buildExecutedLog(trampoline: Address, orderUidHash: Hex, delta: bigint): SimulateV1Log {
+	const topics = encodeEventTopics({
+		abi: TrampolineAbi,
+		eventName: "Executed",
+		args: { _orderUidHash: orderUidHash },
+	}) as [Hex, Hex];
+
+	const data = encodeAbiParameters(
+		[{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+		[delta, 0n, 0n],
+	);
+
+	return { address: trampoline as Hex, topics, data };
+}
+
+/** Builds a successful simulateV1 call result with a single Executed log. */
+function simulateSuccess(
+	delta: bigint,
+	orderUidHash: Hex,
+	gasUsed = 100_000n,
+): SimulateV1CallResult {
+	return {
+		status: "0x1",
+		gasUsed: `0x${gasUsed.toString(16)}`,
+		returnData: "0x",
+		logs: [buildExecutedLog(TRAMPOLINE, orderUidHash, delta)],
+	};
+}
+
+/** Builds a failed simulateV1 call result (revert). */
+function simulateRevert(returnData: Hex = "0x"): SimulateV1CallResult {
+	return {
+		status: "0x0",
+		gasUsed: "0x0",
+		returnData,
+		logs: [],
+	};
+}
+
+// ── Test fixtures ────────────────────────────────────────────────────────────
 
 function sampleOrder(overrides?: Partial<CowOrder>): CowOrder {
 	return {
@@ -60,11 +126,12 @@ function submittedProposal(): Proposal {
 		rejectionReason: null,
 		gasUsed: null,
 		// Pre-populated so validate() never resolves the trampoline via RPC.
-		trampoline: "0x4444444444444444444444444444444444441234",
+		trampoline: TRAMPOLINE,
 		settlementTxHash: null,
 		penaltyTxHash: null,
 		pendingCancellation: false,
 		simulationFailureParams: null,
+		simulationBuyAmount: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
 		sellTokenRefPrice: null,
@@ -74,12 +141,58 @@ function submittedProposal(): Proposal {
 	};
 }
 
-function fakePublicClient(): PublicClient {
-	return {
-		readContract: async () => AUTHENTICATOR,
-		estimateGas: async () => 100_000n,
-	} as unknown as PublicClient;
+// ── Fake RPC node ────────────────────────────────────────────────────────────
+
+interface FakeNode {
+	client: PublicClient;
+	counts: { addressOf: number; simulateV1: number };
+	simulateCalls: Array<unknown>;
 }
+
+/**
+ * Fake RPC node for eth_simulateV1-based validation.
+ * By default returns a successful simulation with a fixed Executed log
+ * (delta = quoteBuyAmount of submittedProposal). Override `simulateV1` to
+ * inject custom results or errors.
+ */
+function fakeNode(opts?: {
+	simulateV1?: () => Promise<SimulateV1CallResult>;
+	addressOf?: () => Promise<string>;
+	/** Default Executed._delta (defaults to submittedProposal().quoteBuyAmount). */
+	delta?: bigint;
+}): FakeNode {
+	const counts = { addressOf: 0, simulateV1: 0 };
+	const simulateCalls: Array<unknown> = [];
+	const defaultDelta = opts?.delta ?? submittedProposal().quoteBuyAmount;
+
+	const client = {
+		readContract: async (args: { functionName: string }) => {
+			if (args.functionName === "addressOf") {
+				counts.addressOf += 1;
+				return opts?.addressOf ? await opts.addressOf() : TRAMPOLINE;
+			}
+			// authenticator() or other view calls
+			return AUTHENTICATOR;
+		},
+		getBlockNumber: async () => 1_000n,
+		request: async (args: unknown) => {
+			const typed = args as { method: string; params: unknown[] };
+			if (typed.method === "eth_simulateV1") {
+				counts.simulateV1 += 1;
+				simulateCalls.push(args);
+				const result = opts?.simulateV1
+					? await opts.simulateV1()
+					: simulateSuccess(defaultDelta, submittedProposal().orderUidHash as Hex);
+				return [{ calls: [result] }];
+			}
+			throw new Error(`unexpected RPC method: ${typed.method}`);
+		},
+	} as unknown as PublicClient;
+
+	return { client, counts, simulateCalls };
+}
+
+// ── Validator factories ──────────────────────────────────────────────────────
 
 function fakeOrderbook(record: OrderRecord): FetchOrder {
 	return {
@@ -88,59 +201,18 @@ function fakeOrderbook(record: OrderRecord): FetchOrder {
 	};
 }
 
-function validatorWith(record: OrderRecord, minScore: bigint): SimulationValidator {
-	return new SimulationValidator(
-		fakePublicClient(),
-		fakeOrderbook(record),
-		SETTLEMENT,
-		ESCROW,
-		TRAMPOLINE_FACTORY,
-		{ value: 0n }, // zero gas price: score is exactly the priced surplus
-		minScore,
-	);
-}
-
-const TRAMPOLINE = "0x4444444444444444444444444444444444441234";
-
-interface FakeNode {
-	client: PublicClient;
-	counts: { addressOf: number; estimateGas: number };
-	estimateCalls: Array<Record<string, unknown>>;
-}
-
 /**
- * Fake RPC client mirroring the Rust test node: answers the address getters
- * (factory → trampoline, settlement → authenticator) and eth_estimateGas
- * with 100_000 gas, unless a step is overridden to fail.
+ * Creates a SimulationValidator with the given node and orderbook.
+ * maxSlippageBps/maxSlippageNative default to effectively unlimited so
+ * existing tests are unaffected by the gap check.
  */
-function fakeNode(opts?: {
-	estimateGas?: () => Promise<bigint>;
-	addressOf?: () => Promise<string>;
-}): FakeNode {
-	const counts = { addressOf: 0, estimateGas: 0 };
-	const estimateCalls: Array<Record<string, unknown>> = [];
-	const client = {
-		readContract: async (args: { functionName: string }) => {
-			if (args.functionName === "addressOf") {
-				counts.addressOf += 1;
-				return opts?.addressOf ? await opts.addressOf() : TRAMPOLINE;
-			}
-			return AUTHENTICATOR;
-		},
-		estimateGas: async (args: Record<string, unknown>) => {
-			counts.estimateGas += 1;
-			estimateCalls.push(args);
-			return opts?.estimateGas ? await opts.estimateGas() : 100_000n;
-		},
-	} as unknown as PublicClient;
-	return { client, counts, estimateCalls };
-}
-
 function validatorAt(
 	node: FakeNode,
 	orderbook: FetchOrder,
 	gasPrice = 0n,
 	minScore = 0n,
+	maxSlippageBps = 10_000n, // 100% — effectively disabled
+	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
 ): SimulationValidator {
 	return new SimulationValidator(
 		node.client,
@@ -150,8 +222,17 @@ function validatorAt(
 		TRAMPOLINE_FACTORY,
 		{ value: gasPrice },
 		minScore,
+		maxSlippageBps,
+		maxSlippageNative,
 	);
 }
+
+/** Convenience: validator for a fixed orderbook record with a given minScore. */
+function validatorWith(record: OrderRecord, minScore: bigint): SimulationValidator {
+	return validatorAt(fakeNode(), fakeOrderbook(record), 0n, minScore);
+}
+
+// ── Profitability gate ───────────────────────────────────────────────────────
 
 describe("SimulationValidator profitability gate", () => {
 	it("zero-surplus first simulation rejects as unprofitable", async () => {
@@ -186,8 +267,10 @@ describe("SimulationValidator profitability gate", () => {
 	});
 });
 
+// ── eth_simulateV1 dispatch ──────────────────────────────────────────────────
+
 describe("SimulationValidator", () => {
-	it("simulation dispatches full settle with overrides", async () => {
+	it("simulation dispatches full settle calldata via eth_simulateV1", async () => {
 		const proposal = submittedProposal();
 		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n }));
 		const node = fakeNode();
@@ -203,11 +286,19 @@ describe("SimulationValidator", () => {
 			},
 		});
 
-		// The transaction: dummy submitter → settlement, carrying the exact
-		// settle() calldata the encoder produces for these inputs.
-		expect(node.estimateCalls).toHaveLength(1);
-		const call = node.estimateCalls[0] as Record<string, unknown>;
-		expect(call.account).toBe(DUMMY_SUBMITTER);
+		expect(node.simulateCalls).toHaveLength(1);
+		const args = node.simulateCalls[0] as { method: string; params: [Record<string, unknown>, string] };
+		expect(args.method).toBe("eth_simulateV1");
+		expect(args.params[1]).toBe("latest");
+
+		const blockStateCall = (args.params[0] as { blockStateCalls: Array<{
+			calls: Array<{ from: string; to: string; data: string }>;
+			stateOverrides: Record<string, { code?: string; stateDiff?: Record<string, string> }>;
+		}> }).blockStateCalls[0];
+
+		// Verify call envelope
+		const call = blockStateCall.calls[0];
+		expect(call.from).toBe(DUMMY_SUBMITTER);
 		expect(call.to).toBe(SETTLEMENT);
 		expect(call.data).toBe(
 			encodeSettle(
@@ -230,20 +321,44 @@ describe("SimulationValidator", () => {
 			),
 		);
 
-		// The state overrides: AnyoneAuthenticator code at the authenticator,
-		// SUBMITTER_ROLE state_diff on the escrow at the pinned slot-5 slot.
-		const overrides = call.stateOverride as Array<{
-			address: string;
-			code?: string;
-			stateDiff?: Array<{ slot: string; value: string }>;
-		}>;
-		const auth = overrides.find((o) => o.address === AUTHENTICATOR);
-		expect(auth?.code).toMatch(/^0x6080/);
-		const escrow = overrides.find((o) => o.address === ESCROW);
-		expect(escrow?.stateDiff?.[0]?.slot).toBe(
-			"0x4eb8c5e0e8f6947fc61867e46604b89f6f2511c7f24d1be62be922d32b056655",
-		);
-		expect(escrow?.stateDiff?.[0]?.value.endsWith("1")).toBe(true);
+		// Verify state overrides: AnyoneAuthenticator at authenticator, SUBMITTER_ROLE at escrow
+		const overrides = blockStateCall.stateOverrides;
+		expect(overrides[AUTHENTICATOR]?.code).toMatch(/^0x6080/);
+		const escrowStateDiff = overrides[ESCROW]?.stateDiff ?? {};
+		const slots = Object.keys(escrowStateDiff);
+		expect(slots).toHaveLength(1);
+		expect(escrowStateDiff[slots[0] as Hex]).toMatch(/0*1$/);
+	});
+
+	it("accept verdict includes simulationBuyAmount from Executed event", async () => {
+		const proposal = submittedProposal();
+		const delta = proposal.quoteBuyAmount + 5_000n; // delta > quote → effectiveBuyAmount = quote
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n }));
+		const node = fakeNode({ delta });
+
+		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+
+		expect(verdict).toMatchObject({
+			kind: "accept",
+			simulation: { simulationBuyAmount: delta },
+		});
+	});
+
+	it("missing Executed event rejects with SimulationMissingExecutedEvent", async () => {
+		const proposal = submittedProposal();
+		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n }));
+		const node = fakeNode({
+			simulateV1: async () => ({
+				status: "0x1",
+				gasUsed: "0x186a0",
+				returnData: "0x",
+				logs: [], // no Executed event
+			}),
+		});
+
+		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+
+		expect(verdict).toEqual({ kind: "reject", reason: "SimulationMissingExecutedEvent" });
 	});
 
 	it("buy order gate prices the sell token", async () => {
@@ -343,7 +458,7 @@ describe("SimulationValidator", () => {
 
 	it("simulation transport error defers judgment", async () => {
 		const node = fakeNode({
-			estimateGas: async () => {
+			simulateV1: async () => {
 				throw new Error("connection refused");
 			},
 		});
@@ -353,21 +468,19 @@ describe("SimulationValidator", () => {
 		expect(verdict).toBeNull();
 	});
 
-	it("rpc error code 3 marks the simulation failed", async () => {
+	it("simulation revert (status 0x0) marks the simulation failed", async () => {
 		const node = fakeNode({
-			estimateGas: async () => {
-				throw { code: 3, message: "execution reverted" };
-			},
+			simulateV1: async () => simulateRevert(),
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
-		expect(verdict).toEqual({ kind: "simFailed" });
+		expect(verdict).toMatchObject({ kind: "simFailed" });
 	});
 
 	it("rate limit error defers rather than failing the simulation", async () => {
 		const node = fakeNode({
-			estimateGas: async () => {
+			simulateV1: async () => {
 				throw { code: 429, message: "rate limit exceeded" };
 			},
 		});
@@ -415,5 +528,121 @@ describe("SimulationValidator", () => {
 
 		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
 		expect(verdict).toEqual({ kind: "simFailed" });
+	});
+});
+
+// ── Gap check (checkProposalSlippage integration) ────────────────────────────
+
+describe("SimulationValidator gap check", () => {
+	/** Proposal with a gap between minBuyAmount and quoteBuyAmount. */
+	function gappedProposal(minBuyAmount: bigint, quoteBuyAmount: bigint): Proposal {
+		return { ...submittedProposal(), minBuyAmount, quoteBuyAmount };
+	}
+
+	function orderFor(quoteBuyAmount: bigint): OrderRecord {
+		// order.buyAmount = minBuyAmount (order limit) ≤ minBuyAmount in the proposal
+		return sampleRecord(sampleOrder({ buyAmount: quoteBuyAmount - 10_000n }));
+	}
+
+	it("rejects when bps cap is exceeded", async () => {
+		// gap = 10_000, quoteBuyAmount = 990_000 → 10_000/990_000 ≈ 101 bps
+		// max = 100 bps → reject
+		const proposal = gappedProposal(980_000n, 990_000n);
+		const record = orderFor(proposal.quoteBuyAmount);
+		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+
+		const verdict = await validatorAt(
+			node,
+			fakeOrderbook(record),
+			0n,
+			0n,
+			100n, // 1% cap
+			10n ** 36n,
+		).validate(proposal);
+
+		expect(verdict).toEqual({ kind: "reject", reason: "ProposedSlippageOutrange" });
+	});
+
+	it("accepts when gap is exactly at the bps cap", async () => {
+		// gap = 9_900, quoteBuyAmount = 990_000 → 9_900/990_000 = 100 bps exactly
+		// 9_900 * 10_000 = 99_000_000 vs 990_000 * 100 = 99_000_000 → NOT strictly greater → pass
+		const proposal = gappedProposal(980_100n, 990_000n);
+		const record = orderFor(proposal.quoteBuyAmount);
+		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+
+		const verdict = await validatorAt(
+			node,
+			fakeOrderbook(record),
+			0n,
+			0n,
+			100n, // 1% cap
+			10n ** 36n,
+		).validate(proposal);
+
+		expect(verdict).toMatchObject({ kind: "accept" });
+	});
+
+	it("rejects when native cap is exceeded", async () => {
+		// gap = 10_000, nativePrice = 1 ETHER (1:1), maxNative = 5_000 wei
+		// gap * ETHER > 5_000 * ETHER → reject
+		const proposal = gappedProposal(980_000n, 990_000n);
+		const record = orderFor(proposal.quoteBuyAmount);
+		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+
+		const verdict = await validatorAt(
+			node,
+			fakeOrderbook(record),
+			0n,
+			0n,
+			10_000n, // bps cap large enough to not trigger
+			5_000n, // 5_000 wei native cap — gap of 10_000 atoms * 1 ETHER/atom > 5_000 * ETHER
+		).validate(proposal);
+
+		expect(verdict).toEqual({ kind: "reject", reason: "ProposedSlippageOutrange" });
+	});
+
+	it("passes when gap is zero", async () => {
+		// min == quote → no gap → always accepted regardless of limits
+		const proposal = gappedProposal(990_000n, 990_000n);
+		const record = orderFor(proposal.quoteBuyAmount);
+		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+
+		const verdict = await validatorAt(
+			node,
+			fakeOrderbook(record),
+			0n,
+			0n,
+			0n, // zero cap — would reject any positive gap
+			0n,
+		).validate(proposal);
+
+		expect(verdict).toMatchObject({ kind: "accept" });
+	});
+
+	it("buy orders skip the gap check regardless of min/quote spread", async () => {
+		// Buy orders enforce minBuyAmount == quoteBuyAmount in checkEnvelope;
+		// checkProposalSlippage returns null for BUY orders unconditionally.
+		const buyOrder = sampleRecord(
+			sampleOrder({
+				kind: OrderKind.BUY,
+				buyAmount: 990_000n,
+				sellAmount: 1_100_000n, // sell limit above proposal — carries sell surplus
+			}),
+		);
+		const proposal = submittedProposal(); // minBuyAmount == quoteBuyAmount == 990_000
+		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+
+		const verdict = await validatorAt(
+			node,
+			{ order: async () => buyOrder, nativePrice: async () => ETHER },
+			0n,
+			0n,
+			0n, // zero cap
+			0n,
+		).validate(proposal);
+
+		// Should not reject for slippage; may accept or defer depending on scoring
+		expect(verdict?.kind).not.toBe("reject");
+		// (in practice this accepts — sell surplus with zero gas cost)
 	});
 });

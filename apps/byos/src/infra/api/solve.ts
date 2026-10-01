@@ -5,7 +5,7 @@ import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import { gasCutSize } from "../../domain/gas-cut.js";
-import type { Proposal } from "../../domain/proposal.js";
+import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
 	type Candidate,
 	effectiveGas,
@@ -137,7 +137,7 @@ export function createSolveRoute(config: SolveConfig) {
 					const exceeds =
 						order.kind === "sell"
 							? proposal.sellAmount > BigInt(order.sellAmount)
-							: proposal.quoteBuyAmount > BigInt(order.buyAmount);
+							: effectiveBuyAmount(proposal) > BigInt(order.buyAmount);
 					if (exceeds) continue;
 				}
 
@@ -149,7 +149,7 @@ export function createSolveRoute(config: SolveConfig) {
 					orderSell: BigInt(order.sellAmount),
 					orderBuy: BigInt(order.buyAmount),
 					proposalSell: proposal.sellAmount,
-					proposalBuy: proposal.quoteBuyAmount,
+					proposalBuy: effectiveBuyAmount(proposal),
 					isSellOrder: order.kind === "sell",
 					gasCost,
 				};
@@ -292,7 +292,7 @@ function buildSolution(
 	return {
 		id,
 		prices: {
-			[order.sellToken]: proposal.quoteBuyAmount.toString(),
+			[order.sellToken]: effectiveBuyAmount(proposal).toString(),
 			[order.buyToken]: proposal.sellAmount.toString(),
 		},
 		trades: [trade],

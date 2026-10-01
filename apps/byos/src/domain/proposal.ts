@@ -36,6 +36,28 @@ export interface Proposal {
 	auctionGasPrice: string | null;
 	/** Clearing prices map at settlement time: { [tokenAddress]: decimalString } */
 	clearingPrices: Record<string, string> | null;
+	/**
+	 * Buy token amount received by the trampoline during simulation (Executed._delta).
+	 * Null for proposals validated before this feature or that failed before simulation.
+	 */
+	simulationBuyAmount: bigint | null;
+}
+
+/**
+ * The effective buy amount for scoring and clearing price computation.
+ * Uses simulationBuyAmount when it is lower than quoteBuyAmount — the simulation
+ * is the source of truth for what the route actually delivered, so we never
+ * promise more than we observed. Falls back to quoteBuyAmount when simulationBuyAmount
+ * is null (pre-feature proposals or proposals that failed before simulation).
+ */
+export function effectiveBuyAmount(proposal: Proposal): bigint {
+	if (
+		proposal.simulationBuyAmount !== null &&
+		proposal.simulationBuyAmount < proposal.quoteBuyAmount
+	) {
+		return proposal.simulationBuyAmount;
+	}
+	return proposal.quoteBuyAmount;
 }
 
 /** What the driver reported about a settlement. */

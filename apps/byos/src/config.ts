@@ -68,6 +68,18 @@ export const configSchema = z.object({
 	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
+	// Slippage protection (ADR-0019)
+	/** Maximum allowed gap between minBuyAmount and quoteBuyAmount, in basis points. */
+	MAX_PROPOSAL_SLIPPAGE_BPS: z
+		.string()
+		.regex(/^\d+$/, "Must be a decimal integer")
+		.default("100"),
+	/** Maximum allowed gap between minBuyAmount and quoteBuyAmount, in native token wei. */
+	MAX_PROPOSAL_SLIPPAGE_NATIVE: z
+		.string()
+		.regex(/^\d+$/, "Must be a decimal wei amount")
+		.default("1000000000000000000"),
+
 	// Rate limiting (ADR-0015). All are operational tuning parameters —
 	// the defaults are sized from the reference client's poll volume, not
 	// from measured traffic. See COW-1265 before going public.
