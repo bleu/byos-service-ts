@@ -4,9 +4,10 @@ import {
 	type RejectionReason,
 	type SettlementInteraction,
 } from "@byos/common";
+import { parseEther } from "viem";
 import type { Proposal } from "./proposal.js";
 
-const NATIVE_PRICE_SCALE = 10n ** 18n;
+const NATIVE_PRICE_SCALE = parseEther("1");
 
 /** Immutable orderbook order with its pre/post hook interactions. */
 export interface OrderRecord {
