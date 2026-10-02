@@ -1,4 +1,5 @@
 import type { Address, Hex } from "viem";
+import { parseEther } from "viem";
 
 export interface OrderbookOrder {
 	uid: Hex;
@@ -31,7 +32,7 @@ interface AuctionDto {
 	tokens?: Record<string, { referencePrice?: string | null }>;
 }
 
-const NATIVE_PRICE_SCALE = 10n ** 18n;
+const NATIVE_PRICE_SCALE = parseEther("1");
 
 function nativeValue(amount: bigint, referencePrice: string | null | undefined): bigint {
 	return referencePrice ? (amount * BigInt(referencePrice)) / NATIVE_PRICE_SCALE : 0n;

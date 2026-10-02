@@ -119,6 +119,12 @@ export const RejectionReason = {
 	SubsolverOutbid: "SubsolverOutbid",
 	/** An external solver won the CoW auction — the on-chain settlement reverted with "GPv2: order filled". */
 	SolverOutbid: "SolverOutbid",
+	/** The gap between minBuyAmount and quoteBuyAmount exceeds the configured bps or native-token cap. */
+	ProposedSlippageOutrange: "ProposedSlippageOutrange",
+	/** Simulation succeeded but the trampoline did not emit an Executed event. */
+	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
+	/** Buy-token native price is unavailable — cannot evaluate the native-amount slippage cap. */
+	NativePriceUnavailable: "NativePriceUnavailable",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -133,6 +139,9 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.Unprofitable,
 	RejectionReason.SubsolverOutbid,
 	RejectionReason.SolverOutbid,
+	RejectionReason.ProposedSlippageOutrange,
+	RejectionReason.SimulationMissingExecutedEvent,
+	RejectionReason.NativePriceUnavailable,
 ]);
 
 // --- Proposal Metadata ---

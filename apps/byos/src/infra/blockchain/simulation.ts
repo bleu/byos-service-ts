@@ -34,13 +34,20 @@ export interface SimulationParams {
 	submitter?: Address;
 }
 
+/**
+ * State override entry for eth_simulateV1.
+ * stateDiff uses { [slot]: value } object format (Geth's simOpts shape),
+ * not the array format used by eth_estimateGas.
+ */
+export interface SimulationStateOverride {
+	address: Address;
+	code?: Hex;
+	stateDiff?: Record<Hex, Hex>;
+}
+
 export interface SimulationResult {
 	calldata: Hex;
-	stateOverride: Array<{
-		address: Address;
-		code?: Hex;
-		stateDiff?: Array<{ slot: Hex; value: Hex }>;
-	}>;
+	stateOverride: SimulationStateOverride[];
 }
 
 /**
@@ -85,7 +92,7 @@ export function buildSimulation(
 			},
 			{
 				address: params.escrow,
-				stateDiff: [{ slot: submitterRoleSlot(submitter), value: pad(toHex(1), { size: 32 }) }],
+				stateDiff: { [submitterRoleSlot(submitter)]: pad(toHex(1), { size: 32 }) },
 			},
 		);
 	}
