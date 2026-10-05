@@ -4,7 +4,10 @@ import {
 	type RejectionReason,
 	type SettlementInteraction,
 } from "@byos/common";
+import { parseEther } from "viem";
 import type { Proposal } from "./proposal.js";
+
+const NATIVE_PRICE_SCALE = parseEther("1");
 
 /** Immutable orderbook order with its pre/post hook interactions. */
 export interface OrderRecord {
@@ -38,6 +41,38 @@ export function checkEnvelope(record: OrderRecord, proposal: Proposal): Rejectio
 		return checkPartialFill(record.order, proposal);
 	}
 	return checkFillOrKill(record.order, proposal);
+}
+
+/**
+ * Checks that the gap between minBuyAmount and quoteBuyAmount is within the
+ * configured limits. Only applies to sell orders — buy orders always enforce
+ * minBuyAmount == quoteBuyAmount in checkEnvelope.
+ *
+ * Rejects if EITHER cap is exceeded:
+ *   - bps cap:    gap * 10000 > quoteBuyAmount * maxSlippageBps
+ *   - native cap: gap * nativePrice / NATIVE_PRICE_SCALE > maxSlippageNative
+ */
+export function checkProposalSlippage(
+	record: OrderRecord,
+	proposal: Proposal,
+	nativePrice: bigint,
+	maxSlippageBps: bigint,
+	maxSlippageNative: bigint,
+): RejectionReason | null {
+	if (record.order.kind !== OrderKind.SELL) return null;
+
+	const gap = proposal.quoteBuyAmount - proposal.minBuyAmount;
+	if (gap <= 0n) return null;
+
+	if (gap * 10000n > proposal.quoteBuyAmount * maxSlippageBps) {
+		return "ProposedSlippageOutrange";
+	}
+
+	if (gap * nativePrice > maxSlippageNative * NATIVE_PRICE_SCALE) {
+		return "ProposedSlippageOutrange";
+	}
+
+	return null;
 }
 
 function checkFillOrKill(order: CowOrder, proposal: Proposal): RejectionReason | null {

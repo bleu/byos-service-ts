@@ -1,6 +1,6 @@
 import { type CowOrder, OrderKind, SigningScheme } from "@byos/common";
 import { describe, expect, it } from "vitest";
-import { checkEnvelope, type OrderRecord } from "../order.js";
+import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../order.js";
 import type { Proposal } from "../proposal.js";
 
 function sampleOrder(): CowOrder {
@@ -54,6 +54,7 @@ function matchingProposal(overrides?: Partial<Proposal>): Proposal {
 		penaltyTxHash: null,
 		pendingCancellation: false,
 		simulationFailureParams: null,
+		simulationBuyAmount: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
 		sellTokenRefPrice: null,
@@ -255,5 +256,89 @@ describe("order envelope", () => {
 			});
 			expect(checkEnvelope(record, proposal)).toBe("AmountMismatch");
 		});
+	});
+});
+
+describe("checkProposalSlippage", () => {
+	const NATIVE_PRICE_SCALE = 10n ** 18n;
+
+	const sellRecord = sampleRecord();
+
+	it("returns null for buy orders regardless of gap", () => {
+		const proposal = matchingProposal({ minBuyAmount: 0n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(
+			{ ...sellRecord, order: { ...sellRecord.order, kind: OrderKind.BUY } },
+			proposal,
+			NATIVE_PRICE_SCALE,
+			0n, // zero bps cap — would reject any positive gap
+			0n, // zero native cap
+		);
+		expect(result).toBeNull();
+	});
+
+	it("returns null when gap is zero", () => {
+		const proposal = matchingProposal({ minBuyAmount: 990_000n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(sellRecord, proposal, NATIVE_PRICE_SCALE, 0n, 0n);
+		expect(result).toBeNull();
+	});
+
+	it("rejects when bps cap is strictly exceeded", () => {
+		// gap = 10_000, quote = 990_000 → 10_000/990_000 ≈ 101 bps > 100 bps cap
+		const proposal = matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(
+			sellRecord,
+			proposal,
+			NATIVE_PRICE_SCALE,
+			100n, // 1% cap
+			10n ** 36n, // huge native cap — only bps triggers
+		);
+		expect(result).toBe("ProposedSlippageOutrange");
+	});
+
+	it("passes when gap equals the bps cap exactly", () => {
+		// gap = 9_900, quote = 990_000 → 9_900 * 10_000 == 990_000 * 100 (not strictly greater)
+		const proposal = matchingProposal({ minBuyAmount: 980_100n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(
+			sellRecord,
+			proposal,
+			NATIVE_PRICE_SCALE,
+			100n,
+			10n ** 36n,
+		);
+		expect(result).toBeNull();
+	});
+
+	it("rejects when native cap is strictly exceeded", () => {
+		// nativePrice = 1 ETHER (1:1 with atoms), gap = 10_000 atoms
+		// gap * ETHER = 10_000 * 1e18 > 9_999 * 1e18 = maxNative * ETHER → reject
+		const proposal = matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(
+			sellRecord,
+			proposal,
+			NATIVE_PRICE_SCALE,
+			10_000n, // bps cap large enough to not trigger
+			9_999n, // native cap: gap of 10_000 atoms at 1 ETHER exceeds this
+		);
+		expect(result).toBe("ProposedSlippageOutrange");
+	});
+
+	it("passes when gap is exactly at the native cap", () => {
+		// gap = 10_000, nativePrice = 1 ETHER, maxNative = 10_000
+		// gap * ETHER = maxNative * ETHER — not strictly greater
+		const proposal = matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(
+			sellRecord,
+			proposal,
+			NATIVE_PRICE_SCALE,
+			10_000n,
+			10_000n,
+		);
+		expect(result).toBeNull();
+	});
+
+	it("rejects when both caps are exceeded (bps fires first)", () => {
+		const proposal = matchingProposal({ minBuyAmount: 980_000n, quoteBuyAmount: 990_000n });
+		const result = checkProposalSlippage(sellRecord, proposal, NATIVE_PRICE_SCALE, 100n, 9_999n);
+		expect(result).toBe("ProposedSlippageOutrange");
 	});
 });

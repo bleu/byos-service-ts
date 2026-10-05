@@ -8,6 +8,8 @@ export interface SimulationOutcome {
 	trampoline: Address;
 	sellToken: Address;
 	buyToken: Address;
+	/** Buy token amount received by the trampoline (Executed._delta). */
+	simulationBuyAmount: bigint;
 }
 
 /** Parameters captured at simulation revert time — stored for permanent debug access. */

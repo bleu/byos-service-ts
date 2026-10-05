@@ -46,12 +46,10 @@ describe("simulation state overrides", () => {
 		});
 
 		const escrowOverride = sim.stateOverride.find((o) => o.address === ESCROW);
-		expect(escrowOverride?.stateDiff).toEqual([
-			{
-				slot: "0x4eb8c5e0e8f6947fc61867e46604b89f6f2511c7f24d1be62be922d32b056655",
-				value: `0x${"00".repeat(31)}01`,
-			},
-		]);
+		// stateDiff is now a Record<Hex, Hex> map rather than an array
+		expect(escrowOverride?.stateDiff).toEqual({
+			"0x4eb8c5e0e8f6947fc61867e46604b89f6f2511c7f24d1be62be922d32b056655": `0x${"00".repeat(31)}01`,
+		});
 
 		// The other override injects AnyoneAuthenticator code at the
 		// authenticator address so isSolver() passes for the dummy submitter.

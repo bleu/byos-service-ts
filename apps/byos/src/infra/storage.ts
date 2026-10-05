@@ -297,6 +297,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		surplusTokenRefPrice: row.surplusTokenRefPrice ?? null,
 		auctionGasPrice: row.auctionGasPrice ?? null,
 		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
+		simulationBuyAmount: row.simulationBuyAmount != null ? BigInt(row.simulationBuyAmount) : null,
 	};
 }
 
@@ -570,6 +571,7 @@ export async function resolveVerdict(
 		let sellToken: string | null = null;
 		let buyToken: string | null = null;
 		let simulationFailureParams: unknown | null = null;
+		let simulationBuyAmount: string | null = null;
 
 		switch (verdict.kind) {
 			case "accept":
@@ -592,6 +594,7 @@ export async function resolveVerdict(
 					trampoline = verdict.simulation.trampoline.toLowerCase();
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
+					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
 				}
 				break;
 			case "reject":
@@ -623,6 +626,7 @@ export async function resolveVerdict(
 				...(sellToken ? { sellToken } : {}),
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
+				simulationBuyAmount,
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
@@ -1378,6 +1382,7 @@ export async function solutionProposals(
 			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
 			auctionGasPrice: proposals.auctionGasPrice,
 			clearingPrices: proposals.clearingPrices,
+			simulationBuyAmount: proposals.simulationBuyAmount,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})
