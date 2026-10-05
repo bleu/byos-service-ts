@@ -91,6 +91,9 @@ export function proposalToGetResponse(p: Proposal) {
 		...(p.surplusTokenRefPrice !== null ? { surplusTokenRefPrice: p.surplusTokenRefPrice } : {}),
 		...(p.auctionGasPrice !== null ? { auctionGasPrice: p.auctionGasPrice } : {}),
 		...(p.clearingPrices !== null ? { clearingPrices: p.clearingPrices } : {}),
+		...(p.simulationBuyAmount !== null
+			? { simulationBuyAmount: p.simulationBuyAmount.toString() }
+			: {}),
 	};
 }
 
