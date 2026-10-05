@@ -93,10 +93,12 @@ function sdkOrderToRecord(
 	//      returns invalid.
 	// Restore both fields to their on-chain values when ethflowData is present.
 	const isEthFlow = !!sdkOrder.ethflowData;
-	// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-	const wrappedToken = getWrappedTokenForChain(chainId)!;
+	const wrappedToken = getWrappedTokenForChain(chainId);
+	if (isEthFlow && !wrappedToken) {
+		throw new Error(`No wrapped native token for chainId ${chainId}`);
+	}
 	const sellToken = isEthFlow
-		? (wrappedToken.address as Address)
+		? (wrappedToken?.address as Address)
 		: (sdkOrder.sellToken as Address);
 	// EthFlow CoW Protocol orders always use validTo = type(uint32).max so the
 	// order never expires at the protocol level (the EthFlow contract enforces its
