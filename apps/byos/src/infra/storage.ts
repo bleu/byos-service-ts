@@ -626,7 +626,7 @@ export async function resolveVerdict(
 				...(sellToken ? { sellToken } : {}),
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
-				simulationBuyAmount,
+				...(simulationBuyAmount != null ? { simulationBuyAmount } : {}),
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
