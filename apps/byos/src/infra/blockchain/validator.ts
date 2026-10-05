@@ -104,11 +104,13 @@ function extractRevertReasonFromHex(data: Hex | undefined): string | null {
 
 /**
  * Reads revert data from a simulateV1 call result.
- * dRPC returns it in returnData for most reverts, falling back to error.data.
+ * Most chains (Geth, OP-stack) put the ABI-encoded revert payload in error.data;
+ * BNB puts it in returnData. Check error.data first, fall back to returnData.
  */
 function revertDataFrom(call: SimulateV1CallResult): Hex | undefined {
+	if (call.error?.data && call.error.data !== "0x") return call.error.data;
 	if (call.returnData && call.returnData !== "0x") return call.returnData;
-	return call.error?.data;
+	return undefined;
 }
 
 /**
@@ -357,7 +359,8 @@ export class SimulationValidator implements ValidateProposal {
 		// Step 8: Handle revert
 		if (call.status === "0x0") {
 			const revertData = revertDataFrom(call);
-			const revertReason = extractRevertReasonFromHex(revertData) ?? undefined;
+			const revertReason =
+				extractRevertReasonFromHex(revertData) ?? call.error?.message ?? "execution reverted";
 
 			const chainId = this.publicClient.chain?.id;
 			let blockNumber: bigint | undefined;
