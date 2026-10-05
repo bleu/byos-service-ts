@@ -1,7 +1,7 @@
 import type { SettlementInteraction } from "@byos/common";
 import { type CowOrder, OrderKind, SigningScheme } from "@byos/common";
 import type { SupportedChainId } from "@cowprotocol/cow-sdk";
-import { OrderBookApi, OrderBookApiError } from "@cowprotocol/cow-sdk";
+import { getWrappedTokenForChain, OrderBookApi, OrderBookApiError } from "@cowprotocol/cow-sdk";
 import type { Address, Hex } from "viem";
 import type { OrderRecord } from "../domain/order.js";
 
@@ -75,17 +75,44 @@ function mapSigningScheme(scheme: string): SigningScheme {
 	}
 }
 
-function sdkOrderToRecord(sdkOrder: Awaited<ReturnType<OrderBookApi["getOrder"]>>): OrderRecord {
+function sdkOrderToRecord(
+	sdkOrder: Awaited<ReturnType<OrderBookApi["getOrder"]>>,
+	chainId: SupportedChainId,
+): OrderRecord {
 	const erc20Balances =
 		sdkOrder.sellTokenBalance === "erc20" && sdkOrder.buyTokenBalance === "erc20";
 
+	// The SDK's transformEthFlowOrder mutates EthFlow orders in two ways that
+	// break settlement:
+	//   1. sellToken → ETH sentinel (0xEeeE...) — subsolvers propose WETH, so
+	//      checkEnvelope would always reject with TokenMismatch.
+	//   2. validTo → ethflowData.userValidTo (the user's short expiry, e.g. 600s)
+	//      instead of the CoW Protocol order's validTo = 0xffffffff. GPv2Settlement
+	//      computes the order hash from the trade data; if validTo differs from
+	//      what the EthFlow contract stored (always 0xffffffff), isValidSignature
+	//      returns invalid.
+	// Restore both fields to their on-chain values when ethflowData is present.
+	const isEthFlow = !!sdkOrder.ethflowData;
+	const wrappedToken = getWrappedTokenForChain(chainId);
+	if (isEthFlow && !wrappedToken) {
+		throw new Error(`No wrapped native token for chainId ${chainId}`);
+	}
+	const sellToken = isEthFlow
+		? (wrappedToken?.address as Address)
+		: (sdkOrder.sellToken as Address);
+	// EthFlow CoW Protocol orders always use validTo = type(uint32).max so the
+	// order never expires at the protocol level (the EthFlow contract enforces its
+	// own expiry via isValidSignature). The SDK replaces this with userValidTo for
+	// display, but we need the protocol value for settlement hash computation.
+	const validTo = isEthFlow ? 0xffffffff : sdkOrder.validTo;
+
 	const order: CowOrder = {
-		sellToken: sdkOrder.sellToken as Address,
+		sellToken,
 		buyToken: sdkOrder.buyToken as Address,
 		receiver: (sdkOrder.receiver ?? "0x0000000000000000000000000000000000000000") as Address,
 		sellAmount: BigInt(sdkOrder.sellAmount),
 		buyAmount: BigInt(sdkOrder.buyAmount),
-		validTo: sdkOrder.validTo,
+		validTo,
 		appData: sdkOrder.appData as Hex,
 		feeAmount: BigInt(sdkOrder.feeAmount),
 		kind: mapKind(sdkOrder.kind),
@@ -126,7 +153,7 @@ export class OrderbookClient implements FetchOrder {
 	private readonly api: OrderBookApi;
 
 	constructor(
-		chainId: SupportedChainId,
+		private readonly chainId: SupportedChainId,
 		baseUrlOverride?: string,
 		private readonly cacheCapacity: number = CACHE_CAPACITY,
 	) {
@@ -161,7 +188,7 @@ export class OrderbookClient implements FetchOrder {
 		}
 
 		// sdkOrderToRecord may throw OrderbookError (mapKind / mapSigningScheme)
-		const record = sdkOrderToRecord(sdkOrder);
+		const record = sdkOrderToRecord(sdkOrder, this.chainId);
 
 		this.remember(uid, record);
 		return record;

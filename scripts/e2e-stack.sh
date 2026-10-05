@@ -85,6 +85,7 @@ bake_byos_contracts() {
 ESCROW_ADDRESS=$escrow
 TRAMPOLINE_FACTORY=$trampoline_factory
 OPERATOR_PRIVATE_KEY=$operator_private_key
+RPC_URL=http://localhost:8545
 ENVEOF
 
   echo ""
