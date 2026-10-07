@@ -38,10 +38,10 @@ async function main() {
 	}
 
 	// Semaphore for fire-and-forget immediate validations. Capped well below the
-	// background worker's VALIDATION_CONCURRENCY=8 so concurrent submissions
+	// background worker's VALIDATION_CONCURRENCY=50 so concurrent submissions
 	// cannot starve the scheduled validator of RPC budget.
 	let activeImmediateValidations = 0;
-	const IMMEDIATE_VALIDATION_CONCURRENCY = 2;
+	const IMMEDIATE_VALIDATION_CONCURRENCY = 40;
 
 	const publicApp = createPublicApp({
 		db: ctx.db,

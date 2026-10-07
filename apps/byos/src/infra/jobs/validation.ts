@@ -13,7 +13,7 @@ import * as store from "../storage.js";
  * request burst against paid-RPC rate limits — the same protection as the
  * Rust loop's 8-permit semaphore.
  */
-const VALIDATION_CONCURRENCY = 8;
+const VALIDATION_CONCURRENCY = 50;
 
 export interface ValidationTickConfig {
 	db: Db;
