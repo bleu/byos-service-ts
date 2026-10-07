@@ -29,6 +29,19 @@ export const configSchema = z.object({
 
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
+	/** Comma-separated list of allowed sub-solver addresses (e.g. 0xabc...,0x123...).
+	 * If absent or empty, all sub-solvers are admitted. */
+	SUBSOLVER_WHITELIST: z
+		.string()
+		.optional()
+		.transform((v) => {
+			if (!v) return null;
+			const addrs = v
+				.split(",")
+				.map((a) => a.trim().toLowerCase())
+				.filter(Boolean);
+			return addrs.length > 0 ? new Set(addrs) : null;
+		}),
 
 	// Chain connectivity
 	RPC_URL: z.string(),

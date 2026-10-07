@@ -78,6 +78,7 @@ async function main() {
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,
 		rateLimits: ctx.rateLimits,
+		subsolverWhitelist: config.SUBSOLVER_WHITELIST,
 	});
 
 	const internalApp = createInternalApp({
