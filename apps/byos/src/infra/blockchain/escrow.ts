@@ -9,17 +9,19 @@ export interface GasPriceRef {
 }
 
 /**
- * Returns the `gasUsed` values for all in-flight proposals of a sub-solver,
- * excluding the proposal currently being validated. `null` means the proposal
- * has not been simulated yet (gas estimate unknown).
+ * Returns all in-flight proposals for a sub-solver with their gas estimates.
+ * Does NOT exclude the proposal being validated — exclusion is applied in memory
+ * so the result can be shared across concurrent validations of the same sub-solver.
  */
 export type FetchInflightGasUsed = (
 	subSolver: Address,
-	excludeId: number,
-) => Promise<(bigint | null)[]>;
+) => Promise<{ id: number; gasUsed: bigint | null }[]>;
 
 export class EscrowValidator implements ValidateProposal {
 	private cache = new Map<string, bigint>();
+	// Promise-coalescing cache: concurrent validations for the same sub-solver
+	// share one DB round-trip. Cleared each tick so data never goes stale.
+	private inflightCache = new Map<string, Promise<{ id: number; gasUsed: bigint | null }[]>>();
 
 	constructor(
 		private readonly publicClient: PublicClient,
@@ -40,6 +42,7 @@ export class EscrowValidator implements ValidateProposal {
 
 	beginTick(): void {
 		this.cache.clear();
+		this.inflightCache.clear();
 	}
 
 	private async getBalance(subSolver: Address): Promise<bigint> {
@@ -66,8 +69,16 @@ export class EscrowValidator implements ValidateProposal {
 	 */
 	private async cumulativeExposure(subSolver: Address, excludeId: number): Promise<bigint> {
 		if (!this.fetchInflightGasUsed) return 0n;
-		const gasUsedList = await this.fetchInflightGasUsed(subSolver, excludeId);
-		return gasUsedList.reduce<bigint>((sum, gas) => sum + this.threshold(gas ?? 0n), 0n);
+		const key = subSolver.toLowerCase();
+		let promise = this.inflightCache.get(key);
+		if (!promise) {
+			promise = this.fetchInflightGasUsed(subSolver);
+			this.inflightCache.set(key, promise);
+		}
+		const entries = await promise;
+		return entries
+			.filter((e) => e.id !== excludeId)
+			.reduce<bigint>((sum, e) => sum + this.threshold(e.gasUsed ?? 0n), 0n);
 	}
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {
