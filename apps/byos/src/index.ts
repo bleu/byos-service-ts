@@ -37,11 +37,9 @@ async function main() {
 		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
-	// Semaphore for fire-and-forget immediate validations. Capped well below the
-	// background worker's VALIDATION_CONCURRENCY=50 so concurrent submissions
-	// cannot starve the scheduled validator of RPC budget.
+	// Semaphore for fire-and-forget immediate validations.
 	let activeImmediateValidations = 0;
-	const IMMEDIATE_VALIDATION_CONCURRENCY = 40;
+	const immediateConcurrency = config.IMMEDIATE_VALIDATION_CONCURRENCY;
 
 	const publicApp = createPublicApp({
 		db: ctx.db,
@@ -53,7 +51,7 @@ async function main() {
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
 		runImmediateValidation: async (proposalId) => {
-			if (activeImmediateValidations >= IMMEDIATE_VALIDATION_CONCURRENCY) {
+			if (activeImmediateValidations >= immediateConcurrency) {
 				logger
 					.child({ worker: "immediate-validation" })
 					.debug({ id: proposalId }, "immediate validation skipped — concurrency limit");
@@ -142,12 +140,16 @@ async function main() {
 		logger: logger.child({ worker: "validation" }),
 	});
 
-	const proposalValidationWorker = createProposalValidationWorker(ctx.redis, {
-		db: ctx.db,
-		validator: ctx.validator,
-		onAuditEvent: ctx.onAuditEvent,
-		logger: logger.child({ worker: "validate-proposal" }),
-	});
+	const proposalValidationWorker = createProposalValidationWorker(
+		ctx.redis,
+		{
+			db: ctx.db,
+			validator: ctx.validator,
+			onAuditEvent: ctx.onAuditEvent,
+			logger: logger.child({ worker: "validate-proposal" }),
+		},
+		config.VALIDATION_CONCURRENCY,
+	);
 
 	const retentionWorker = createRetentionWorker(ctx.redis, {
 		db: ctx.db,

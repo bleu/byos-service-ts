@@ -75,7 +75,7 @@ export function createSharedPublicClient(chain: Chain, transport: Transport): Pu
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
 	// Database
-	const { db, client: dbClient } = createDb(config.DATABASE_URL);
+	const { db, client: dbClient } = createDb(config.DATABASE_URL, config.VALIDATION_CONCURRENCY);
 	const migrationsFolder = resolve(import.meta.dirname, "../drizzle");
 	await migrate(db, { migrationsFolder });
 	logger.info("database connected and migrated");

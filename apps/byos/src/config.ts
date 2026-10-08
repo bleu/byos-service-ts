@@ -71,6 +71,13 @@ export const configSchema = z.object({
 		.default("10000000000000000"),
 	DEFAULT_GAS_PRICE: z.string(),
 
+	// Concurrency
+	/** Max concurrent background proposal validations (BullMQ worker). Also
+	 * used as the DB connection pool size so the pool is never the bottleneck. */
+	VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(50),
+	/** Max concurrent fire-and-forget immediate validations on the request path. */
+	IMMEDIATE_VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(40),
+
 	// Timing
 	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
 	DROPPED_RETENTION_SECS: z.coerce.number().default(3600),
