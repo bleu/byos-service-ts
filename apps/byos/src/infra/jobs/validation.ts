@@ -7,7 +7,6 @@ import type { ValidateProposal } from "../../domain/validator.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 
-
 export interface ValidationTickConfig {
 	db: Db;
 	validator: ValidateProposal;

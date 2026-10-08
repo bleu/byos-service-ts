@@ -187,7 +187,8 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 		// Two in-flight proposals each costing THRESHOLD → total 2 × THRESHOLD.
 		// Balance = 2 × THRESHOLD is not enough to accept a third.
 		const inflightGas = 200_000n;
-		const fetchInflight: FetchInflightGasUsed = async () => inflightEntries(inflightGas, inflightGas);
+		const fetchInflight: FetchInflightGasUsed = async () =>
+			inflightEntries(inflightGas, inflightGas);
 
 		const balance = 2n * THRESHOLD; // exactly covers the two in-flight proposals
 

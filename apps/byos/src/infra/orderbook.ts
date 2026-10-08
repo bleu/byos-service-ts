@@ -3,7 +3,7 @@ import { type CowOrder, OrderKind, SigningScheme } from "@byos/common";
 import type { SupportedChainId } from "@cowprotocol/cow-sdk";
 import { getWrappedTokenForChain, OrderBookApi, OrderBookApiError } from "@cowprotocol/cow-sdk";
 import type { Address, Hex } from "viem";
-import type { OrderRecord, OrderStatus } from "../domain/order.js";
+import type { OrderRecord } from "../domain/order.js";
 
 // --- Error ---
 

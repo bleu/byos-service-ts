@@ -159,8 +159,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// Escrow validators — two independent instances so the tick's beginTick()
 	// (which clears the balance cache) never races with in-flight immediate
 	// validations that are currently reading from their own cached balances.
-	const inflightFetch = (subSolver: Address) =>
-		store.inflightGasUsedBySubSolver(db, subSolver);
+	const inflightFetch = (subSolver: Address) => store.inflightGasUsedBySubSolver(db, subSolver);
 	const escrowValidator = new EscrowValidator(
 		publicClient,
 		escrowAddress,
