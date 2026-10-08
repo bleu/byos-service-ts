@@ -64,7 +64,7 @@ async function main() {
 				await runProposalValidation(
 					{
 						db: ctx.db,
-						validator: ctx.validator,
+						validator: ctx.immediateValidator,
 						onAuditEvent: ctx.onAuditEvent,
 						logger: logger.child({ worker: "immediate-validation" }),
 					},
