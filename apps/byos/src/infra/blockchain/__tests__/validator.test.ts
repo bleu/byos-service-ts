@@ -1,4 +1,4 @@
-import { type CowOrder, encodeSettle, OrderKind, SigningScheme, TrampolineAbi } from "@byos/common";
+import { type CowOrder, encodeSettle, OrderKind, OrderStatus, SigningScheme, TrampolineAbi } from "@byos/common";
 import {
 	type Address,
 	encodeAbiParameters,
@@ -103,6 +103,7 @@ function sampleRecord(order: CowOrder): OrderRecord {
 		preInteractions: [],
 		postInteractions: [],
 		erc20Balances: true,
+		status: OrderStatus.OPEN,
 	};
 }
 
