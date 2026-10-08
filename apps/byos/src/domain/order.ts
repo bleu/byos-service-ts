@@ -1,6 +1,7 @@
 import {
 	type CowOrder,
 	OrderKind,
+	type OrderStatus,
 	type RejectionReason,
 	type SettlementInteraction,
 } from "@byos/common";
@@ -9,6 +10,8 @@ import type { Proposal } from "./proposal.js";
 
 const NATIVE_PRICE_SCALE = parseEther("1");
 
+export type { OrderStatus };
+
 /** Immutable orderbook order with its pre/post hook interactions. */
 export interface OrderRecord {
 	order: CowOrder;
@@ -16,6 +19,7 @@ export interface OrderRecord {
 	postInteractions: SettlementInteraction[];
 	/** True if both sell and buy token balances are erc20 (not Balancer vault). */
 	erc20Balances: boolean;
+	status: OrderStatus;
 }
 
 /**

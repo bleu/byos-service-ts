@@ -1280,32 +1280,30 @@ export async function listBySubSolver(
 }
 
 /**
- * Returns the gas used for all proposals of a sub-solver that are in-flight
- * (`submitted`, `active`, or `executing`), excluding one proposal by id (the
- * one being validated). Used by EscrowValidator to compute cumulative exposure.
+ * Returns the id and gasUsed for all in-flight proposals of a sub-solver
+ * (`submitted`, `active`, or `executing`). The caller excludes the proposal
+ * being validated in memory so the full result can be cached per sub-solver
+ * and reused across concurrent validations.
  *
- * `submitted` proposals have not been simulated yet, so their `gasUsed` is
- * null — they contribute 0 gas to the exposure (minCollateral only).
- * `active` proposals have been simulated and carry a real gas estimate.
+ * `submitted` proposals have not been simulated yet — gasUsed is null.
+ * `active` proposals carry a real gas estimate from simulation.
  * `executing` proposals may or may not have a gas estimate; same rule applies.
  */
 export async function inflightGasUsedBySubSolver(
 	db: Db,
 	subSolver: Address,
-	excludeId: number,
-): Promise<(bigint | null)[]> {
+): Promise<{ id: number; gasUsed: bigint | null }[]> {
 	const rows = await db
-		.select({ gasUsed: proposals.gasUsed })
+		.select({ id: proposals.id, gasUsed: proposals.gasUsed })
 		.from(proposals)
 		.where(
 			and(
 				eq(proposals.subSolver, subSolver.toLowerCase()),
 				inArray(proposals.status, ["submitted", "active", "executing"]),
-				sql`${proposals.id} != ${excludeId}`,
 			),
 		);
 
-	return rows.map((r) => (r.gasUsed != null ? BigInt(r.gasUsed) : null));
+	return rows.map((r) => ({ id: r.id, gasUsed: r.gasUsed != null ? BigInt(r.gasUsed) : null }));
 }
 
 export async function activeByOrderUids(

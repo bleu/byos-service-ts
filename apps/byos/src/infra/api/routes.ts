@@ -30,6 +30,8 @@ export interface RoutesConfig {
 	onAuditEvent: (event: AuditEvent) => void;
 	runImmediateValidation: (proposalId: number) => Promise<void>;
 	signerLimit: SignerLimitConfig;
+	/** If set, only sub-solvers in this set (lowercase) are admitted. */
+	subsolverWhitelist?: Set<string> | null;
 	logger?: Logger;
 }
 
@@ -92,6 +94,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 			);
 		} catch {
 			throw new AppError(Kind.SignatureRecoveryFailed);
+		}
+
+		if (config.subsolverWhitelist && !config.subsolverWhitelist.has(subSolver.toLowerCase())) {
+			throw new AppError(Kind.SubsolverNotAllowed);
 		}
 
 		// The floor gate is a write-side control: a sub-solver whose withdrawal

@@ -137,7 +137,7 @@ function sdkOrderToRecord(
 		}),
 	);
 
-	return { order, preInteractions, postInteractions, erc20Balances };
+	return { order, preInteractions, postInteractions, erc20Balances, status: sdkOrder.status };
 }
 
 // --- Client ---

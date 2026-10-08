@@ -58,6 +58,14 @@ function clientWithBalance(balance: bigint): PublicClient & { calls: () => numbe
 /** No in-flight proposals for the sub-solver. */
 const noInflight: FetchInflightGasUsed = async () => [];
 
+/** Helper: build a mock inflight list with auto-assigned ids (starting from 2,
+ *  so they never collide with the test proposal's id=1). */
+function inflightEntries(
+	...gasValues: (bigint | null)[]
+): { id: number; gasUsed: bigint | null }[] {
+	return gasValues.map((gasUsed, i) => ({ id: i + 2, gasUsed }));
+}
+
 function validatorWith(
 	client: PublicClient,
 	gasPrice = GAS_PRICE,
@@ -158,7 +166,7 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 		const inflightExposure = inflightGas * GAS_PRICE + MIN_COLLATERAL; // = THRESHOLD
 		const required = inflightExposure + THRESHOLD; // = 2 × THRESHOLD
 
-		const fetchInflight: FetchInflightGasUsed = async () => [inflightGas];
+		const fetchInflight: FetchInflightGasUsed = async () => inflightEntries(inflightGas);
 
 		const atBoundary = await validatorWith(
 			clientWithBalance(required),
@@ -179,7 +187,8 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 		// Two in-flight proposals each costing THRESHOLD → total 2 × THRESHOLD.
 		// Balance = 2 × THRESHOLD is not enough to accept a third.
 		const inflightGas = 200_000n;
-		const fetchInflight: FetchInflightGasUsed = async () => [inflightGas, inflightGas];
+		const fetchInflight: FetchInflightGasUsed = async () =>
+			inflightEntries(inflightGas, inflightGas);
 
 		const balance = 2n * THRESHOLD; // exactly covers the two in-flight proposals
 
@@ -207,7 +216,7 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 			MIN_COLLATERAL;
 		const required = exposure + THRESHOLD;
 
-		const fetchInflight: FetchInflightGasUsed = async () => [gas1, gas2, gas3];
+		const fetchInflight: FetchInflightGasUsed = async () => inflightEntries(gas1, gas2, gas3);
 
 		const atBoundary = await validatorWith(
 			clientWithBalance(required),
@@ -231,7 +240,7 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 		const required = unsimulatedExposure + THRESHOLD;
 
 		// Null means no gas estimate yet.
-		const fetchInflight: FetchInflightGasUsed = async () => [null];
+		const fetchInflight: FetchInflightGasUsed = async () => inflightEntries(null);
 
 		const atBoundary = await validatorWith(
 			clientWithBalance(required),
@@ -261,10 +270,26 @@ describe("EscrowValidator — cumulative exposure cap", () => {
 		expect(verdict).toBeNull();
 	});
 
+	it("concurrent validations for the same sub-solver share one DB call", async () => {
+		let calls = 0;
+		const fetchInflight: FetchInflightGasUsed = async () => {
+			calls++;
+			return inflightEntries(200_000n);
+		};
+		const validator = validatorWith(clientWithBalance(100n * THRESHOLD), GAS_PRICE, fetchInflight);
+		// Three concurrent validations (different proposal ids) for the same sub-solver.
+		await Promise.all([
+			validator.validate(submittedProposal({ id: 1 })),
+			validator.validate(submittedProposal({ id: 3 })),
+			validator.validate(submittedProposal({ id: 4 })),
+		]);
+		expect(calls).toBe(1);
+	});
+
 	it("floor gate fires before exposure cap is checked", async () => {
 		// Balance below the single-proposal threshold → InsufficientEscrow,
 		// not ExposureCapExceeded, even if in-flight proposals exist.
-		const fetchInflight: FetchInflightGasUsed = async () => [200_000n];
+		const fetchInflight: FetchInflightGasUsed = async () => inflightEntries(200_000n);
 
 		const verdict = await validatorWith(
 			clientWithBalance(THRESHOLD - 1n),

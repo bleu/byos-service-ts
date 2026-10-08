@@ -68,7 +68,7 @@ Create `.env.byos` with the values below. Use `.env.byos` in the repo root as a 
 | `COW_EXPLORER_URL` | `https://explorer.cow.fi` | CoW Explorer base URL. Override for non-mainnet chains (e.g. `https://explorer.cow.fi/bnb` for BSC) |
 | `LOG_LEVEL` | `info` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
 | `JSON_LOGS` | `false` | Set to `true` to emit JSON logs (recommended for cloud log aggregators) |
-| `SOLVE_HOLDBACK_MS` | — | Delay in milliseconds before BYOS responds to a `/solve` request |
+| `SELECTOR_BUFFER_MS` | `100` | Safety margin in milliseconds subtracted from the driver-supplied deadline before running the proposal selector |
 | `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window in seconds |
 | `RATE_LIMIT_IP_PER_WINDOW` | `6000` | Maximum requests per IP per window |
 | `RATE_UNIT_WEI` | `100000000000000000` | Escrow balance in wei that buys one unit of throughput |

@@ -7,14 +7,6 @@ import type { ValidateProposal } from "../../domain/validator.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 
-/**
- * At most this many proposals are validated at once. Each validation holds
- * one RPC/orderbook request open at a time, so this bounds the in-flight
- * request burst against paid-RPC rate limits — the same protection as the
- * Rust loop's 8-permit semaphore.
- */
-const VALIDATION_CONCURRENCY = 8;
-
 export interface ValidationTickConfig {
 	db: Db;
 	validator: ValidateProposal;
@@ -46,10 +38,11 @@ export function createValidationWorker(connection: Redis, config: ValidationTick
 	);
 }
 
-/** Worker that validates one proposal per job, VALIDATION_CONCURRENCY at a time. */
+/** Worker that validates one proposal per job, up to `concurrency` at a time. */
 export function createProposalValidationWorker(
 	connection: Redis,
 	config: ProposalValidationConfig,
+	concurrency: number,
 ): Worker {
 	return new Worker(
 		"validate-proposal",
@@ -59,7 +52,7 @@ export function createProposalValidationWorker(
 		{
 			connection,
 			prefix: "byos",
-			concurrency: VALIDATION_CONCURRENCY,
+			concurrency,
 		},
 	);
 }

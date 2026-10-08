@@ -1,4 +1,4 @@
-import { type CowOrder, OrderKind, SigningScheme } from "@byos/common";
+import { type CowOrder, OrderKind, OrderStatus, SigningScheme } from "@byos/common";
 import { describe, expect, it } from "vitest";
 import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../order.js";
 import type { Proposal } from "../proposal.js";
@@ -26,6 +26,7 @@ function sampleRecord(overrides?: Partial<OrderRecord>): OrderRecord {
 		preInteractions: [],
 		postInteractions: [],
 		erc20Balances: true,
+		status: OrderStatus.OPEN,
 		...overrides,
 	};
 }

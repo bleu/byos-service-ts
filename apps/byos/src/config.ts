@@ -29,6 +29,19 @@ export const configSchema = z.object({
 
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
+	/** Comma-separated list of allowed sub-solver addresses (e.g. 0xabc...,0x123...).
+	 * If absent or empty, all sub-solvers are admitted. */
+	SUBSOLVER_WHITELIST: z
+		.string()
+		.optional()
+		.transform((v) => {
+			if (!v) return null;
+			const addrs = v
+				.split(",")
+				.map((a) => a.trim().toLowerCase())
+				.filter(Boolean);
+			return addrs.length > 0 ? new Set(addrs) : null;
+		}),
 
 	// Chain connectivity
 	RPC_URL: z.string(),
@@ -58,6 +71,13 @@ export const configSchema = z.object({
 		.default("10000000000000000"),
 	DEFAULT_GAS_PRICE: z.string(),
 
+	// Concurrency
+	/** Max concurrent background proposal validations (BullMQ worker). Also
+	 * used as the DB connection pool size so the pool is never the bottleneck. */
+	VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(50),
+	/** Max concurrent fire-and-forget immediate validations on the request path. */
+	IMMEDIATE_VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(40),
+
 	// Timing
 	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
 	DROPPED_RETENTION_SECS: z.coerce.number().default(3600),
@@ -65,7 +85,10 @@ export const configSchema = z.object({
 	LOG_REDACTION_AFTER_SECS: z.coerce.number().default(604800), // 7 days
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
 	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
-	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),
+	/** How many milliseconds before the driver-supplied deadline BYOS stops
+	 * waiting for proposals and runs the selector. A small safety margin that
+	 * accounts for serialisation and network round-trip back to the driver. */
+	SELECTOR_BUFFER_MS: z.coerce.number().int().min(0).default(100),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Slippage protection (ADR-0019)

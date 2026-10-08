@@ -1,4 +1,4 @@
-import { OrderKind, SigningScheme } from "@byos/common";
+import { OrderKind, OrderStatus, SigningScheme } from "@byos/common";
 import { OrderBookApiError, SupportedChainId } from "@cowprotocol/cow-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyOrderbookError, OrderbookClient } from "../orderbook.js";
@@ -192,6 +192,7 @@ describe("OrderbookClient — order mapping", () => {
 		expect(record.preInteractions).toEqual([]);
 		expect(record.postInteractions).toEqual([]);
 		expect(record.erc20Balances).toBe(true);
+		expect(record.status).toBe(OrderStatus.OPEN);
 	});
 
 	it("deserializes pre and post interactions", async () => {

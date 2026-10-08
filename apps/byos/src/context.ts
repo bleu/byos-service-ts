@@ -50,7 +50,11 @@ export interface AppContext {
 	queues: Queues;
 	config: Config;
 	gasPriceRef: GasPriceRef;
+	/** Used by the background validation tick (calls beginTick()). */
 	validator: ValidateProposal;
+	/** Used by immediate (fire-and-forget) validations. Separate EscrowValidator
+	 * instance so the tick's beginTick() never clears its balance cache mid-flight. */
+	immediateValidator: ValidateProposal;
 	operator: EscrowOperator;
 	rateLimiter: RateLimiter;
 	balances: BalanceCache;
@@ -71,7 +75,7 @@ export function createSharedPublicClient(chain: Chain, transport: Transport): Pu
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
 	// Database
-	const { db, client: dbClient } = createDb(config.DATABASE_URL);
+	const { db, client: dbClient } = createDb(config.DATABASE_URL, config.VALIDATION_CONCURRENCY);
 	const migrationsFolder = resolve(import.meta.dirname, "../drizzle");
 	await migrate(db, { migrationsFolder });
 	logger.info("database connected and migrated");
@@ -152,13 +156,23 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	const settlementAddress: Address =
 		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
-	// Escrow validator
+	// Escrow validators — two independent instances so the tick's beginTick()
+	// (which clears the balance cache) never races with in-flight immediate
+	// validations that are currently reading from their own cached balances.
+	const inflightFetch = (subSolver: Address) => store.inflightGasUsedBySubSolver(db, subSolver);
 	const escrowValidator = new EscrowValidator(
 		publicClient,
 		escrowAddress,
 		minCollateralWei,
 		gasPriceRef,
-		(subSolver, excludeId) => store.inflightGasUsedBySubSolver(db, subSolver, excludeId),
+		inflightFetch,
+	);
+	const immediateEscrowValidator = new EscrowValidator(
+		publicClient,
+		escrowAddress,
+		minCollateralWei,
+		gasPriceRef,
+		inflightFetch,
 	);
 
 	// Orderbook client. Resolve the base URL explicitly so that local chains
@@ -184,6 +198,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);
+	const immediateValidator = new ProposalValidator(immediateEscrowValidator, simulationValidator);
 
 	// Request-path balance cache and the job that keeps it fresh.
 	const balanceStore = createRedisBalanceStore(requestRedis, {
@@ -226,6 +241,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		config,
 		gasPriceRef,
 		validator,
+		immediateValidator,
 		operator,
 		rateLimiter,
 		balances,
