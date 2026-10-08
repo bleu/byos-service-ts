@@ -78,7 +78,10 @@ export const configSchema = z.object({
 	LOG_REDACTION_AFTER_SECS: z.coerce.number().default(604800), // 7 days
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
 	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
-	SOLVE_HOLDBACK_MS: z.coerce.number().int().min(0).default(0),
+	/** How many milliseconds before the driver-supplied deadline BYOS stops
+	 * waiting for proposals and runs the selector. A small safety margin that
+	 * accounts for serialisation and network round-trip back to the driver. */
+	SELECTOR_BUFFER_MS: z.coerce.number().int().min(0).default(100),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Slippage protection (ADR-0019)

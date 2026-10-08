@@ -29,7 +29,7 @@ export interface SolveConfig {
 	db: Db;
 	gasPriceRef: GasPriceRef;
 	onAuditEvent: (event: AuditEvent) => void;
-	holdbackMs?: number;
+	selectorBufferMs?: number;
 	logger?: Logger;
 }
 
@@ -92,8 +92,10 @@ export function createSolveRoute(config: SolveConfig) {
 			return c.json({ solutions: [] } satisfies SolveResponse);
 		}
 
-		if (config.holdbackMs && config.holdbackMs > 0) {
-			await new Promise((resolve) => setTimeout(resolve, config.holdbackMs));
+		const deadlineMs = new Date(auction.deadline).getTime();
+		const waitMs = Math.max(0, deadlineMs - Date.now() - (config.selectorBufferMs ?? 0));
+		if (waitMs > 0) {
+			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
 
 		// Batch lookup: single query for all active proposals

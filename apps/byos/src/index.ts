@@ -89,7 +89,7 @@ async function main() {
 		cL,
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
-		holdbackMs: config.SOLVE_HOLDBACK_MS,
+		selectorBufferMs: config.SELECTOR_BUFFER_MS,
 		onAuditEvent: ctx.onAuditEvent,
 		logger,
 	});
