@@ -783,6 +783,7 @@ export async function applySettlementOutcome(
 		const [locked] = await tx
 			.select({
 				status: proposals.status,
+				rejectionReason: proposals.rejectionReason,
 				pendingCancellation: proposals.pendingCancellation,
 				subSolver: proposals.subSolver,
 				orderUid: proposals.orderUid,
@@ -805,7 +806,14 @@ export async function applySettlementOutcome(
 				if (from === "active") toStatus = "executing";
 				break;
 			case "succeeded":
-				if (from === "active" || from === "executing") {
+				// Our transaction can fill the order before its success notification
+				// arrives. An intervening validation cannot distinguish that fill
+				// from an external solver's; the attributed success corrects it.
+				if (
+					from === "active" ||
+					from === "executing" ||
+					(from === "rejected" && locked.rejectionReason === "SolverOutbid")
+				) {
 					toStatus = "settled";
 					txHash = outcome.txHash;
 				}
@@ -833,6 +841,7 @@ export async function applySettlementOutcome(
 			.set({
 				status: toStatus,
 				pendingCancellation: false,
+				...(outcome.kind === "succeeded" ? { rejectionReason: null } : {}),
 				...(txHash ? { settlementTxHash: txHash.toLowerCase() } : {}),
 				statusChangedAt: sql`now()`,
 			})
