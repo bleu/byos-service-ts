@@ -373,6 +373,7 @@ describe("OrderbookClient — construction", () => {
 		new OrderbookClient(SupportedChainId.GNOSIS_CHAIN);
 		expect(vi.mocked(OrderBookApi)).toHaveBeenCalledWith({
 			chainId: SupportedChainId.GNOSIS_CHAIN,
+			limiterOpts: { tokensPerInterval: 100, interval: "second" },
 		});
 	});
 
@@ -382,6 +383,7 @@ describe("OrderbookClient — construction", () => {
 		expect(vi.mocked(OrderBookApi)).toHaveBeenCalledWith({
 			chainId: SupportedChainId.MAINNET,
 			baseUrls: { [SupportedChainId.MAINNET]: "http://barn.cow.fi/mainnet" },
+			limiterOpts: { tokensPerInterval: 100, interval: "second" },
 		});
 	});
 });

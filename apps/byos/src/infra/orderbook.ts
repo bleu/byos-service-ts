@@ -157,13 +157,15 @@ export class OrderbookClient implements FetchOrder {
 		baseUrlOverride?: string,
 		private readonly cacheCapacity: number = CACHE_CAPACITY,
 	) {
+		// The SDK's default 5 requests/sec queues validation bursts before HTTP.
+		const limiterOpts = { tokensPerInterval: 100, interval: "second" as const };
 		if (baseUrlOverride) {
 			// Build a per-chain map: only our chain's slot matters, but the type
 			// requires all chains. Cast is safe — sdk only reads baseUrls[chainId].
 			const allUrls = { [chainId]: baseUrlOverride } as Record<SupportedChainId, string>;
-			this.api = new OrderBookApi({ chainId, baseUrls: allUrls });
+			this.api = new OrderBookApi({ chainId, baseUrls: allUrls, limiterOpts });
 		} else {
-			this.api = new OrderBookApi({ chainId });
+			this.api = new OrderBookApi({ chainId, limiterOpts });
 		}
 	}
 
