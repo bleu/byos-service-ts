@@ -52,7 +52,7 @@ export interface PublicAppContext extends AppContext {
 	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
 	 */
 	rateLimits: RateLimitSettings;
-	runImmediateValidation: (proposalId: number) => Promise<void>;
+	enqueueValidation: (proposalId: number) => Promise<void>;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
 }
@@ -85,7 +85,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
-		runImmediateValidation: ctx.runImmediateValidation,
+		enqueueValidation: ctx.enqueueValidation,
 		subsolverWhitelist: ctx.subsolverWhitelist,
 		logger: ctx.logger,
 		signerLimit: {

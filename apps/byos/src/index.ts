@@ -15,7 +15,6 @@ import {
 	createProposalValidationWorker,
 	createValidationWorker,
 	enqueueProposalValidation,
-	runProposalValidation,
 } from "./infra/jobs/validation.js";
 
 async function main() {
@@ -37,10 +36,6 @@ async function main() {
 		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
-	// Semaphore for fire-and-forget immediate validations.
-	let activeImmediateValidations = 0;
-	const immediateConcurrency = config.IMMEDIATE_VALIDATION_CONCURRENCY;
-
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
@@ -50,28 +45,8 @@ async function main() {
 		gasPriceRef: ctx.gasPriceRef,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
-		runImmediateValidation: async (proposalId) => {
-			if (activeImmediateValidations >= immediateConcurrency) {
-				logger
-					.child({ worker: "immediate-validation" })
-					.debug({ id: proposalId }, "immediate validation skipped — concurrency limit");
-				return;
-			}
-			activeImmediateValidations++;
-			try {
-				await runProposalValidation(
-					{
-						db: ctx.db,
-						validator: ctx.immediateValidator,
-						onAuditEvent: ctx.onAuditEvent,
-						logger: logger.child({ worker: "immediate-validation" }),
-					},
-					proposalId,
-				);
-			} finally {
-				activeImmediateValidations--;
-			}
-		},
+		enqueueValidation: (proposalId) =>
+			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
 		logger,
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,

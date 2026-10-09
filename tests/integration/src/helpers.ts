@@ -69,7 +69,7 @@ export interface TestAppOverrides {
 	/** Escrow floor for the synchronous gate. Defaults to 0.01 ETH. */
 	floorWei?: bigint;
 	/** Called when a proposal is accepted via POST /proposals. Defaults to a no-op. */
-	runImmediateValidation?: (proposalId: number) => Promise<void>;
+	enqueueValidation?: (proposalId: number) => Promise<void>;
 }
 
 /** Production defaults straight from the config schema, so the e2e assertions
@@ -102,7 +102,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		cL: 10_000_000_000_000_000n, // 0.01 ETH — mainnet c_L
 		gasPriceRef,
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
-		runImmediateValidation: overrides.runImmediateValidation ?? (() => Promise.resolve()),
+		enqueueValidation: overrides.enqueueValidation ?? (() => Promise.resolve()),
 		rateLimiter: overrides.rateLimiter,
 		balances: overrides.balances,
 		rateLimits: testRateLimits(overrides),

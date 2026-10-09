@@ -28,7 +28,7 @@ export interface RoutesConfig {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
-	runImmediateValidation: (proposalId: number) => Promise<void>;
+	enqueueValidation: (proposalId: number) => Promise<void>;
 	signerLimit: SignerLimitConfig;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
@@ -165,24 +165,14 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
-		// Fire-and-forget simulation: runs concurrently with the HTTP response so
-		// the proposal is often already active by the time the driver polls. This
-		// is a deliberate departure from ADR-0001's "async-only" invariant — see
-		// ADR-0001 §Alternatives for the tradeoff discussion.
-		//
-		// Known limitation: runImmediateValidation calls validator.validate()
-		// directly, bypassing the beginTick() cache-clear that runs at the start
-		// of each background tick. The escrow balance seen here may be stale by
-		// up to one tick interval (default 12s). The background tick re-validates
-		// every live proposal, so any mis-accepted proposal will be caught and
-		// rejected within one tick.
+		// Enqueue promptly; the tick retries dispatch if Redis is unavailable.
 		void (async () => {
-			log?.info({ id: inserted.id }, "immediate simulation triggered");
+			log?.info({ id: inserted.id }, "validation dispatch started");
 			try {
-				await config.runImmediateValidation(inserted.id);
-				log?.info({ id: inserted.id }, "immediate simulation finished");
+				await config.enqueueValidation(inserted.id);
+				log?.info({ id: inserted.id }, "validation queued");
 			} catch (err) {
-				log?.warn({ err, id: inserted.id }, "immediate simulation error");
+				log?.warn({ err, id: inserted.id }, "validation dispatch failed");
 			}
 		})();
 		log?.info(
