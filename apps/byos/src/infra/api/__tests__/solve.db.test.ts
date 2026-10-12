@@ -57,7 +57,7 @@ function buildAuction(orderUid = ORDER_UID) {
 	return {
 		id: "1",
 		effectiveGasPrice: "0",
-		deadline: new Date(Date.now() + 60_000).toISOString(),
+		deadline: new Date().toISOString(),
 		surplusCapturingJitOrderOwners: [],
 		orders: [
 			{

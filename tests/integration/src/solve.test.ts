@@ -20,7 +20,7 @@ function emptyAuction(overrides?: Partial<Auction>): Auction {
 		tokens: {},
 		orders: [],
 		effectiveGasPrice: "10000000000",
-		deadline: "2099-01-01T00:00:00Z",
+		deadline: new Date().toISOString(),
 		...overrides,
 	};
 }
@@ -77,13 +77,17 @@ function solvableAuction(orderUid: string, overrides?: Partial<Auction>): Auctio
 }
 
 /** Submits a proposal with 1e18 surplus for `orderUid` and simulates it. */
-async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Promise<number> {
+async function seedSimulatedProposal(
+	nonce: bigint,
+	orderUid: `0x${string}`,
+	buyAmount = 2n * 10n ** 18n,
+): Promise<number> {
 	const { response } = await signAndSubmitProposal(app.publicApp, {
 		orderUid,
 		nonce,
 		sellAmount: 10n ** 18n,
-		minBuyAmount: 2n * 10n ** 18n,
-		quoteBuyAmount: 2n * 10n ** 18n,
+		minBuyAmount: buyAmount,
+		quoteBuyAmount: buyAmount,
 	});
 	const { id } = await response.json();
 
@@ -94,7 +98,7 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 			trampoline: "0x0000000000000000000000000000000000001234" as Address,
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
-			simulationBuyAmount: 2n * 10n ** 18n,
+			simulationBuyAmount: buyAmount,
 		},
 	});
 
@@ -102,6 +106,73 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 }
 
 describe("/solve", () => {
+	it("batches compatible winning proposals and attributes success to every order", async () => {
+		const uid1 = `0x${"91".repeat(56)}` as const;
+		const uid2 = `0x${"92".repeat(56)}` as const;
+		const id1 = await seedSimulatedProposal(910n, uid1);
+		const id2 = await seedSimulatedProposal(920n, uid2);
+		const auction = solvableAuction(uid1, { id: "910" });
+		auction.orders.push(...solvableAuction(uid2).orders);
+		const { body } = await postSolve(auction);
+		expect(body.solutions).toHaveLength(1);
+		const batch = body.solutions[0];
+		if (!batch) throw new Error("missing batch");
+		expect(batch.trades.map((trade) => trade.order)).toEqual([uid1, uid2]);
+		expect(batch.interactions).toHaveLength(4);
+		const response = await app.internalApp.request("/notify", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				auctionId: "910",
+				solutionId: batch.id,
+				kind: "success",
+				transaction: `0x${"91".repeat(32)}`,
+			}),
+		});
+		expect(response.status).toBe(200);
+		expect((await store.get(app.ctx.db, id1))?.status).toBe("settled");
+		expect((await store.get(app.ctx.db, id2))?.status).toBe("settled");
+	});
+
+	it("records one abandonment penalty for a batch and returns every member to active", async () => {
+		const uid1 = `0x${"93".repeat(56)}` as const;
+		const uid2 = `0x${"94".repeat(56)}` as const;
+		const id1 = await seedSimulatedProposal(930n, uid1);
+		const id2 = await seedSimulatedProposal(940n, uid2);
+		const auction = solvableAuction(uid1, { id: "930" });
+		auction.orders.push(...solvableAuction(uid2).orders);
+		const { body } = await postSolve(auction);
+		const notify = (kind: string) =>
+			app.internalApp.request("/notify", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ auctionId: "930", solutionId: body.solutions[0]?.id, kind }),
+			});
+		await notify("settlementStarted");
+		await notify("cancelled");
+		await notify("cancelled");
+		expect((await store.get(app.ctx.db, id1))?.status).toBe("active");
+		expect((await store.get(app.ctx.db, id2))?.status).toBe("active");
+		expect(
+			(await store.pendingPenalties(app.ctx.db)).filter(
+				(p) => p.proposalId === id1 || p.proposalId === id2,
+			),
+		).toHaveLength(1);
+	});
+	it("keeps only the best proposal per order, even when the auction repeats an order", async () => {
+		const uid = `0x${"95".repeat(56)}` as const;
+		await seedSimulatedProposal(950n, uid);
+		const best = await seedSimulatedProposal(951n, uid, 3n * 10n ** 18n);
+		const auction = solvableAuction(uid, { id: "950" });
+		auction.orders.push(...solvableAuction(uid).orders);
+		const { body } = await postSolve(auction);
+		expect(body.solutions).toHaveLength(1);
+		expect(body.solutions[0]?.trades).toHaveLength(1);
+		expect(
+			(await store.solutionProposals(app.ctx.db, 950, [body.solutions[0]!.id])).map((p) => p.id),
+		).toEqual([best]);
+	});
+
 	it("empty auction returns empty solutions", async () => {
 		const { status, body } = await postSolve(emptyAuction());
 		expect(status).toBe(200);

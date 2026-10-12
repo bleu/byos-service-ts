@@ -71,7 +71,7 @@ function solvableAuction(orderUid: string, overrides?: Partial<Auction>): Auctio
 			},
 		],
 		effectiveGasPrice: "10000000000",
-		deadline: "2099-01-01T00:00:00Z",
+		deadline: new Date().toISOString(),
 		...overrides,
 	};
 }

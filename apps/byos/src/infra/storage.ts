@@ -769,6 +769,7 @@ export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
+	penaltySourceId?: string,
 ): Promise<
 	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
 	| StoreError
@@ -848,11 +849,17 @@ export async function applySettlementOutcome(
 			.where(eq(proposals.id, proposal.id));
 
 		if (insertPenalty) {
-			await tx.insert(penalties).values({
-				proposalId: proposal.id,
-				subSolver: proposal.subSolver.toLowerCase(),
-				orderUid: proposal.orderUid.toLowerCase(),
-			});
+			const inserted = await tx
+				.insert(penalties)
+				.values({
+					sourceId: penaltySourceId,
+					proposalId: proposal.id,
+					subSolver: proposal.subSolver.toLowerCase(),
+					orderUid: proposal.orderUid.toLowerCase(),
+				})
+				.onConflictDoNothing()
+				.returning({ id: penalties.id });
+			insertPenalty = inserted.length > 0;
 		}
 
 		const cancelled =
@@ -1070,13 +1077,30 @@ export async function recordSolution(
 	proposalId: number,
 	buyTokenRefPrice: string,
 ): Promise<void> {
-	await db
-		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
-		.onConflictDoUpdate({
-			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId, buyTokenRefPrice },
-		});
+	await recordSolutionBatch(db, auctionId, solutionId, [{ proposalId, buyTokenRefPrice }]);
+}
+
+export async function recordSolutionBatch(
+	db: Db,
+	auctionId: number,
+	solutionId: number,
+	members: { proposalId: number; buyTokenRefPrice: string }[],
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		await tx
+			.delete(solutions)
+			.where(and(eq(solutions.auctionId, auctionId), eq(solutions.solutionId, solutionId)));
+		if (members.length > 0) {
+			await tx.insert(solutions).values(
+				members.map((member) => ({
+					auctionId,
+					solutionId,
+					proposalId: member.proposalId,
+					buyTokenRefPrice: member.buyTokenRefPrice,
+				})),
+			);
+		}
+	});
 }
 
 export interface SolutionPrices {
@@ -1362,7 +1386,7 @@ export async function solutionProposals(
 	if (solutionIds.length === 0) return [];
 
 	const rows = await db
-		.select({
+		.selectDistinct({
 			id: proposals.id,
 			subSolver: proposals.subSolver,
 			orderUid: proposals.orderUid,
@@ -1600,4 +1624,59 @@ export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
 	}));
+}
+
+export async function solutionPenaltySources(
+	db: Db,
+	auctionId: number,
+	solutionIds: number[],
+): Promise<Map<number, string>> {
+	if (!solutionIds.length) return new Map();
+	const rows = await db
+		.select({ proposalId: solutions.proposalId, solutionId: solutions.solutionId })
+		.from(solutions)
+		.where(and(eq(solutions.auctionId, auctionId), inArray(solutions.solutionId, solutionIds)));
+	return new Map(
+		rows.map((row) => [row.proposalId, `auction:${auctionId}:solution:${row.solutionId}`]),
+	);
+}
+
+/** Keep an existing debit journal entry when upgrading single-order settlements. */
+export async function revertDebitSourceId(
+	db: Db,
+	subSolver: Address,
+	txHash: Hex,
+): Promise<string> {
+	const [existing] = await db
+		.select({ sourceId: debitOperations.sourceId })
+		.from(debitOperations)
+		.where(
+			and(
+				eq(debitOperations.sourceKind, "revert"),
+				eq(debitOperations.subSolver, subSolver.toLowerCase()),
+				eq(debitOperations.reason, txHash.toLowerCase()),
+			),
+		)
+		.orderBy(debitOperations.id)
+		.limit(1);
+	return existing?.sourceId ?? `settlement:${txHash.toLowerCase()}:${subSolver.toLowerCase()}`;
+}
+
+export async function settlementChargeProposalId(
+	db: Db,
+	subSolver: Address,
+	txHash: Hex,
+): Promise<number | undefined> {
+	const [row] = await db
+		.select({ id: proposals.id })
+		.from(proposals)
+		.where(
+			and(
+				eq(proposals.subSolver, subSolver.toLowerCase()),
+				eq(proposals.settlementTxHash, txHash.toLowerCase()),
+			),
+		)
+		.orderBy(proposals.id)
+		.limit(1);
+	return row?.id;
 }

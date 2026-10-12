@@ -4,7 +4,7 @@ import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries } from "../../../db/schema.js";
+import { bufferEntries, proposals } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -123,6 +123,44 @@ function durableTestOperator(operator: LegacyDebitEscrow): DebitEscrow {
 }
 
 describe("revert debits", () => {
+	it("debits a reverted batch once and retries a member write without charging again", async () => {
+		const first = await settleFailedProposal();
+		const second = await settleFailedProposal();
+		const row = await store.get(ctx.db, second.id);
+		await ctx.db
+			.update(proposals)
+			.set({ settlementTxHash: first.tx })
+			.where(eq(proposals.id, second.id));
+		let charges = 0;
+		const operator: LegacyDebitEscrow = {
+			async settlementCost() {
+				return 500n;
+			},
+			async debit(_subSolver, _amount, reason) {
+				if (reason === first.tx) charges++;
+				return PENALTY_TX;
+			},
+			async readExecutedDelta() {
+				throw new Error("not used");
+			},
+		};
+		const original = store.recordPenalty;
+		const spy = vi.spyOn(store, "recordPenalty").mockImplementation(async (...args) => {
+			if (args[1].id === row?.id) {
+				spy.mockRestore();
+				throw new Error("temporary database failure");
+			}
+			return original(...args);
+		});
+		const worker = config(operator);
+		await runRevertDebits(worker, new Map());
+		await runRevertDebits(worker, new Map());
+		await runRevertDebits(worker, new Map());
+		expect(charges).toBe(1);
+		expect((await store.get(ctx.db, first.id))?.status).toBe("penalized");
+		expect((await store.get(ctx.db, second.id))?.status).toBe("penalized");
+	});
+
 	it("a successor claims an expired lease and broadcasts persisted debit bytes without signing", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const raw = `0x${"12".repeat(96)}` as Hex;
@@ -389,8 +427,8 @@ describe("revert debits", () => {
 		expect(
 			events.filter((e) => e.kind.type === "penalized" && e.kind.proposalId === id),
 		).toHaveLength(0);
-		// The double-charge risk must be loud, as in the Rust loop.
-		expect(logLines.some((line) => line.includes("may re-charge next tick"))).toBe(true);
+		// A deferred proposal write remains visible even though the debit is durable.
+		expect(logLines.some((line) => line.includes("proposal recording deferred"))).toBe(true);
 	});
 });
 

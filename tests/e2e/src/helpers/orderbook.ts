@@ -417,3 +417,28 @@ export async function getAmountsOut(
 		args: [amountIn, path],
 	});
 }
+
+/** Cancel test orders through the orderbook; already fulfilled orders need no cleanup. */
+export async function cancelOrders(wallet: WalletClient, orderUids: string[]): Promise<void> {
+	if (!wallet.account) throw new Error("order cleanup requires a trader account");
+	for (const uid of orderUids) {
+		const current = await fetch(`${CONFIG.orderbookUrl}/api/v1/orders/${uid}`);
+		if (!current.ok) throw new Error(`Cleanup order lookup: ${current.status}`);
+		const order = (await current.json()) as { status: string };
+		if (order.status !== "open" && order.status !== "presignaturePending") continue;
+		const signature = await wallet.signTypedData({
+			account: wallet.account,
+			domain: GPV2_DOMAIN,
+			types: { OrderCancellations: [{ name: "orderUids", type: "bytes[]" }] },
+			primaryType: "OrderCancellations",
+			message: { orderUids: [uid as Hex] },
+		});
+		const response = await fetch(`${CONFIG.orderbookUrl}/api/v1/orders`, {
+			method: "DELETE",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ orderUids: [uid], signature, signingScheme: "eip712" }),
+		});
+		if (!response.ok)
+			throw new Error(`Cleanup order cancellation: ${response.status} ${await response.text()}`);
+	}
+}
