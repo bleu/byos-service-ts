@@ -225,6 +225,7 @@ export class SimulationValidator implements ValidateProposal {
 	}
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {
+		const orderbookStarted = performance.now();
 		// Step 1: Fetch order + buy token native price in parallel.
 		// nativePrice is only needed for the gap check (sell orders).
 		// Errors are handled independently: order notFound → OrderNotFound,
@@ -235,6 +236,10 @@ export class SimulationValidator implements ValidateProposal {
 			this.orderbook.order(proposal.orderUid),
 			this.orderbook.nativePrice(proposal.buyToken),
 		]);
+		this.logger?.debug(
+			{ proposalId: proposal.id, elapsedMs: performance.now() - orderbookStarted },
+			"validation orderbook reads finished",
+		);
 
 		if (orderResult.status === "rejected") {
 			const err = orderResult.reason as OrderbookError;
@@ -320,6 +325,7 @@ export class SimulationValidator implements ValidateProposal {
 
 		// Step 7: Dispatch eth_simulateV1
 		let result: unknown;
+		const simulationStarted = performance.now();
 		try {
 			result = await this.publicClient.request({
 				method: "eth_simulateV1" as never,
@@ -346,6 +352,10 @@ export class SimulationValidator implements ValidateProposal {
 		} catch {
 			return null; // transport error, defer
 		}
+		this.logger?.debug(
+			{ proposalId: proposal.id, elapsedMs: performance.now() - simulationStarted },
+			"validation simulation RPC finished",
+		);
 
 		const firstBlock = Array.isArray(result)
 			? (result as { calls?: SimulateV1CallResult[] }[])[0]
