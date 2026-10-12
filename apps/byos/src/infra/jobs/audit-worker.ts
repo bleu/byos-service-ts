@@ -90,6 +90,8 @@ export async function enqueueAuditEvent(
 		{
 			attempts: 20,
 			backoff: { type: "exponential", delay: 100 },
+			removeOnComplete: true,
+			// A failed job may be the only surviving copy of an unpersisted event.
 			removeOnFail: false,
 		},
 	);

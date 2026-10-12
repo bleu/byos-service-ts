@@ -149,3 +149,46 @@ curl http://localhost:59585/healthz
 ```
 
 A `200 OK` response confirms the service is running and the database connection is healthy.
+
+## Redis memory and job history
+
+The prod-local Redis container has a 1 GiB memory limit and a 512 MiB Redis
+`maxmemory` limit. The remaining headroom covers Redis overhead and persistence
+work; monitor actual usage during background saves. `noeviction` protects
+BullMQ queue keys. The authenticated health check allows three minutes for
+persisted data to load before counting failures.
+
+Scheduled queues keep at most 100 completed jobs (up to one day) and 1,000
+failed jobs (up to seven days). Failed Slack jobs use the same failure limit.
+Successful audit jobs are removed after their events reach Postgres; failed
+audit jobs are retained for recovery because they may contain unpersisted
+evidence. Per-proposal validation jobs are removed on completion or failure.
+Age-based removal occurs when another job finishes, rather than on a timer.
+The proposal retention sweep applies to Postgres, separately from this policy.
+
+Existing completed job history can be inspected and cleaned after deploying
+an image containing the Redis history command:
+
+```bash
+# Read-only: Redis memory and completed/failed/pending counts per queue.
+docker compose -f docker-compose.prod-local.yml exec byos \
+  node apps/byos/dist/redis-history.js
+
+# Remove completed jobs older than one hour in batches of 100.
+docker compose -f docker-compose.prod-local.yml exec byos \
+  node apps/byos/dist/redis-history.js --apply
+```
+
+The cleanup preserves all failed jobs, pending jobs, scheduler definitions and
+the known-sub-solvers set. New retention settings trim operational failures
+as subsequent jobs fail; existing failed audit jobs require explicit recovery
+or archival. A growing failed audit count or pending backlog still requires
+investigation rather than more memory. Do not delete Redis keys directly or
+remove the data volume to reclaim completed history.
+
+To apply the resource and policy changes without removing persisted data:
+
+```bash
+docker build -t byos-service:local .
+docker compose -f docker-compose.prod-local.yml up -d redis byos
+```
