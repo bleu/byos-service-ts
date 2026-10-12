@@ -12,22 +12,23 @@ function defaultDateRange(): { from: string; to: string } {
 export default async function OverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; subSolver?: string }>;
 }) {
-  const { from: fromParam, to: toParam } = await searchParams;
+  const { from: fromParam, to: toParam, subSolver: subSolverParam } = await searchParams;
   const defaults = defaultDateRange();
   const from = fromParam ?? defaults.from;
   const to = toParam ?? defaults.to;
 
+  const subSolver = subSolverParam?.trim() ?? "";
   const range = { from: new Date(from), to: new Date(to) };
-  const raw = await getOverviewStats(db, range);
+  const raw = await getOverviewStats(db, range, subSolver);
   const stats = { ...raw, penalizedAmountFormatted: formatNativeAmount(raw.penalizedAmountWei) };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-[13px] font-semibold text-ink">Overview</h1>
-        <DateRangeForm from={from} to={to} resetHref="/" />
+        <DateRangeForm from={from} to={to} resetHref="/" subSolver={subSolver} />
       </div>
 
       {/* Funnel */}
