@@ -86,7 +86,7 @@ export const configSchema = z.object({
 	/** How many milliseconds before the driver-supplied deadline BYOS stops
 	 * waiting for proposals and runs the selector. A small safety margin that
 	 * accounts for serialisation and network round-trip back to the driver. */
-	SELECTOR_BUFFER_MS: z.coerce.number().int().min(0).default(100),
+	SELECTOR_BUFFER_MS: z.coerce.number().int().min(0).default(200),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Slippage protection (ADR-0019)

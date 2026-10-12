@@ -93,13 +93,13 @@ export function createSolveRoute(config: SolveConfig) {
 			return c.json({ solutions: [] } satisfies SolveResponse);
 		}
 
-		const deadlineMs = new Date(auction.deadline).getTime();
-		const waitMs = Math.max(0, deadlineMs - Date.now() - (config.selectorBufferMs ?? 0));
+		// Keep the competition window open, then leave time to select and respond.
+		const snapshotDeadlineMs =
+			new Date(auction.deadline).getTime() - (config.selectorBufferMs ?? 200);
+		const waitMs = Math.max(0, snapshotDeadlineMs - Date.now());
 		if (waitMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-
-		// Batch lookup: single query for all active proposals
 		const grouped = await store.activeByOrderUids(config.db, orderUids);
 
 		const selected: SelectedSolution[] = [];

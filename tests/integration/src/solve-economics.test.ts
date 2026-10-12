@@ -312,7 +312,10 @@ describe("/solve economics", () => {
 			quoteBuyAmount: 950n,
 		});
 
-		const { solutions } = await postSolve(auctionJson(u, "sell", "1000", "900", "0"));
+		const auction = auctionJson(u, "sell", "1000", "900", "0");
+		// Finish selection promptly when no eligible proposal exists.
+		auction.deadline = new Date(Date.now() + 100).toISOString();
+		const { solutions } = await postSolve(auction);
 		expect(solutions).toHaveLength(0);
 	});
 

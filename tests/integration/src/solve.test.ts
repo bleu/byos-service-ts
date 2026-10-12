@@ -173,6 +173,44 @@ describe("/solve", () => {
 		).toEqual([best]);
 	});
 
+	it("waits for competition until 200 ms before the deadline despite full coverage", async () => {
+		const uid = `0x${"71".repeat(56)}` as const;
+		await seedSimulatedProposal(710n, uid);
+		const deadline = Date.now() + 800;
+		let completed = false;
+		const pending = postSolve(
+			solvableAuction(uid, { deadline: new Date(deadline).toISOString() }),
+		).then((result) => {
+			completed = true;
+			return result;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(completed).toBe(false);
+		await seedSimulatedProposal(711n, uid, 3n * 10n ** 18n);
+		const { body } = await pending;
+		expect(Date.now()).toBeGreaterThanOrEqual(deadline - 220);
+		expect(Date.now()).toBeLessThan(deadline);
+		expect(body.solutions).toHaveLength(1);
+		expect(body.solutions[0]?.prices[SELL_TOKEN]).toBe((3n * 10n ** 18n).toString());
+	});
+
+	it("returns partial coverage at the selection deadline", async () => {
+		const uid = `0x${"72".repeat(56)}` as const;
+		const missingUid = `0x${"73".repeat(56)}`;
+		await seedSimulatedProposal(720n, uid);
+		const deadline = Date.now() + 800;
+		const auction = solvableAuction(uid, { deadline: new Date(deadline).toISOString() });
+		const missingOrder = solvableAuction(missingUid).orders[0];
+		if (!missingOrder) throw new Error("missing order fixture");
+		auction.orders.push(missingOrder);
+		const { status, body } = await postSolve(auction);
+		expect(status).toBe(200);
+		expect(Date.now()).toBeGreaterThanOrEqual(deadline - 220);
+		expect(Date.now()).toBeLessThan(deadline);
+		expect(body.solutions).toHaveLength(1);
+		expect(body.solutions[0]?.trades[0]?.order).toBe(uid);
+	});
+
 	it("empty auction returns empty solutions", async () => {
 		const { status, body } = await postSolve(emptyAuction());
 		expect(status).toBe(200);
