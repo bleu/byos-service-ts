@@ -188,19 +188,22 @@ export async function waitForProposalStatus(
 	maxWaitMs = 30_000,
 ): Promise<{ status: string; [key: string]: unknown }> {
 	const start = Date.now();
+	let lastStatus = "unobserved";
+	let lastError = "none";
 	while (Date.now() - start < maxWaitMs) {
 		try {
 			const proposal = await getProposal(walletClient, proposalId);
+			lastStatus = `${proposal.status} (${proposal.rejectionReason ?? "no rejection reason"})`;
 			if (targetStatuses.includes(proposal.status)) {
 				return proposal;
 			}
-		} catch {
-			// proposal might not exist yet, keep polling
+		} catch (error) {
+			lastError = String(error);
 		}
 		await new Promise((r) => setTimeout(r, 1000));
 	}
 	throw new Error(
-		`Proposal ${proposalId} did not reach ${targetStatuses.join("/")} within ${maxWaitMs}ms`,
+		`Proposal ${proposalId} did not reach ${targetStatuses.join("/")} within ${maxWaitMs}ms; last status: ${lastStatus}; last error: ${lastError}`,
 	);
 }
 
@@ -212,7 +215,7 @@ export async function cancelProposals(walletClient: WalletClient, ids: number[])
 			method: "DELETE",
 			headers: { "X-Signature": signature },
 		});
-		if (!response.ok && response.status !== 404 && response.status !== 409)
+		if (!response.ok && response.status !== 404 && response.status !== 409 && response.status !== 429)
 			throw new Error(`Cleanup proposal ${id}: ${response.status}`);
 	}
 }

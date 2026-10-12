@@ -3,6 +3,17 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { config as dotenvConfig } from "dotenv";
 import { defineConfig } from "vitest/config";
 
+/**
+ * Parse a .env file and return its values without mutating process.env.
+ * dotenv's config() mutates process.env by default, which causes env vars
+ * from one project (e.g. CHAIN_ID=56 from .env.byos) to bleed into workers
+ * spawned for other projects (e.g. e2e) before vitest applies project-level
+ * env overrides.
+ */
+function parseEnv(path: string): Record<string, string> {
+	return dotenvConfig({ path, processEnv: {} }).parsed ?? {};
+}
+
 // Mirrors tsup's loader: { '.yml': 'text' } so tests can import .yml files.
 // resolveId claims ownership of .yml files so Vite skips its built-in file
 // serving (which would pass raw YAML to vite:import-analysis and fail).
@@ -31,7 +42,7 @@ export default defineConfig({
 					name: "unit",
 					include: ["apps/*/src/**/*.test.ts", "packages/*/src/**/*.test.ts"],
 					exclude: ["**/*.db.test.ts", "**/*.redis.test.ts"],
-					env: dotenvConfig({ path: resolve(".env") }).parsed ?? {},
+					env: parseEnv(resolve(".env")),
 				},
 			},
 			{
@@ -73,7 +84,7 @@ export default defineConfig({
 					include: ["**/*.test.ts"],
 					testTimeout: 120_000,
 					hookTimeout: 60_000,
-					env: dotenvConfig({ path: resolve(".env.e2e") }).parsed ?? {},
+					env: parseEnv(resolve(".env.e2e")),
 				},
 			},
 		],

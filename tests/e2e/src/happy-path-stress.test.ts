@@ -169,7 +169,7 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 				quoteBuyAmount: assignment.winner ? quoteBuyAmount : (quoteBuyAmount * 9995n) / 10000n,
 				interactions,
 				nonce: nonceBase + BigInt(index),
-				validUntilOffset: 600,
+				validUntilOffset: 300,
 			});
 			return { id, ...assignment };
 		}),

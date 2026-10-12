@@ -108,7 +108,9 @@ function buildAuction(
 			},
 		],
 		effectiveGasPrice: "10000000000",
-		deadline: new Date(Date.now() + 60_000).toISOString(),
+		// Very short deadline so /solve snapshots well within the autopilot's
+		// 4s cycle, before it can settle the proposal out from under us.
+		deadline: new Date(Date.now() + 1_500).toISOString(),
 	};
 }
 
