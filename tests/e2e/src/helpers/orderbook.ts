@@ -4,6 +4,7 @@
  *
  * Ported from offline-mode/test/utils/order-helpers.ts (ethers → viem).
  */
+import { EscrowAbi } from "@byos/common";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import { encodeFunctionData, erc20Abi, keccak256, maxUint256 } from "viem";
 import { mineBlock } from "./chain.js";
@@ -222,7 +223,21 @@ export async function depositToEscrow(
 		}),
 		value: amount,
 	});
-	await publicClient.waitForTransactionReceipt({ hash });
+	const receipt = await publicClient.waitForTransactionReceipt({ hash });
+	if (receipt.status !== "success") {
+		throw new Error(`Escrow deposit for ${subSolver} reverted: ${hash}`);
+	}
+	const balance = await publicClient.readContract({
+		address: CONTRACTS.escrow,
+		abi: EscrowAbi,
+		functionName: "effectiveBalance",
+		args: [subSolver],
+	});
+	if (balance < amount) {
+		throw new Error(
+			`Escrow deposit for ${subSolver}: effective balance ${balance} is below deposit ${amount} (${hash})`,
+		);
+	}
 }
 
 /** Get Uniswap V2 router reverse quote (how much input for a desired output). */
