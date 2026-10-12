@@ -215,7 +215,12 @@ export async function cancelProposals(walletClient: WalletClient, ids: number[])
 			method: "DELETE",
 			headers: { "X-Signature": signature },
 		});
-		if (!response.ok && response.status !== 404 && response.status !== 409 && response.status !== 429)
+		if (
+			!response.ok &&
+			response.status !== 404 &&
+			response.status !== 409 &&
+			response.status !== 429
+		)
 			throw new Error(`Cleanup proposal ${id}: ${response.status}`);
 	}
 }
