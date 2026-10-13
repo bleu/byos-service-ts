@@ -104,17 +104,36 @@ This command starts the BYOS service, PostgreSQL, Redis, and the admin dashboard
 
 ### Port mapping
 
-The `docker-compose.prod-local.yml` file uses offset port numbers to avoid conflicts with other local services:
+The `docker-compose.prod-local.yml` file uses the following default host ports.
+Set any override in the **repo-root `.env` file**; all six variables belong in
+that file, rather than `.env.byos`, `.env.admin`, or a sub-solver env file.
+Service `env_file` entries configure containers and do not supply Compose port
+interpolation values.
 
-| Service | Container port | Host port |
-|---------|---------------|-----------|
-| BYOS public API | 9585 | 59585 |
-| BYOS internal API | 9586 | 59586 |
-| Admin dashboard | 3000 | 53001 |
-| PostgreSQL | 5432 | 55432 |
-| Redis | 6379 | 56379 |
+| Service | Container port | Default host port | Variable in `.env` |
+|---------|---------------|-------------------|--------------------|
+| BYOS public API | 9585 | 59585 | `BYOS_PUBLIC_HOST_PORT` |
+| BYOS internal API | 9586 | 59586 | `BYOS_INTERNAL_HOST_PORT` |
+| Admin dashboard | 3000 | 53001 | `ADMIN_HOST_PORT` |
+| PostgreSQL | 5432 | 55432 | `POSTGRES_HOST_PORT` |
+| Redis | 6379 | 56379 | `REDIS_HOST_PORT` |
+| Fynd | 3000 | 53000 | `FYND_HOST_PORT` |
 
-To use standard port numbers on a dedicated server, update the `ports` mappings in `docker-compose.prod-local.yml` (e.g. change `59585:9585` to `9585:9585`).
+For example, to publish the admin dashboard on port 53002:
+
+```dotenv
+ADMIN_HOST_PORT=53002
+```
+
+Then run `docker compose -f docker-compose.prod-local.yml up -d admin` to
+recreate its port mapping. No image rebuild is needed. Unset or empty variables
+use the defaults. Container ports and URLs between containers stay the same.
+Shell environment variables take precedence over `.env`. To use a different
+Compose env file, pass it explicitly:
+
+```bash
+docker compose --env-file env/bnb-staging/.env -f docker-compose.prod-local.yml up -d
+```
 
 > **Security.** The BYOS internal API (port 9586) and the admin dashboard (port 53001) must not be exposed to the public internet. Use a firewall rule or a network overlay such as [Tailscale](https://tailscale.com/) to restrict access. The public API (port 59585) is the only port that should be reachable externally.
 

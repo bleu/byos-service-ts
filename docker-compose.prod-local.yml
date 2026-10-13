@@ -10,7 +10,7 @@ services:
       volumes:
         - postgres-data:/var/lib/postgresql/data
       ports:
-        - "55432:5432"
+        - "${POSTGRES_HOST_PORT:-55432}:5432"
       deploy:
         resources:
           limits:
@@ -34,7 +34,7 @@ services:
       volumes:
         - redis-data:/data
       ports:
-        - "56379:6379"
+        - "${REDIS_HOST_PORT:-56379}:6379"
       deploy:
         resources:
           limits:
@@ -56,8 +56,8 @@ services:
         DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/byos
         REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       ports:
-        - "59585:9585"
-        - "59586:9586"
+        - "${BYOS_PUBLIC_HOST_PORT:-59585}:9585"
+        - "${BYOS_INTERNAL_HOST_PORT:-59586}:9586"
       deploy:
         resources:
           limits:
@@ -82,7 +82,7 @@ services:
       environment:
         TYCHO_API_KEY: ${TYCHO_API_KEY}
       ports:
-        - "53000:3000"
+        - "${FYND_HOST_PORT:-53000}:3000"
       deploy:
         resources:
           limits:
@@ -134,7 +134,7 @@ services:
       environment:
         DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/byos
       ports:
-        - "53001:3000"
+        - "${ADMIN_HOST_PORT:-53001}:3000"
       deploy:
         resources:
           limits:
