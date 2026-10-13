@@ -186,7 +186,7 @@ export const solutions = pgTable(
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [
-		primaryKey({ columns: [table.auctionId, table.solutionId, table.proposalId] }),
+		primaryKey({ columns: [table.auctionId, table.solutionId] }),
 		index("solutions_proposal_id_idx").on(table.proposalId),
 	],
 );
@@ -230,7 +230,6 @@ export const penalties = pgTable(
 		subSolver: text("sub_solver").notNull(),
 		orderUid: text("order_uid").notNull(),
 		penaltyTxHash: text("penalty_tx_hash"),
-		sourceId: text("source_id").unique(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [index("penalties_pending_idx").on(table.id).where(sql`penalty_tx_hash IS NULL`)],

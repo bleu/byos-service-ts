@@ -19,8 +19,6 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 - [0015 — Rate Limiting](0015-rate-limiting.md): Cloudflare edge per-IP filter, escrow-tiered per-signer sliding window, cached escrow floor gate
 - [0016 — Active-Active Replicas and Durable Debits](0016-active-active-replicas-and-durable-debits.md): shared gas price and crash-safe escrow debit recovery
 
-- [0020 — Same-Sub-Solver Settlement Batches](0020-same-sub-solver-batches.md): compatible winning proposals share a solution; outcomes update every member and failures charge once
-
 ### TypeScript-specific ADRs
 
 - [0004 — pnpm Monorepo and Tooling](0004-pnpm-monorepo-and-tooling.md): pnpm workspaces, tsup, Biome, Vitest, `tsc -b` project references

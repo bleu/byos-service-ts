@@ -96,11 +96,6 @@ async function durableDebit(
 		reason,
 	});
 	const owner = config.workerId;
-	// Reverted batches can be only partly recorded after a database failure.
-	// Reuse the completed debit for remaining members without broadcasting again.
-	if (sourceKind === "revert" && operation.status === "completed" && operation.transactionHash) {
-		return { hash: operation.transactionHash, operationId: operation.id, owner };
-	}
 	const claimed = await store.claimDebitOperation(db, operation.id, owner, LEASE_SECS);
 	if (!claimed) return null;
 
@@ -183,16 +178,7 @@ export async function runRevertDebits(
 		return;
 	}
 
-	const groups = new Map<string, typeof pending>();
-	for (const member of pending) {
-		const key = `${member.subSolver.toLowerCase()}:${member.settlementTxHash ?? member.id}`;
-		const group = groups.get(key) ?? [];
-		group.push(member);
-		groups.set(key, group);
-	}
-	for (const members of groups.values()) {
-		const proposal = members[0];
-		if (!proposal) continue;
+	for (const proposal of pending) {
 		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
 		if (!proposal.settlementTxHash) {
@@ -212,7 +198,7 @@ export async function runRevertDebits(
 		const landedDebit = await durableDebit(
 			config,
 			"revert",
-			await store.revertDebitSourceId(db, proposal.subSolver, proposal.settlementTxHash),
+			`proposal:${proposal.id}`,
 			proposal.subSolver,
 			amount,
 			proposal.settlementTxHash,
@@ -224,35 +210,33 @@ export async function runRevertDebits(
 		// record failure below must not eat retry budget.
 		attempts.delete(proposal.id);
 
-		await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
-		const chargeProposalId = await store.settlementChargeProposalId(
-			db,
-			proposal.subSolver,
-			proposal.settlementTxHash,
-		);
-		for (const member of members) {
-			try {
-				const result = await store.recordPenalty(
-					db,
-					member,
-					member.id === chargeProposalId ? amount : 0n,
-					penaltyTxHash,
+		try {
+			const result = await store.recordPenalty(db, proposal, amount, penaltyTxHash);
+			if ("auditEvent" in result) {
+				await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
+				onAuditEvent(result.auditEvent);
+				logger.info(
+					{
+						id: proposal.id,
+						subSolver: proposal.subSolver,
+						orderUid: proposal.orderUid,
+						amount: amount.toString(),
+						tx: penaltyTxHash,
+					},
+					"revert debit landed",
 				);
-				if ("auditEvent" in result) {
-					onAuditEvent(result.auditEvent);
-					logger.info(
-						{ id: member.id, subSolver: member.subSolver, tx: penaltyTxHash },
-						"revert debit landed",
-					);
-				} else {
-					logger.error(
-						{ id: member.id, error: result },
-						"debit landed; proposal recording deferred",
-					);
-				}
-			} catch (e) {
-				logger.error({ err: e, id: member.id }, "debit landed; proposal recording deferred");
+			} else {
+				await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
+				logger.error(
+					{ id: proposal.id, error: result },
+					"debit landed but proposal not marked penalized; may re-charge next tick",
+				);
 			}
+		} catch (e) {
+			logger.error(
+				{ err: e, id: proposal.id },
+				"debit landed but proposal not marked penalized; may re-charge next tick",
+			);
 		}
 	}
 }

@@ -321,7 +321,7 @@ describe("/solve economics", () => {
 
 	// The driver keys its /notify attribution on solution ids (ADR-0013), so
 	// a duplicate would misattribute a settlement.
-	it("compatible orders share one numbered solution", async () => {
+	it("each order in an auction gets its own numbered solution", async () => {
 		const first = uid("f2");
 		const second = uid("f3");
 		await seedActive(first, 1_000n, 950n);
@@ -346,10 +346,15 @@ describe("/solve economics", () => {
 		auction.orders = [auction.orders[0], secondOrder];
 
 		const { solutions } = await postSolve(auction);
-		expect(solutions).toHaveLength(1);
-		expect(solutions[0]?.id).toBe(1);
-		expect(solutions[0]?.trades.map((trade) => trade.order)).toEqual([first, second]);
-		expect(solutions[0]?.trades.map((trade) => trade.executedAmount)).toEqual(["1000", "2000"]);
+		expect(solutions, "each order must be scored on its own").toHaveLength(2);
+		expect(
+			solutions.map((s) => s.id),
+			"ids must be distinct — the driver attributes notifications by them",
+		).toEqual([1, 2]);
+
+		// Each solution must carry the amounts of its own order, not the other's.
+		expect(solutions[0]?.trades[0]?.executedAmount).toBe("1000");
+		expect(solutions[1]?.trades[0]?.executedAmount).toBe("2000");
 	});
 
 	// The encoder itself is covered in @byos/common; what was not covered is

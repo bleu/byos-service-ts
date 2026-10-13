@@ -16,7 +16,6 @@ import {
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
-import { batchSolutions, type SelectedSolution } from "./solution-batches.js";
 import {
 	type AuctionOrder,
 	auctionSchema,
@@ -102,13 +101,10 @@ export function createSolveRoute(config: SolveConfig) {
 		}
 		const grouped = await store.activeByOrderUids(config.db, orderUids);
 
-		const selected: SelectedSolution[] = [];
+		const solutions: Solution[] = [];
 		let solutionId = 1;
 
-		const selectedOrders = new Set<string>();
 		for (const order of auction.orders) {
-			if (selectedOrders.has(order.uid.toLowerCase())) continue;
-			selectedOrders.add(order.uid.toLowerCase());
 			const proposals = grouped.get(order.uid.toLowerCase());
 			if (!proposals || proposals.length === 0) continue;
 
@@ -182,68 +178,53 @@ export function createSolveRoute(config: SolveConfig) {
 			const solution = buildSolution(solutionId, order, bestProposal, bestGasUsed, bestCut);
 			if (!solution) continue;
 
-			selected.push({
-				subSolver: bestProposal.subSolver,
-				proposalId: bestProposal.id,
-				buyTokenRefPrice: auction.tokens[order.buyToken]?.referencePrice ?? "0",
-				solution,
-			});
-			solutionId++;
-		}
-
-		const solutions: Solution[] = [];
-		for (const batch of batchSolutions(selected)) {
+			// Record attribution before bidding: if we cannot record it, we
+			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
+				const buyTokenRefPrice = auction.tokens[order.buyToken]?.referencePrice ?? "0";
 				try {
-					await store.recordSolutionBatch(config.db, auctionId, batch.solution.id, batch.members);
-				} catch (err) {
-					log?.error({ err, solutionId: batch.solution.id }, "batch attribution failed");
+					await store.recordSolution(
+						config.db,
+						auctionId,
+						solutionId,
+						bestProposal.id,
+						buyTokenRefPrice,
+					);
+				} catch {
 					continue;
 				}
-				for (const member of batch.members) {
-					const order = auction.orders.find(
-						(order) => order.uid.toLowerCase() === member.solution.trades[0]?.order.toLowerCase(),
-					);
-					if (!order) continue;
-					store
-						.rejectOutbidProposals(config.db, order.uid, member.subSolver as Address)
-						.catch(() => undefined);
-					store
-						.saveSolutionPrices(config.db, member.proposalId, {
-							sellTokenRefPrice: auction.tokens[order.sellToken]?.referencePrice ?? "0",
-							surplusTokenRefPrice:
-								auction.tokens[
-									surplusToken(
-										order.kind === "sell",
-										order.sellToken as Address,
-										order.buyToken as Address,
-									)
-								]?.referencePrice ?? "0",
-							auctionGasPrice: auctionGasPrice.toString(),
-							clearingPrices: batch.solution.prices,
-						})
-						.catch(() => undefined);
-				}
+
+				// Mark all competing sub-solver proposals for the same order as
+				// rejected: SubsolverOutbid. Best-effort: we never block /solve for this.
+				store
+					.rejectOutbidProposals(config.db, order.uid, bestProposal.subSolver)
+					.catch(() => undefined);
+
+				// Fire-and-forget: price snapshot on the proposal row; failure is non-fatal.
+				store
+					.saveSolutionPrices(config.db, bestProposal.id, {
+						sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+						surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+						auctionGasPrice: auctionGasPrice.toString(),
+						clearingPrices: solution.prices,
+					})
+					.catch(() => undefined);
 			}
-			for (const member of batch.members) {
-				log?.info(
-					{
-						solutionId: batch.solution.id,
-						proposalId: member.proposalId,
-						orderUid: member.solution.trades[0]?.order,
-					},
-					"solution included",
-				);
-			}
-			solutions.push(batch.solution);
+
+			solutions.push(solution);
+			log?.info(
+				{
+					proposalId: bestProposal.id,
+					orderUid: order.uid,
+					sellToken: order.sellToken,
+					buyToken: order.buyToken,
+					quoteBuyAmount: bestProposal.quoteBuyAmount.toString(),
+				},
+				"solution included",
+			);
+			solutionId++;
 		}
-		log?.info(
-			{
-				solutionCount: solutions.length,
-				proposalCount: solutions.reduce((count, solution) => count + solution.trades.length, 0),
-			},
-			"solution sent",
-		);
+		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);
 	});
 

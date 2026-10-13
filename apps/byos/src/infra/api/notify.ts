@@ -125,17 +125,8 @@ export function createNotifyRoute(config: NotifyConfig) {
 			return c.json({ status: "ok" });
 		}
 
-		const penaltySources =
-			outcome.kind === "abandoned"
-				? await store.solutionPenaltySources(config.db, auctionId, solutionIds)
-				: new Map<number, string>();
 		for (const proposal of proposals) {
-			const result = await store.applySettlementOutcome(
-				config.db,
-				proposal,
-				outcome,
-				penaltySources.get(proposal.id),
-			);
+			const result = await store.applySettlementOutcome(config.db, proposal, outcome);
 			if ("kind" in result) {
 				// A write we could not perform on a money path: the debit that
 				// should follow a revert now depends on the timeout backstop.
