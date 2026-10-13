@@ -181,6 +181,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MIN_PROPOSAL_SCORE),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_BPS),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
+		minCollateralWei,
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 	);

@@ -2,7 +2,12 @@ import { OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
-import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../../domain/order.js";
+import {
+	checkEnvelope,
+	checkProposalSlippage,
+	checkTradeValueCap,
+	type OrderRecord,
+} from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
 	type Candidate,
@@ -152,6 +157,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly minScore: bigint,
 		private readonly maxSlippageBps: bigint,
 		private readonly maxSlippageNative: bigint,
+		private readonly minCollateral: bigint,
 		private readonly logger?: Logger,
 		private readonly submitter?: Address,
 	) {}
@@ -226,15 +232,12 @@ export class SimulationValidator implements ValidateProposal {
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {
 		const orderbookStarted = performance.now();
-		// Step 1: Fetch order + buy token native price in parallel.
-		// nativePrice is only needed for the gap check (sell orders).
-		// Errors are handled independently: order notFound → OrderNotFound,
-		// price notFound on a sell order → fail closed (ProposedSlippageOutrange),
-		// price unavailable on a buy order → use 0n (gap check skips buy orders),
-		// any transient error → defer.
-		const [orderResult, priceResult] = await Promise.allSettled([
+		// Order and native prices are read during immediate validation and every
+		// background revalidation. The sell price is required for all order kinds.
+		const [orderResult, priceResult, sellPriceResult] = await Promise.allSettled([
 			this.orderbook.order(proposal.orderUid),
 			this.orderbook.nativePrice(proposal.buyToken),
+			this.orderbook.nativePrice(proposal.sellToken),
 		]);
 		this.logger?.debug(
 			{ proposalId: proposal.id, elapsedMs: performance.now() - orderbookStarted },
@@ -268,6 +271,21 @@ export class SimulationValidator implements ValidateProposal {
 		if (envelopeReason) {
 			return { kind: "reject", reason: envelopeReason };
 		}
+
+		if (sellPriceResult.status === "rejected") {
+			const err = sellPriceResult.reason as OrderbookError;
+			if (err.kind === "notFound") return { kind: "reject", reason: "NativePriceUnavailable" };
+			return null; // transient, defer without admitting an unpriced proposal
+		}
+		if (sellPriceResult.value <= 0n) {
+			return { kind: "reject", reason: "NativePriceUnavailable" };
+		}
+		const tradeValueReason = checkTradeValueCap(
+			proposal.sellAmount,
+			sellPriceResult.value,
+			this.minCollateral,
+		);
+		if (tradeValueReason) return { kind: "reject", reason: tradeValueReason };
 
 		// Step 3: Gap check — reject if min/quote spread exceeds configured limits
 		const slippageReason = checkProposalSlippage(

@@ -115,6 +115,8 @@ export const RejectionReason = {
 	TokenMismatch: "TokenMismatch",
 	OrderNotFound: "OrderNotFound",
 	Unprofitable: "Unprofitable",
+	/** Proposal sell value is at or way above MIN_COLLATERAL in native token. */
+	TradeValueCapExceeded: "TradeValueCapExceeded",
 	/** Another sub-solver's proposal was selected by BYOS for the same order at /solve time. */
 	SubsolverOutbid: "SubsolverOutbid",
 	/** An external solver won the CoW auction — the on-chain settlement reverted with "GPv2: order filled". */
@@ -123,7 +125,7 @@ export const RejectionReason = {
 	ProposedSlippageOutrange: "ProposedSlippageOutrange",
 	/** Simulation succeeded but the trampoline did not emit an Executed event. */
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
-	/** Buy-token native price is unavailable — cannot evaluate the native-amount slippage cap. */
+	/** A required token native price is unavailable — cannot evaluate a native-value guard. */
 	NativePriceUnavailable: "NativePriceUnavailable",
 } as const;
 
@@ -137,6 +139,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.TokenMismatch,
 	RejectionReason.OrderNotFound,
 	RejectionReason.Unprofitable,
+	RejectionReason.TradeValueCapExceeded,
 	RejectionReason.SubsolverOutbid,
 	RejectionReason.SolverOutbid,
 	RejectionReason.ProposedSlippageOutrange,

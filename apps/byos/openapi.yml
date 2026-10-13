@@ -523,6 +523,13 @@ components:
           zero, exceeds the order, or violates the limit price.
         - `OrderNotFound` — the orderbook does not know the proposal's
           order UID.
+        - `TradeValueCapExceeded` — the proposal sell amount, valued using
+          the orderbook sell-token native price, is at or above
+          `10_000 * MIN_COLLATERAL`. Applies to sell and buy orders, including
+          partial fills, during immediate validation and revalidation.
+        - `NativePriceUnavailable` — a required native token price is missing
+          or the sell-token price is non-positive; native-value guards cannot
+          be evaluated. Temporary lookup failures defer validation.
         - `Unprofitable` — the first simulation scored the proposal at or
           below the minimum (`score = surplus - gas`), so it could
           never win an auction. Fix: improve the price or
@@ -535,6 +542,8 @@ components:
         - AmountMismatch
         - OrderNotFound
         - Unprofitable
+        - TradeValueCapExceeded
+        - NativePriceUnavailable
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at

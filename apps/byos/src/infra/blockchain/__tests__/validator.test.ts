@@ -221,6 +221,7 @@ function validatorAt(
 	minScore = 0n,
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
+	minCollateral = 10n ** 16n,
 ): SimulationValidator {
 	return new SimulationValidator(
 		node.client,
@@ -232,6 +233,7 @@ function validatorAt(
 		minScore,
 		maxSlippageBps,
 		maxSlippageNative,
+		minCollateral,
 	);
 }
 
@@ -660,4 +662,83 @@ describe("SimulationValidator gap check", () => {
 		expect(verdict?.kind).not.toBe("reject");
 		// (in practice this accepts — sell surplus with zero gas cost)
 	});
+});
+
+// The same validate() is dispatched immediately after ingestion and on ticks.
+describe("native sell-value safeguard", () => {
+	for (const kind of [OrderKind.SELL, OrderKind.BUY]) {
+		for (const status of ["submitted", "active"] as const) {
+			it(`rejects ${kind} proposals at the cap during ${status} validation before simulation`, async () => {
+				const proposal = { ...submittedProposal(), status };
+				const record = sampleRecord(sampleOrder({ kind }));
+				const node = fakeNode();
+				const verdict = await validatorAt(
+					node,
+					fakeOrderbook(record),
+					0n,
+					0n,
+					10_000n,
+					10n ** 36n,
+					100n,
+				).validate(proposal);
+				expect(verdict).toEqual({ kind: "reject", reason: "TradeValueCapExceeded" });
+				expect(node.counts.simulateV1).toBe(0);
+			});
+		}
+	}
+
+	it("values the proposed partial fill using the sell price, not the full order or buy price", async () => {
+		const proposal = { ...submittedProposal(), status: "active" as const, sellAmount: 500_000n };
+		const record = sampleRecord(sampleOrder({ partiallyFillable: true, sellAmount: 10_000_000n }));
+		const node = fakeNode();
+		const orderbook: FetchOrder = {
+			order: async () => record,
+			nativePrice: async (token) =>
+				token.toLowerCase() === proposal.sellToken.toLowerCase() ? ETHER : 100n * ETHER,
+		};
+		expect(
+			await validatorAt(node, orderbook, 0n, 0n, 10_000n, 10n ** 36n, 100n).validate(proposal),
+		).toMatchObject({ kind: "accept" });
+		expect(node.counts.simulateV1).toBe(1);
+	});
+
+	it("rechecks current sell-token price for an already active proposal", async () => {
+		const proposal = { ...submittedProposal(), status: "active" as const };
+		const node = fakeNode();
+		let sellPrice = ETHER / 2n;
+		const orderbook: FetchOrder = {
+			order: async () => sampleRecord(sampleOrder()),
+			nativePrice: async (token) => (token === proposal.sellToken ? sellPrice : ETHER),
+		};
+		const validator = validatorAt(node, orderbook, 0n, 0n, 10_000n, 10n ** 36n, 100n);
+		expect(await validator.validate(proposal)).toMatchObject({ kind: "accept" });
+		sellPrice = ETHER;
+		expect(await validator.validate(proposal)).toEqual({
+			kind: "reject",
+			reason: "TradeValueCapExceeded",
+		});
+		expect(node.counts.simulateV1).toBe(1);
+	});
+
+	for (const kind of [OrderKind.SELL, OrderKind.BUY]) {
+		for (const failure of ["notFound", "transient", "zero"] as const) {
+			it(`${kind} sell price ${failure} prevents admission`, async () => {
+				const proposal = submittedProposal();
+				const node = fakeNode();
+				const orderbook: FetchOrder = {
+					order: async () => sampleRecord(sampleOrder({ kind })),
+					nativePrice: async (token) => {
+						if (token !== proposal.sellToken) return ETHER;
+						if (failure === "zero") return 0n;
+						throw { kind: failure };
+					},
+				};
+				const verdict = await validatorAt(node, orderbook).validate(proposal);
+				expect(verdict).toEqual(
+					failure === "transient" ? null : { kind: "reject", reason: "NativePriceUnavailable" },
+				);
+				expect(node.counts.simulateV1).toBe(0);
+			});
+		}
+	}
 });
