@@ -565,11 +565,11 @@ describe("buffer debits", () => {
 	});
 
 	it("slashes when outstanding balance exceeds c_L", async () => {
-		// Create a proposal with a gap large enough to exceed c_L (0.01 ETH)
+		// Create a proposal with a gap large enough to exceed the buffer threshold (MIN_COLLATERAL/5 = 0.002 ETH)
 		const maxBuy = ETHER; // 1e18
 		const minBuy = ETHER / 2n;
 		// delivered = 0.98e18, gap = 0.02e18. With ref price = 1 ETH/token,
-		// nativeTokenAmount = 0.02 ETH = 2e16 > c_L (1e16).
+		// nativeTokenAmount = 0.02 ETH > threshold (0.002 ETH).
 		const delivered = (ETHER * 98n) / 100n;
 		const refPrice = ETHER.toString();
 
@@ -618,20 +618,20 @@ describe("buffer debits", () => {
 	});
 
 	it("credits offset debits before threshold check", async () => {
-		// First proposal: under-delivery of 0.008 ETH
+		// First proposal: under-delivery of 0.0008 ETH
 		const { tx: tx1 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
-		// Second proposal: over-delivery of 0.006 ETH
+		// Second proposal: over-delivery of 0.0006 ETH
 		const { tx: tx2 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
 		const deltaByTx = new Map([
-			[tx1.toLowerCase(), ETHER - 8_000_000_000_000_000n], // gap = +0.008 ETH
-			[tx2.toLowerCase(), ETHER + 6_000_000_000_000_000n], // gap = -0.006 ETH
+			[tx1.toLowerCase(), ETHER - 800_000_000_000_000n], // gap = +0.0008 ETH
+			[tx2.toLowerCase(), ETHER + 600_000_000_000_000n], // gap = -0.0006 ETH
 		]);
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
 		const operator = bufferOperator(deltaByTx, debitCalls);
 
 		await runBufferDebits(config(operator, []), new Map());
 
-		// Net balance = 0.008 - 0.006 = 0.002 ETH < c_L (0.01 ETH)
+		// Net balance = 0.0008 - 0.0006 = 0.0002 ETH < buffer threshold (MIN_COLLATERAL/5 = 0.002 ETH)
 		// No slash should happen — entries remain uncleared
 		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared.length).toBeGreaterThanOrEqual(2);
