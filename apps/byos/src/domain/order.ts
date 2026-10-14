@@ -82,15 +82,14 @@ export function checkProposalSlippage(
 /** Temporary per-proposal native sell-value guard, for both sell and buy orders.
  * Compare scaled products to avoid rounding a fractional wei at the boundary.
  * A zero MIN_COLLATERAL admits no proposal; it does not disable this guard.
+ * Returns true if the cap is exceeded.
  */
 export function checkTradeValueCap(
 	sellAmount: bigint,
 	sellTokenNativePrice: bigint,
 	minCollateral: bigint,
-): RejectionReason | null {
-	return sellAmount * sellTokenNativePrice >= 10_000n * minCollateral * NATIVE_PRICE_SCALE
-		? "TradeValueCapExceeded"
-		: null;
+): boolean {
+	return sellAmount * sellTokenNativePrice >= 10_000n * minCollateral * NATIVE_PRICE_SCALE;
 }
 
 function checkFillOrKill(order: CowOrder, proposal: Proposal): RejectionReason | null {

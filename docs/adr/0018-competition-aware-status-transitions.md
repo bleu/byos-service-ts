@@ -32,15 +32,9 @@ Settlement failures with other revert reasons remain `settleFailed`. These are g
 
 ### Success notification racing with filled-order validation
 
-The filled-order revert does not prove an external solver won: BYOS's own
-transaction may have landed before its success notification arrives. An
-attributed success therefore takes precedence over a `SolverOutbid` rejection.
-This narrowly reopens ADR-0013's terminal-state assumption because preserving
-the rejection would discard the settlement transaction and prevent buffer
-accounting. Other rejection reasons remain outside this recovery path.
+The filled-order revert does not prove an external solver won: BYOS's own transaction may have landed before its success notification arrives. An attributed success therefore takes precedence over a `SolverOutbid` rejection. This narrowly reopens ADR-0013's terminal-state assumption because preserving the rejection would discard the settlement transaction and prevent buffer accounting. Other rejection reasons remain outside this recovery path.
 
-The shared lifecycle specification needs to incorporate this recovery edge;
-its existing transition table does not describe this race.
+The shared lifecycle specification needs to incorporate this recovery edge; its existing transition table does not describe this race.
 
 ## Consequences
 

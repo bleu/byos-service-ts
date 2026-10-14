@@ -280,12 +280,9 @@ export class SimulationValidator implements ValidateProposal {
 		if (sellPriceResult.value <= 0n) {
 			return { kind: "reject", reason: "NativePriceUnavailable" };
 		}
-		const tradeValueReason = checkTradeValueCap(
-			proposal.sellAmount,
-			sellPriceResult.value,
-			this.minCollateral,
-		);
-		if (tradeValueReason) return { kind: "reject", reason: tradeValueReason };
+		if (checkTradeValueCap(proposal.sellAmount, sellPriceResult.value, this.minCollateral)) {
+			return { kind: "reject", reason: "TradeValueCapExceeded" };
+		}
 
 		// Step 3: Gap check — reject if min/quote spread exceeds configured limits
 		const slippageReason = checkProposalSlippage(
