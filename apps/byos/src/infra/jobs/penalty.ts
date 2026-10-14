@@ -27,8 +27,7 @@ function perProposalCL(
 	minCollateral: bigint,
 ): bigint {
 	if (!sellTokenRefPrice || sellTokenRefPrice === "0") return minCollateral;
-	const sellAmountNative =
-		(BigInt(sellAmount) * BigInt(sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+	const sellAmountNative = (BigInt(sellAmount) * BigInt(sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
 	const scaled = (sellAmountNative * collateralRatioBps) / 10_000n;
 	return scaled < minCollateral ? scaled : minCollateral;
 }

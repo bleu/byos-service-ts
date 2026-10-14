@@ -65,11 +65,7 @@ export const configSchema = z.object({
 	 * Mirrors CIP-87's chain-specific ϕ parameter (e.g. 4 bps for uncorrelated
 	 * pairs on Ethereum, 1 bps on BNB). One value per deployment — set via
 	 * COLLATERAL_RATIO_BPS. Default: 4 bps. */
-	COLLATERAL_RATIO_BPS: z.coerce
-		.number()
-		.int()
-		.min(0)
-		.default(4),
+	COLLATERAL_RATIO_BPS: z.coerce.number().int().min(0).default(4),
 	DEFAULT_GAS_PRICE: z.string(),
 
 	// Timing

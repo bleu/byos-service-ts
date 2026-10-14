@@ -1345,24 +1345,17 @@ export async function fetchInflightDataBySubSolver(
 			.select({ nativeTokenAmount: bufferEntries.nativeTokenAmount })
 			.from(bufferEntries)
 			.where(
-				and(
-					eq(bufferEntries.subSolver, subSolver.toLowerCase()),
-					eq(bufferEntries.cleared, false),
-				),
+				and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
 			),
 	]);
 
-	const bufferBalance = bufferRows.reduce(
-		(sum, r) => sum + BigInt(r.nativeTokenAmount),
-		0n,
-	);
+	const bufferBalance = bufferRows.reduce((sum, r) => sum + BigInt(r.nativeTokenAmount), 0n);
 
 	const proposalData = proposalRows.map((r) => {
 		const gasUsed = r.gasUsed != null ? BigInt(r.gasUsed) : null;
 		let sellAmountNative: bigint | null = null;
 		if (r.sellTokenRefPrice != null && r.sellTokenRefPrice !== "0") {
-			sellAmountNative =
-				(BigInt(r.sellAmount) * BigInt(r.sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+			sellAmountNative = (BigInt(r.sellAmount) * BigInt(r.sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
 		}
 		return { id: r.id, gasUsed, sellAmountNative };
 	});

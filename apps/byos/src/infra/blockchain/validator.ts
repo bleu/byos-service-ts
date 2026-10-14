@@ -6,8 +6,8 @@ import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../../do
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
 	type Candidate,
-	effectiveGas,
 	ESCROW_GAS_ESTIMATION,
+	effectiveGas,
 	scaledToFill,
 	scoreProposal,
 	surplusToken,

@@ -20,7 +20,7 @@ import {
 	type GasPriceRef,
 } from "./infra/blockchain/escrow.js";
 import { EscrowOperator } from "./infra/blockchain/operator.js";
-import { type FetchInflightData, ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
+import { ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
 import { enqueueAuditEvent } from "./infra/jobs/audit-worker.js";
 import type { BalanceRefreshConfig } from "./infra/jobs/balance-refresh.js";
 import {
@@ -153,11 +153,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
 	// Escrow validator
-	const escrowValidator = new EscrowValidator(
-		publicClient,
-		escrowAddress,
-		minCollateralWei,
-	);
+	const escrowValidator = new EscrowValidator(publicClient, escrowAddress, minCollateralWei);
 
 	// Orderbook client. Resolve the base URL explicitly so that local chains
 	// (e.g. foundry/31337) get the LOCAL_ORDERBOOK_URL fallback from

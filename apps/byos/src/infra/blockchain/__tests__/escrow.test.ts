@@ -58,16 +58,16 @@ function validatorWith(client: PublicClient): EscrowValidator {
 
 describe("EscrowValidator — floor gate (single proposal)", () => {
 	it("accepts when balance equals min collateral", async () => {
-		const verdict = await validatorWith(
-			clientWithBalance(MIN_COLLATERAL),
-		).validate(submittedProposal());
+		const verdict = await validatorWith(clientWithBalance(MIN_COLLATERAL)).validate(
+			submittedProposal(),
+		);
 		expect(verdict).toEqual({ kind: "accept", simulation: null });
 	});
 
 	it("rejects when balance is below min collateral", async () => {
-		const verdict = await validatorWith(
-			clientWithBalance(MIN_COLLATERAL - 1n),
-		).validate(submittedProposal());
+		const verdict = await validatorWith(clientWithBalance(MIN_COLLATERAL - 1n)).validate(
+			submittedProposal(),
+		);
 		expect(verdict).toEqual({ kind: "reject", reason: "InsufficientEscrow" });
 	});
 
