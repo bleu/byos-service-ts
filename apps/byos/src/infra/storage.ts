@@ -572,6 +572,7 @@ export async function resolveVerdict(
 		let buyToken: string | null = null;
 		let simulationFailureParams: unknown | null = null;
 		let simulationBuyAmount: string | null = null;
+		let sellTokenRefPrice: string | null = null;
 
 		switch (verdict.kind) {
 			case "accept":
@@ -595,6 +596,7 @@ export async function resolveVerdict(
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
 					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
+					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice.toString();
 				}
 				break;
 			case "reject":
@@ -627,6 +629,7 @@ export async function resolveVerdict(
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
 				...(simulationBuyAmount != null ? { simulationBuyAmount } : {}),
+				...(sellTokenRefPrice != null ? { sellTokenRefPrice } : {}),
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
@@ -1308,6 +1311,65 @@ export async function inflightGasUsedBySubSolver(
 	return rows.map((r) => (r.gasUsed != null ? BigInt(r.gasUsed) : null));
 }
 
+/**
+ * Returns in-flight proposal data and outstanding buffer balance for a subsolver.
+ * Used by Gate 2 of the cumulative exposure check (CIP-87).
+ * `sellAmountNative` is null when `sellTokenRefPrice` has not been written yet
+ * (proposal not yet accepted by the validator).
+ */
+export async function fetchInflightDataBySubSolver(
+	db: Db,
+	subSolver: Address,
+): Promise<{
+	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
+	bufferBalance: bigint;
+}> {
+	const NATIVE_PRICE_SCALE = 10n ** 18n;
+
+	const [proposalRows, bufferRows] = await Promise.all([
+		db
+			.select({
+				id: proposals.id,
+				gasUsed: proposals.gasUsed,
+				sellAmount: proposals.sellAmount,
+				sellTokenRefPrice: proposals.sellTokenRefPrice,
+			})
+			.from(proposals)
+			.where(
+				and(
+					eq(proposals.subSolver, subSolver.toLowerCase()),
+					inArray(proposals.status, ["submitted", "active", "executing"]),
+				),
+			),
+		db
+			.select({ nativeTokenAmount: bufferEntries.nativeTokenAmount })
+			.from(bufferEntries)
+			.where(
+				and(
+					eq(bufferEntries.subSolver, subSolver.toLowerCase()),
+					eq(bufferEntries.cleared, false),
+				),
+			),
+	]);
+
+	const bufferBalance = bufferRows.reduce(
+		(sum, r) => sum + BigInt(r.nativeTokenAmount),
+		0n,
+	);
+
+	const proposalData = proposalRows.map((r) => {
+		const gasUsed = r.gasUsed != null ? BigInt(r.gasUsed) : null;
+		let sellAmountNative: bigint | null = null;
+		if (r.sellTokenRefPrice != null && r.sellTokenRefPrice !== "0") {
+			sellAmountNative =
+				(BigInt(r.sellAmount) * BigInt(r.sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+		}
+		return { id: r.id, gasUsed, sellAmountNative };
+	});
+
+	return { proposals: proposalData, bufferBalance };
+}
+
 export async function activeByOrderUids(
 	db: Db,
 	orderUids: string[],
@@ -1575,16 +1637,24 @@ export async function clearBufferEntries(
 	return result.length;
 }
 
-export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {
+export interface PendingPenaltyWithPrices extends PendingPenalty {
+	sellAmount: string;
+	sellTokenRefPrice: string | null;
+}
+
+export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithPrices[]> {
 	const rows = await db
 		.select({
 			id: penalties.id,
 			proposalId: penalties.proposalId,
 			subSolver: penalties.subSolver,
 			orderUid: penalties.orderUid,
+			sellAmount: proposals.sellAmount,
+			sellTokenRefPrice: proposals.sellTokenRefPrice,
 		})
 		.from(penalties)
-		.where(sql`penalty_tx_hash IS NULL`)
+		.innerJoin(proposals, eq(proposals.id, penalties.proposalId))
+		.where(sql`${penalties.penaltyTxHash} IS NULL`)
 		.orderBy(penalties.id);
 
 	return rows.map((r) => ({
@@ -1592,5 +1662,7 @@ export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {
 		proposalId: r.proposalId,
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
+		sellAmount: r.sellAmount,
+		sellTokenRefPrice: r.sellTokenRefPrice ?? null,
 	}));
 }

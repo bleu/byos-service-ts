@@ -1,4 +1,4 @@
-import { OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
+import { EscrowAbi, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
@@ -7,6 +7,7 @@ import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
 	type Candidate,
 	effectiveGas,
+	ESCROW_GAS_ESTIMATION,
 	scaledToFill,
 	scoreProposal,
 	surplusToken,
@@ -15,6 +16,19 @@ import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../d
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
 import type { EscrowValidator, GasPriceRef } from "./escrow.js";
 import { buildSimulation } from "./simulation.js";
+
+/**
+ * Per-subsolver in-flight data needed for Gate 2 cumulative exposure check.
+ * `sellAmountNative` is null for proposals whose sell-token ref price has not
+ * yet been written (i.e. not yet accepted by the validator) — the caller must
+ * treat this as a hard reject (InflightPriceUnavailable).
+ * `bufferBalance` is the sum of uncleared buffer_entries.nativeTokenAmount for
+ * the subsolver, subtracted from effectiveBalance to get the adjusted balance.
+ */
+export type FetchInflightData = (subSolver: Address) => Promise<{
+	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
+	bufferBalance: bigint;
+}>;
 
 function buildTenderlyUrl({
 	chainId,
@@ -152,6 +166,9 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly minScore: bigint,
 		private readonly maxSlippageBps: bigint,
 		private readonly maxSlippageNative: bigint,
+		private readonly collateralRatioBps: bigint,
+		private readonly minCollateral: bigint,
+		private readonly fetchInflightData: FetchInflightData,
 		private readonly logger?: Logger,
 		private readonly submitter?: Address,
 	) {}
@@ -231,9 +248,10 @@ export class SimulationValidator implements ValidateProposal {
 		// price notFound on a sell order → fail closed (ProposedSlippageOutrange),
 		// price unavailable on a buy order → use 0n (gap check skips buy orders),
 		// any transient error → defer.
-		const [orderResult, priceResult] = await Promise.allSettled([
+		const [orderResult, priceResult, sellPriceResult] = await Promise.allSettled([
 			this.orderbook.order(proposal.orderUid),
 			this.orderbook.nativePrice(proposal.buyToken),
+			this.orderbook.nativePrice(proposal.sellToken),
 		]);
 
 		if (orderResult.status === "rejected") {
@@ -258,6 +276,16 @@ export class SimulationValidator implements ValidateProposal {
 			nativePrice = priceResult.value;
 		}
 
+		if (sellPriceResult.status === "rejected") {
+			const err = sellPriceResult.reason as OrderbookError;
+			if (err.kind === "notFound") return { kind: "reject", reason: "NativePriceUnavailable" };
+			return null; // transient, defer
+		}
+		if (sellPriceResult.value <= 0n) {
+			return { kind: "reject", reason: "NativePriceUnavailable" };
+		}
+		const sellTokenRefPrice = sellPriceResult.value;
+
 		// Step 2: Check envelope validity
 		const envelopeReason = checkEnvelope(record, proposal);
 		if (envelopeReason) {
@@ -274,6 +302,70 @@ export class SimulationValidator implements ValidateProposal {
 		);
 		if (slippageReason) {
 			return { kind: "reject", reason: slippageReason };
+		}
+
+		// Gate 2: cumulative collateral exposure check (CIP-87).
+		//
+		// Per-proposal penalty cap mirrors the protocol formula:
+		//   penaltyCap(o) = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
+		// where minCollateral serves as c̄ (the ~$20 USD absolute bound from CIP-87).
+		//
+		// adjustedBalance = effectiveBalance − outstandingBufferBalance
+		// Gate passes iff: adjustedBalance > Σ penaltyCap(o) + gasEstimate × gasPrice
+		//   summed over all active proposals for this subsolver, including this one.
+		{
+			let inflightData: Awaited<ReturnType<FetchInflightData>>;
+			try {
+				inflightData = await this.fetchInflightData(proposal.subSolver);
+			} catch {
+				return null; // transient DB error, defer
+			}
+
+			const NATIVE_PRICE_SCALE = 10n ** 18n;
+
+			// Compute penalty cap for a single proposal given its native sell amount.
+			const penaltyCap = (sellAmountNative: bigint): bigint => {
+				const scaled = (sellAmountNative * this.collateralRatioBps) / 10_000n;
+				return scaled < this.minCollateral ? scaled : this.minCollateral;
+			};
+
+			// Check siblings first — hard-reject if any lack a ref price.
+			let siblingExposure = 0n;
+			for (const p of inflightData.proposals) {
+				if (p.id === proposal.id) continue;
+				if (p.sellAmountNative === null) {
+					return { kind: "reject", reason: "InflightPriceUnavailable" };
+				}
+				const gas = p.gasUsed ?? 0n;
+				siblingExposure += penaltyCap(p.sellAmountNative) + gas * this.gasPriceRef.value;
+			}
+
+			// Current proposal's contribution.
+			const currentSellAmountNative =
+				(proposal.sellAmount * sellTokenRefPrice) / NATIVE_PRICE_SCALE;
+			const currentExposure =
+				penaltyCap(currentSellAmountNative) +
+				BigInt(ESCROW_GAS_ESTIMATION) * this.gasPriceRef.value;
+
+			// effectiveBalance from the escrow cache is not available here; we read it
+			// via the EscrowValidator which runs first. Use the on-chain value directly.
+			// Import EscrowAbi and read effectiveBalance.
+			let escrowBalance: bigint;
+			try {
+				escrowBalance = await this.publicClient.readContract({
+					address: this.escrowAddress,
+					abi: EscrowAbi,
+					functionName: "effectiveBalance",
+					args: [proposal.subSolver],
+				});
+			} catch {
+				return null; // RPC error, defer
+			}
+
+			const adjustedBalance = escrowBalance - inflightData.bufferBalance;
+			if (siblingExposure + currentExposure > adjustedBalance) {
+				return { kind: "reject", reason: "ExposureCapExceeded" };
+			}
 		}
 
 		// Step 4: Resolve trampoline address
@@ -437,6 +529,7 @@ export class SimulationValidator implements ValidateProposal {
 				sellToken: record.order.sellToken,
 				buyToken: record.order.buyToken,
 				simulationBuyAmount,
+				sellTokenRefPrice,
 			},
 		};
 	}

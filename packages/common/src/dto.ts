@@ -125,6 +125,8 @@ export const RejectionReason = {
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
 	/** Buy-token native price is unavailable — cannot evaluate the native-amount slippage cap. */
 	NativePriceUnavailable: "NativePriceUnavailable",
+	/** A sibling in-flight proposal has no sell-token ref price yet — cannot compute cumulative exposure. */
+	InflightPriceUnavailable: "InflightPriceUnavailable",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -142,6 +144,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.ProposedSlippageOutrange,
 	RejectionReason.SimulationMissingExecutedEvent,
 	RejectionReason.NativePriceUnavailable,
+	RejectionReason.InflightPriceUnavailable,
 ]);
 
 // --- Proposal Metadata ---

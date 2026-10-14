@@ -12,6 +12,27 @@ import {
 } from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
+const NATIVE_PRICE_SCALE = 10n ** 18n;
+
+/**
+ * Per-proposal penalty cap (cL) following CIP-87:
+ *   cL = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
+ * where minCollateral is c̄ (~$20 USD absolute bound).
+ * Mirrors the Gate 2 formula in SimulationValidator — both sides use the same cap.
+ */
+function perProposalCL(
+	sellAmount: string,
+	sellTokenRefPrice: string | null,
+	collateralRatioBps: bigint,
+	minCollateral: bigint,
+): bigint {
+	if (!sellTokenRefPrice || sellTokenRefPrice === "0") return minCollateral;
+	const sellAmountNative =
+		(BigInt(sellAmount) * BigInt(sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+	const scaled = (sellAmountNative * collateralRatioBps) / 10_000n;
+	return scaled < minCollateral ? scaled : minCollateral;
+}
+
 const MAX_DEBIT_ATTEMPTS = 10;
 
 /**
@@ -26,7 +47,8 @@ export function nonSettlementReason(orderUid: string): Hex {
 export interface PenaltyWorkerConfig {
 	db: Db;
 	operator: DebitEscrow;
-	cL: bigint;
+	collateralRatioBps: bigint;
+	minCollateral: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
 	/** Unique process-instance identity used only for expiring database leases. */
@@ -168,7 +190,7 @@ export async function runRevertDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, cL, onAuditEvent, logger } = config;
+	const { db, operator, collateralRatioBps, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
@@ -194,6 +216,12 @@ export async function runRevertDebits(
 			continue;
 		}
 
+		const cL = perProposalCL(
+			String(proposal.sellAmount),
+			proposal.sellTokenRefPrice ?? null,
+			collateralRatioBps,
+			minCollateral,
+		);
 		const amount = revertDebit(cost, cL);
 		const landedDebit = await durableDebit(
 			config,
@@ -245,7 +273,7 @@ export async function runNonSettlementDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, cL, onAuditEvent, logger } = config;
+	const { db, collateralRatioBps, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.pendingPenalties>>;
 	try {
@@ -258,6 +286,12 @@ export async function runNonSettlementDebits(
 	for (const penalty of pending) {
 		if ((attempts.get(penalty.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
+		const cL = perProposalCL(
+			penalty.sellAmount,
+			penalty.sellTokenRefPrice,
+			collateralRatioBps,
+			minCollateral,
+		);
 		const amount = nonSettlementDebit(cL);
 		const reason = nonSettlementReason(penalty.orderUid);
 		const landedDebit = await durableDebit(
@@ -315,7 +349,7 @@ export async function runBufferDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, cL, onAuditEvent, logger } = config;
+	const { db, operator, minCollateral, onAuditEvent, logger } = config;
 
 	// Step 1: Snapshot settled proposals with loose slippage that have
 	// no ledger entry yet.
@@ -450,7 +484,10 @@ export async function runBufferDebits(
 			continue;
 		}
 
-		if (balance <= cL) continue;
+		// Buffer slash threshold: a fixed fraction of MIN_COLLATERAL.
+		// Deliberately simpler than per-proposal scaling — the buffer accumulates
+		// across many orders and a per-order sum would require joining all entries.
+		if (balance <= minCollateral / 5n) continue;
 
 		const entries = await store.unclearedBufferEntries(db, subSolver);
 		const entryIds = entries.map((entry) => entry.id);

@@ -83,7 +83,8 @@ function config(operator: DebitEscrow | LegacyDebitEscrow, events: AuditEvent[] 
 	return {
 		db: ctx.db,
 		operator: "debit" in operator ? durableTestOperator(operator) : operator,
-		cL: C_L,
+		collateralRatioBps: 0n,
+		minCollateral: C_L,
 		workerId: "test-worker",
 		onAuditEvent: (event: AuditEvent) => {
 			events.push(event);

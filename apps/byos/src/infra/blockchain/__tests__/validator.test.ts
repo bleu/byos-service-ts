@@ -171,6 +171,10 @@ function fakeNode(opts?: {
 				counts.addressOf += 1;
 				return opts?.addressOf ? await opts.addressOf() : TRAMPOLINE;
 			}
+			if (args.functionName === "effectiveBalance") {
+				// Return a large balance so Gate 2 always passes in unit tests.
+				return 10n ** 30n;
+			}
 			// authenticator() or other view calls
 			return AUTHENTICATOR;
 		},
@@ -224,6 +228,9 @@ function validatorAt(
 		minScore,
 		maxSlippageBps,
 		maxSlippageNative,
+		0n, // collateralRatioBps = 0 → Gate 2 exposure is 0, always passes
+		0n, // minCollateral = 0 → penaltyCap = 0
+		async () => ({ proposals: [], bufferBalance: 0n }), // fetchInflightData: no siblings
 	);
 }
 

@@ -511,11 +511,6 @@ components:
 
         - `InsufficientEscrow` — the sub-solver's escrow balance is below
           the required minimum. Fix: deposit escrow and resubmit.
-        - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
-          exposure (sum of `gasUsed * gasPrice + minCollateral` across all
-          active, submitted, and executing proposals) would exceed their
-          effective escrow balance. Fix: wait for in-flight proposals to
-          settle before submitting more.
         - `UnsupportedOrder` — the order is outside the simulation envelope
           (hooks, non-erc20 balances).
         - `AmountMismatch` — for fill-or-kill orders, the proposal amount
@@ -527,6 +522,13 @@ components:
           below the minimum (`score = surplus - gas`), so it could
           never win an auction. Fix: improve the price or
           resubmit when gas is cheaper.
+        - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
+          exposure (sum of `penaltyCap + gas` across all active, submitted,
+          and executing proposals) would exceed their adjusted escrow balance
+          (effectiveBalance minus outstanding buffer). Fix: wait for in-flight
+          proposals to settle before submitting more.
+        - `InflightPriceUnavailable` — a sibling in-flight proposal has no
+          sell-token reference price yet. Fix: wait briefly and resubmit.
       type: string
       enum:
         - InsufficientEscrow
@@ -535,6 +537,7 @@ components:
         - AmountMismatch
         - OrderNotFound
         - Unprofitable
+        - InflightPriceUnavailable
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at

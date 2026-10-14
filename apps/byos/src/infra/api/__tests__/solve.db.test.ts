@@ -120,6 +120,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 				sellToken: SELL_TOKEN as Address,
 				buyToken: BUY_TOKEN as Address,
 				simulationBuyAmount,
+				sellTokenRefPrice: 1_000_000_000_000_000_000n,
 			},
 		});
 
@@ -150,6 +151,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 				sellToken: SELL_TOKEN as Address,
 				buyToken: BUY_TOKEN as Address,
 				simulationBuyAmount,
+				sellTokenRefPrice: 1_000_000_000_000_000_000n,
 			},
 		});
 
@@ -177,6 +179,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 				sellToken: SELL_TOKEN as Address,
 				buyToken: BUY_TOKEN as Address,
 				simulationBuyAmount: quoteBuyAmount, // will be overwritten below
+				sellTokenRefPrice: 1_000_000_000_000_000_000n,
 			},
 		});
 

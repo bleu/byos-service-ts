@@ -20,7 +20,7 @@ import {
 	type GasPriceRef,
 } from "./infra/blockchain/escrow.js";
 import { EscrowOperator } from "./infra/blockchain/operator.js";
-import { ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
+import { type FetchInflightData, ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
 import { enqueueAuditEvent } from "./infra/jobs/audit-worker.js";
 import type { BalanceRefreshConfig } from "./infra/jobs/balance-refresh.js";
 import {
@@ -157,8 +157,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		publicClient,
 		escrowAddress,
 		minCollateralWei,
-		gasPriceRef,
-		(subSolver, excludeId) => store.inflightGasUsedBySubSolver(db, subSolver, excludeId),
 	);
 
 	// Orderbook client. Resolve the base URL explicitly so that local chains
@@ -179,6 +177,9 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MIN_PROPOSAL_SCORE),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_BPS),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
+		BigInt(config.COLLATERAL_RATIO_BPS),
+		minCollateralWei,
+		(subSolver) => store.fetchInflightDataBySubSolver(db, subSolver),
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 	);

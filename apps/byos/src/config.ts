@@ -50,12 +50,26 @@ export const configSchema = z.object({
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
 	/** Minimum escrow collateral for this deployment, in wei. Defaults to 10^16
-	 * (0.01 ETH-equivalent) — a placeholder until per-chain gas data informs it
-	 * (COW-1265). Override with MIN_COLLATERAL when deploying. */
+	 * (0.01 ETH-equivalent). Serves two roles:
+	 * (1) Gate 1 floor: the sub-solver must hold at least this much escrow.
+	 * (2) Per-proposal absolute penalty cap (c̄ from CIP-87): each proposal's
+	 *     contribution to cumulative exposure is capped at this value, mirroring
+	 *     the protocol's ~$20 USD absolute bound. Override with MIN_COLLATERAL when
+	 *     deploying. */
 	MIN_COLLATERAL: z
 		.string()
 		.regex(/^\d+$/, "Must be a decimal wei amount")
 		.default("10000000000000000"),
+	/** Fraction of each proposal's native sell value that counts toward the
+	 * subsolver's cumulative penalty exposure, in basis points.
+	 * Mirrors CIP-87's chain-specific ϕ parameter (e.g. 4 bps for uncorrelated
+	 * pairs on Ethereum, 1 bps on BNB). One value per deployment — set via
+	 * COLLATERAL_RATIO_BPS. Default: 4 bps. */
+	COLLATERAL_RATIO_BPS: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.default(4),
 	DEFAULT_GAS_PRICE: z.string(),
 
 	// Timing

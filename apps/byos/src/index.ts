@@ -160,7 +160,8 @@ async function main() {
 	const penaltyWorker = createPenaltyWorker(ctx.redis, {
 		db: ctx.db,
 		operator: ctx.operator,
-		cL: ctx.minCollateralWei,
+		collateralRatioBps: BigInt(config.COLLATERAL_RATIO_BPS),
+		minCollateral: ctx.minCollateralWei,
 		workerId: `penalty-${randomUUID()}`,
 		onAuditEvent: ctx.onAuditEvent,
 		logger: logger.child({ worker: "penalty" }),
