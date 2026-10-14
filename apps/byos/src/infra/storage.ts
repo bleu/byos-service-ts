@@ -596,7 +596,7 @@ export async function resolveVerdict(
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
 					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
-					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice.toString();
+					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice?.toString() ?? null;
 				}
 				break;
 			case "reject":
