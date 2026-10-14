@@ -50,6 +50,7 @@ export interface AppContext {
 	queues: Queues;
 	config: Config;
 	gasPriceRef: GasPriceRef;
+	/** Used by the background validation tick (calls beginTick()). */
 	validator: ValidateProposal;
 	operator: EscrowOperator;
 	rateLimiter: RateLimiter;
@@ -71,7 +72,7 @@ export function createSharedPublicClient(chain: Chain, transport: Transport): Pu
 
 export async function buildContext(config: Config, logger: Logger): Promise<AppContext> {
 	// Database
-	const { db, client: dbClient } = createDb(config.DATABASE_URL);
+	const { db, client: dbClient } = createDb(config.DATABASE_URL, config.VALIDATION_CONCURRENCY);
 	const migrationsFolder = resolve(import.meta.dirname, "../drizzle");
 	await migrate(db, { migrationsFolder });
 	logger.info("database connected and migrated");
@@ -152,13 +153,14 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	const settlementAddress: Address =
 		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
-	// Escrow validator
+	// One validator shared by the proposal queue.
+	const inflightFetch = (subSolver: Address) => store.inflightGasUsedBySubSolver(db, subSolver);
 	const escrowValidator = new EscrowValidator(
 		publicClient,
 		escrowAddress,
 		minCollateralWei,
 		gasPriceRef,
-		(subSolver, excludeId) => store.inflightGasUsedBySubSolver(db, subSolver, excludeId),
+		inflightFetch,
 	);
 
 	// Orderbook client. Resolve the base URL explicitly so that local chains
@@ -179,6 +181,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MIN_PROPOSAL_SCORE),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_BPS),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
+		minCollateralWei,
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 	);

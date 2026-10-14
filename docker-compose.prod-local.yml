@@ -10,7 +10,7 @@ services:
       volumes:
         - postgres-data:/var/lib/postgresql/data
       ports:
-        - "55432:5432"
+        - "${POSTGRES_HOST_PORT:-55432}:5432"
       deploy:
         resources:
           limits:
@@ -28,21 +28,24 @@ services:
       # --appendonly yes is required so the byos:known-subsolvers set survives
       # container restarts (ADR-0017). Without it, every restart re-triggers
       # the "new sub-solver" Slack notification for every known subsolver.
-      command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+      command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD}
+      environment:
+        REDIS_PASSWORD: ${REDIS_PASSWORD}
       volumes:
         - redis-data:/data
       ports:
-        - "56379:6379"
+        - "${REDIS_HOST_PORT:-56379}:6379"
       deploy:
         resources:
           limits:
-            memory: "128M"
-            cpus: "0.1"
+            memory: "1G"
+            cpus: "0.5"
       healthcheck:
-        test: ["CMD", "redis-cli", "ping"]
+        test: ["CMD-SHELL", 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG']
         interval: 2s
         timeout: 2s
         retries: 15
+        start_period: 180s
 
     byos:
       image: byos-service:local
@@ -53,8 +56,8 @@ services:
         DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/byos
         REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       ports:
-        - "59585:9585"
-        - "59586:9586"
+        - "${BYOS_PUBLIC_HOST_PORT:-59585}:9585"
+        - "${BYOS_INTERNAL_HOST_PORT:-59586}:9586"
       deploy:
         resources:
           limits:
@@ -79,7 +82,7 @@ services:
       environment:
         TYCHO_API_KEY: ${TYCHO_API_KEY}
       ports:
-        - "53000:3000"
+        - "${FYND_HOST_PORT:-53000}:3000"
       deploy:
         resources:
           limits:
@@ -106,21 +109,21 @@ services:
         byos:
           condition: service_healthy
 
-    private-mm-subsolver:
-      image: byos-service:local
-      restart: unless-stopped
-      command: ["node", "apps/private-mm-subsolver/dist/index.js"]
-      env_file: .env.private-mm-subsolver
-      environment:
-        BYOS_URL: http://byos:9585
-      deploy:
-        resources:
-          limits:
-            memory: "128M"
-            cpus: "0.2"
-      depends_on:
-        byos:
-          condition: service_healthy
+    # private-mm-subsolver:
+    #   image: byos-service:local
+    #   restart: unless-stopped
+    #   command: ["node", "apps/private-mm-subsolver/dist/index.js"]
+    #   env_file: .env.private-mm-subsolver
+    #   environment:
+    #     BYOS_URL: http://byos:9585
+    #   deploy:
+    #     resources:
+    #       limits:
+    #         memory: "128M"
+    #         cpus: "0.2"
+    #   depends_on:
+    #     byos:
+    #       condition: service_healthy
 
     admin:
       restart: unless-stopped
@@ -131,7 +134,7 @@ services:
       environment:
         DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/byos
       ports:
-        - "53001:3000"
+        - "${ADMIN_HOST_PORT:-53001}:3000"
       deploy:
         resources:
           limits:

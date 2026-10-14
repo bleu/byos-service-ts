@@ -92,6 +92,27 @@ ENVEOF
   echo "Wrote $ENV_FILE"
 }
 
+# Grant EthFlow (0x04501b9b...) an unlimited WETH allowance to the vault relayer.
+# The real EthFlow contract does this in its constructor, but the local chain
+# loads EthFlow from anvil-state.json via anvil_setCode which injects bytecode
+# only — the constructor never runs, so the allowance is absent. Without it,
+# the vault relayer cannot pull WETH from EthFlow during settlement simulation.
+init_ethflow_allowance() {
+  local rpc="http://localhost:8545"
+  local ethflow="0x04501b9b1d52e67f6862d157e00d13419d2d6e95"
+  local weth="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  local vault_relayer="0xC92E8bdf79f0507f65a392b0ab4667716BFE0110"
+  local max_uint256="115792089237316195423570985008687907853269984665640564039457584007913129639935"
+
+  echo "Initializing EthFlow WETH allowance..."
+  cast rpc anvil_setBalance "$ethflow" "0x1000000000000000000" --rpc-url "$rpc" > /dev/null
+  cast rpc anvil_impersonateAccount "$ethflow" --rpc-url "$rpc" > /dev/null
+  cast send "$weth" "approve(address,uint256)" "$vault_relayer" "$max_uint256" \
+    --from "$ethflow" --unlocked --rpc-url "$rpc" > /dev/null
+  cast rpc anvil_stopImpersonatingAccount "$ethflow" --rpc-url "$rpc" > /dev/null
+  echo "EthFlow WETH allowance set."
+}
+
 # If the command is "up", bake contracts first, then start the stack.
 # For other commands (down, logs, ps, etc.), pass through as-is.
 if [ "${1:-}" = "up" ]; then
@@ -106,6 +127,8 @@ if [ "${1:-}" = "up" ]; then
     fi
     exit 1
   }
+
+  init_ethflow_allowance
 else
   compose "$@"
 fi

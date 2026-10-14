@@ -41,6 +41,8 @@ services:
       INTERNAL_ADDR_PORT: "9586"
       LOG_LEVEL: debug
       JSON_LOGS: "true"
+      VALIDATION_INTERVAL_SECS: "4"
+      MAX_PROPOSAL_SLIPPAGE_BPS: "600"
     ports:
       - "19585:9585"
       - "19586:9586"
@@ -83,4 +85,5 @@ services:
 
   autopilot:
     environment:
+      SOLVE_DEADLINE: "4s"
       DRIVERS: "byos-ts|http://driver/byos-ts|0x90F79bf6EB2c4f870365E785982E1f101E93b906"

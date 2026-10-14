@@ -83,6 +83,26 @@ export const ACCOUNTS = {
 		address: "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720" as Address,
 		key: "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6" as Hex,
 	},
+	/** Anvil account #10 — quaternary sub-solver (Unprofitable + SolverOutbid victim) */
+	subSolver4: {
+		address: "0xCCe3657d4c072CA1f83c692feB3c8546875e7975" as Address,
+		key: "0xf214f2b2cd398c806f84e317254e0f0b801d0643e213b9be87ff0f5ff25f8fcd" as Hex,
+	},
+	/** Anvil account #11 — quaternary trader (Unprofitable scenario) */
+	trader4: {
+		address: "0x71bE63f3384f5fb98995898A86B02Fb2426c5788" as Address,
+		key: "0x701b615bbdfb9de65240bc28bd21bbc0d996645a3dd57e7b12bc2bdf6f192c82" as Hex,
+	},
+	/** Anvil account #12 — quinary sub-solver (SolverOutbid first settlement) */
+	subSolver5: {
+		address: "0xFABB0ac9d68B0B445fB7357272Ff202C5651694a" as Address,
+		key: "0xa267530f49f8280200edf313ee7af6b827f2a8bce2897751d06a843f644967b1" as Hex,
+	},
+	/** Anvil account #13 — quinary trader (SolverOutbid scenario) */
+	trader5: {
+		address: "0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec" as Address,
+		key: "0x47c99abed3324a2707c28affff1267e45918ec8c3f20b8aa892e8b065d2942dd" as Hex,
+	},
 };
 
 /** GPv2 EIP-712 domain for order signing. */

@@ -64,9 +64,20 @@ info:
     solver-engine spec (`crates/solvers/openapi.yml` in
     cowprotocol/services).
   version: 0.1.0
+  contact:
+    name: bleu
+    url: https://github.com/bleu/byos-service-ts
   license:
     name: GPL-3.0-or-later
     url: https://www.gnu.org/licenses/gpl-3.0.html
+
+tags:
+  - name: proposals
+    description: Proposal submission and lifecycle management.
+  - name: escrow
+    description: Sub-solver escrow and buffer balance.
+  - name: health
+    description: Service health and liveness probes.
 
 servers:
   - url: http://localhost:9585
@@ -79,6 +90,7 @@ paths:
   /healthz:
     get:
       operationId: healthz
+      tags: [health]
       summary: Health check.
       description: >-
         Liveness probe. Always `200` with an empty body. Exempt from the
@@ -92,6 +104,7 @@ paths:
   /proposals:
     post:
       operationId: createProposal
+      tags: [proposals]
       summary: Submit a signed settlement proposal.
       description: |
         Parses the request, recovers the sub-solver address from the EIP-712
@@ -145,6 +158,7 @@ paths:
       - $ref: "#/components/parameters/ProposalIdPath"
     get:
       operationId: getProposal
+      tags: [proposals]
       summary: Get one of the caller's proposals.
       description: |
         Returns the full proposal: amounts, tokens, interactions, status, and
@@ -196,6 +210,7 @@ paths:
 
     delete:
       operationId: cancelProposal
+      tags: [proposals]
       summary: Cancel a live proposal.
       description: |
         Requires an EIP-712 `CancelProposal` signature over the proposal id
@@ -238,6 +253,7 @@ paths:
   /proposals/by-sub-solver:
     get:
       operationId: listProposalsBySubSolver
+      tags: [proposals]
       summary: List the caller's own proposals.
       description: |
         Lists the caller's proposals across all orders. Identity comes
@@ -273,6 +289,7 @@ paths:
   /buffer-balance:
     get:
       operationId: getBufferBalance
+      tags: [escrow]
       summary: Get the caller's off-chain buffer balance.
       description: |
         Returns the caller's outstanding buffer balance — the sum of
@@ -306,6 +323,7 @@ paths:
   /proposals/{orderUid}:
     get:
       operationId: listProposalsByOrder
+      tags: [proposals]
       summary: List the caller's proposals on one order.
       description: |
         Owner-scoped: returns only the caller's own proposals on
@@ -523,6 +541,13 @@ components:
           zero, exceeds the order, or violates the limit price.
         - `OrderNotFound` — the orderbook does not know the proposal's
           order UID.
+        - `TradeValueCapExceeded` — the proposal sell amount, valued using
+          the orderbook sell-token native price, is at or above
+          `10_000 * MIN_COLLATERAL`. Applies to sell and buy orders, including
+          partial fills, during immediate validation and revalidation.
+        - `NativePriceUnavailable` — a required native token price is missing
+          or the sell-token price is non-positive; native-value guards cannot
+          be evaluated. Temporary lookup failures defer validation.
         - `Unprofitable` — the first simulation scored the proposal at or
           below the minimum (`score = surplus - gas`), so it could
           never win an auction. Fix: improve the price or
@@ -535,6 +560,8 @@ components:
         - AmountMismatch
         - OrderNotFound
         - Unprofitable
+        - TradeValueCapExceeded
+        - NativePriceUnavailable
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at

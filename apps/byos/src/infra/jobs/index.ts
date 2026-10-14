@@ -39,15 +39,49 @@ export interface Queues {
 
 const PREFIX = "byos";
 
-export function createQueues(connection: Redis): Queues {
+// Operational history is diagnostic; durable audit evidence lives in Postgres.
+export const OPERATIONAL_JOB_RETENTION = {
+	removeOnComplete: { age: 24 * 3600, count: 100 },
+	removeOnFail: { age: 7 * 24 * 3600, count: 1000 },
+};
+
+export function createQueues(connection: Redis, prefix = PREFIX): Queues {
 	return {
-		validation: new Queue("validation", { connection, prefix: PREFIX }),
-		validateProposal: new Queue("validate-proposal", { connection, prefix: PREFIX }),
-		retention: new Queue("retention", { connection, prefix: PREFIX }),
-		penalty: new Queue("penalty", { connection, prefix: PREFIX }),
-		audit: new Queue("audit", { connection, prefix: PREFIX }),
-		balanceRefresh: new Queue("balance-refresh", { connection, prefix: PREFIX }),
-		slackNotification: new Queue("slack-notification", { connection, prefix: PREFIX }),
+		validation: new Queue("validation", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
+		validateProposal: new Queue("validate-proposal", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
+		retention: new Queue("retention", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
+		penalty: new Queue("penalty", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
+		audit: new Queue("audit", {
+			connection,
+			prefix,
+			defaultJobOptions: { removeOnComplete: true, removeOnFail: false },
+		}),
+		balanceRefresh: new Queue("balance-refresh", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
+		slackNotification: new Queue("slack-notification", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
 	};
 }
 

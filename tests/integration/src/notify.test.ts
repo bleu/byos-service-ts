@@ -89,6 +89,25 @@ describe("/notify", () => {
 		expect(updated?.status).toBe("settled");
 	});
 
+	it("success notification recovers a proposal rejected by a concurrent filled-order validation", async () => {
+		const id = await seedActiveProposal(399n);
+		await store.recordSolution(app.ctx.db, 199, 1, id, "0");
+		await store.resolveVerdict(app.ctx.db, id, {
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		const txHash = `0x${"99".repeat(32)}`;
+		const notification = { auctionId: "199", solutionId: 1, kind: "success", transaction: txHash };
+		expect((await postNotify(notification)).status).toBe(200);
+		expect(await getProposal(id)).toMatchObject({
+			status: "settled",
+			settlementTxHash: txHash,
+			rejectionReason: null,
+		});
+		expect((await postNotify(notification)).status).toBe(200);
+		expect(await getProposal(id)).toMatchObject({ status: "settled", settlementTxHash: txHash });
+	});
+
 	it("success notification cancels the sub-solver's other live proposals for the order", async () => {
 		const id = await seedActiveProposal(304n);
 		const original = (await store.get(app.ctx.db, id))!;

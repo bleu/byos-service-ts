@@ -1,7 +1,11 @@
 import { Redis } from "ioredis";
+import pino from "pino";
 import type { Address } from "viem";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { allowAll } from "../../domain/rate-limit.js";
+import { enforceSignerLimit } from "../api/middleware.js";
 import { createRedisBalanceStore } from "../balance-cache.js";
+import { runBalanceRefresh } from "../jobs/balance-refresh.js";
 
 const REDIS_URL = process.env.BYOS_TEST_REDIS_URL ?? "redis://localhost:6379";
 const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
@@ -79,6 +83,53 @@ describe("redis balance store", () => {
 
 		expect(await store.activeAddresses(10)).toEqual([BROKE.toLowerCase()]);
 		await expect(store.lookup(BROKE)).resolves.toBe(10n ** 18n);
+	});
+
+	it("rejects a newly funded sub-solver until its negative cache entry expires", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		let onChainBalance = 0n;
+		const fetchBalances = vi.fn(async (addresses: Address[]) =>
+			addresses.map(() => onChainBalance),
+		);
+		const refresh = () =>
+			runBalanceRefresh({
+				store,
+				fetchBalances,
+				floorWei: FLOOR,
+				evictionSecs: 3600,
+				maxActive: 100,
+				batchSize: 10,
+				logger: pino({ enabled: false }),
+			});
+		const submit = () =>
+			enforceSignerLimit(
+				{
+					limiter: allowAll,
+					balances: store,
+					floorWei: FLOOR,
+					windowSecs: 60,
+					tier: { rateUnitWei: FLOOR, ratePerUnit: 1, minRate: 1, maxRate: 100 },
+				},
+				BROKE,
+				{ enforceEscrowFloor: true },
+			);
+
+		await submit(); // First contact is unknown and enrols the address.
+		await refresh(); // The chain reports zero, so it enters the negative cache.
+		onChainBalance = 10n ** 18n; // A later deposit does not invalidate Redis.
+		await refresh();
+		expect(fetchBalances).toHaveBeenCalledTimes(1);
+		await expect(submit()).rejects.toMatchObject({ kind: "InsufficientEscrow" });
+		expect(await redis.ttl(`${prefix}:low:${BROKE.toLowerCase()}`)).toBeGreaterThan(0);
+
+		// Expire the real Redis key without a ten-minute wall-clock wait.
+		await redis.pexpire(`${prefix}:low:${BROKE.toLowerCase()}`, 0);
+		await submit(); // Unknown again, so the address is re-enrolled.
+		await refresh();
+		expect(fetchBalances).toHaveBeenCalledTimes(2);
+		await expect(store.lookup(BROKE)).resolves.toBe(onChainBalance);
+		await expect(submit()).resolves.toBeUndefined();
 	});
 
 	it("evicts an address idle past the eviction age", async () => {

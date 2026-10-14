@@ -76,7 +76,7 @@ describe("bearer token enforcement", () => {
 					orders: [],
 					tokens: {},
 					effectiveGasPrice: "10000000000",
-					deadline: "2099-01-01T00:00:00Z",
+					deadline: new Date().toISOString(),
 				}),
 			});
 			expect(noAuthResp.status).toBe(401);
@@ -96,7 +96,7 @@ describe("bearer token enforcement", () => {
 					orders: [],
 					tokens: {},
 					effectiveGasPrice: "10000000000",
-					deadline: "2099-01-01T00:00:00Z",
+					deadline: new Date().toISOString(),
 				}),
 			});
 			expect(authedResp.status).toBe(200);
@@ -123,7 +123,7 @@ describe("bearer token enforcement", () => {
 				orders: [],
 				tokens: {},
 				effectiveGasPrice: "10000000000",
-				deadline: "2099-01-01T00:00:00Z",
+				deadline: new Date().toISOString(),
 			});
 			const solve = (authorization: string) =>
 				authedApp.request("/solve", {

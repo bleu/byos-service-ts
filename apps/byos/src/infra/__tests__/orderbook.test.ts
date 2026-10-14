@@ -1,4 +1,4 @@
-import { OrderKind, SigningScheme } from "@byos/common";
+import { OrderKind, OrderStatus, SigningScheme } from "@byos/common";
 import { OrderBookApiError, SupportedChainId } from "@cowprotocol/cow-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyOrderbookError, OrderbookClient } from "../orderbook.js";
@@ -192,6 +192,7 @@ describe("OrderbookClient — order mapping", () => {
 		expect(record.preInteractions).toEqual([]);
 		expect(record.postInteractions).toEqual([]);
 		expect(record.erc20Balances).toBe(true);
+		expect(record.status).toBe(OrderStatus.OPEN);
 	});
 
 	it("deserializes pre and post interactions", async () => {
@@ -372,6 +373,7 @@ describe("OrderbookClient — construction", () => {
 		new OrderbookClient(SupportedChainId.GNOSIS_CHAIN);
 		expect(vi.mocked(OrderBookApi)).toHaveBeenCalledWith({
 			chainId: SupportedChainId.GNOSIS_CHAIN,
+			limiterOpts: { tokensPerInterval: 100, interval: "second" },
 		});
 	});
 
@@ -381,6 +383,7 @@ describe("OrderbookClient — construction", () => {
 		expect(vi.mocked(OrderBookApi)).toHaveBeenCalledWith({
 			chainId: SupportedChainId.MAINNET,
 			baseUrls: { [SupportedChainId.MAINNET]: "http://barn.cow.fi/mainnet" },
+			limiterOpts: { tokensPerInterval: 100, interval: "second" },
 		});
 	});
 });

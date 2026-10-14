@@ -107,6 +107,44 @@ describe("parseConfig", () => {
 	});
 });
 
+describe("SUBSOLVER_WHITELIST", () => {
+	it("is null when not set", () => {
+		expect(parseConfig(base).SUBSOLVER_WHITELIST).toBeNull();
+	});
+
+	it("is null when set to an empty string", () => {
+		expect(parseConfig({ ...base, SUBSOLVER_WHITELIST: "" }).SUBSOLVER_WHITELIST).toBeNull();
+	});
+
+	it("parses a single address into a one-element set", () => {
+		const whitelist = parseConfig({
+			...base,
+			SUBSOLVER_WHITELIST: "0xaabbccddaabbccddaabbccddaabbccddaabbccdd",
+		}).SUBSOLVER_WHITELIST;
+		expect(whitelist?.size).toBe(1);
+		expect(whitelist?.has("0xaabbccddaabbccddaabbccddaabbccddaabbccdd")).toBe(true);
+	});
+
+	it("parses multiple comma-separated addresses", () => {
+		const whitelist = parseConfig({
+			...base,
+			SUBSOLVER_WHITELIST:
+				"0xaabbccddaabbccddaabbccddaabbccddaabbccdd,0x1122334411223344112233441122334411223344",
+		}).SUBSOLVER_WHITELIST;
+		expect(whitelist?.size).toBe(2);
+		expect(whitelist?.has("0xaabbccddaabbccddaabbccddaabbccddaabbccdd")).toBe(true);
+		expect(whitelist?.has("0x1122334411223344112233441122334411223344")).toBe(true);
+	});
+
+	it("normalises addresses to lowercase", () => {
+		const whitelist = parseConfig({
+			...base,
+			SUBSOLVER_WHITELIST: "0xAABBCCDDaabbccddaabbccddaabbccddaabbccdd",
+		}).SUBSOLVER_WHITELIST;
+		expect(whitelist?.has("0xaabbccddaabbccddaabbccddaabbccddaabbccdd")).toBe(true);
+	});
+});
+
 describe("rate limit config", () => {
 	it("defaults the tier and window to values sized from poll volume", () => {
 		const config = parseConfig(base);

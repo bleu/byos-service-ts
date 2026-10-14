@@ -30,6 +30,12 @@ When any step in the simulation pipeline reverts and `extractRevertReason` retur
 
 Settlement failures with other revert reasons remain `settleFailed`. These are genuine protocol-level failures rather than competitive losses and warrant separate operational attention.
 
+### Success notification racing with filled-order validation
+
+The filled-order revert does not prove an external solver won: BYOS's own transaction may have landed before its success notification arrives. An attributed success therefore takes precedence over a `SolverOutbid` rejection. This narrowly reopens ADR-0013's terminal-state assumption because preserving the rejection would discard the settlement transaction and prevent buffer accounting. Other rejection reasons remain outside this recovery path.
+
+The shared lifecycle specification needs to incorporate this recovery edge; its existing transition table does not describe this race.
+
 ## Consequences
 
 - Sub-solvers polling their proposal status now receive a clear competitive signal rather than silence.

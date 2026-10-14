@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
+import { OPERATIONAL_JOB_RETENTION } from "./index.js";
 
 export interface SlackNotificationPayload {
 	text: string;
@@ -55,6 +56,6 @@ export async function enqueueSlackNotification(
 		attempts: 5,
 		backoff: { type: "exponential", delay: 2000 },
 		removeOnComplete: true,
-		removeOnFail: false,
+		removeOnFail: OPERATIONAL_JOB_RETENTION.removeOnFail,
 	});
 }

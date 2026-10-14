@@ -28,14 +28,21 @@ export interface OverviewStats {
 	bufferDebitedCount: number;
 }
 
-export async function getOverviewStats(db: Db, range: DateRange): Promise<OverviewStats> {
+export async function getOverviewStats(
+	db: Db,
+	range: DateRange,
+	subSolver?: string,
+): Promise<OverviewStats> {
 	const { from, to } = range;
+	const address = subSolver?.trim().toLowerCase();
+	const proposalFilter = address ? sql`lower(${proposalsLog.subSolver}) = ${address}` : undefined;
+	const auditFilter = address ? sql`lower(${auditEvents.subSolver}) = ${address}` : undefined;
 
 	const [statusRows, rejectionRows, [penaltyStats]] = await Promise.all([
 		db
 			.select({ status: proposalsLog.status, count: count() })
 			.from(proposalsLog)
-			.where(and(gte(proposalsLog.createdAt, from), lt(proposalsLog.createdAt, to)))
+			.where(and(gte(proposalsLog.createdAt, from), lt(proposalsLog.createdAt, to), proposalFilter))
 			.groupBy(proposalsLog.status),
 
 		db
@@ -46,6 +53,7 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 					gte(proposalsLog.createdAt, from),
 					lt(proposalsLog.createdAt, to),
 					isNotNull(proposalsLog.rejectionReason),
+					proposalFilter,
 				),
 			)
 			.groupBy(proposalsLog.rejectionReason),
@@ -58,7 +66,7 @@ export async function getOverviewStats(db: Db, range: DateRange): Promise<Overvi
 				bufferDebitedCount: sql<number>`COUNT(*) FILTER (WHERE event_type = 'buffer_debited')`,
 			})
 			.from(auditEvents)
-			.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to))),
+			.where(and(gte(auditEvents.occurredAt, from), lt(auditEvents.occurredAt, to), auditFilter)),
 	]);
 
 	const byStatus = new Map(statusRows.map((r) => [r.status, r.count]));

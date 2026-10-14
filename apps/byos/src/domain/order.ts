@@ -1,6 +1,7 @@
 import {
 	type CowOrder,
 	OrderKind,
+	type OrderStatus,
 	type RejectionReason,
 	type SettlementInteraction,
 } from "@byos/common";
@@ -9,6 +10,8 @@ import type { Proposal } from "./proposal.js";
 
 const NATIVE_PRICE_SCALE = parseEther("1");
 
+export type { OrderStatus };
+
 /** Immutable orderbook order with its pre/post hook interactions. */
 export interface OrderRecord {
 	order: CowOrder;
@@ -16,6 +19,7 @@ export interface OrderRecord {
 	postInteractions: SettlementInteraction[];
 	/** True if both sell and buy token balances are erc20 (not Balancer vault). */
 	erc20Balances: boolean;
+	status: OrderStatus;
 }
 
 /**
@@ -73,6 +77,19 @@ export function checkProposalSlippage(
 	}
 
 	return null;
+}
+
+/** Temporary per-proposal native sell-value guard, for both sell and buy orders.
+ * Compare scaled products to avoid rounding a fractional wei at the boundary.
+ * A zero MIN_COLLATERAL admits no proposal; it does not disable this guard.
+ * Returns true if the cap is exceeded.
+ */
+export function checkTradeValueCap(
+	sellAmount: bigint,
+	sellTokenNativePrice: bigint,
+	minCollateral: bigint,
+): boolean {
+	return sellAmount * sellTokenNativePrice >= 10_000n * minCollateral * NATIVE_PRICE_SCALE;
 }
 
 function checkFillOrKill(order: CowOrder, proposal: Proposal): RejectionReason | null {
