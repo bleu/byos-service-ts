@@ -15,13 +15,30 @@ export function DateRangeForm({
   from,
   to,
   resetHref,
+  subSolver,
 }: {
   from: string;
   to: string;
   resetHref: string;
+  subSolver?: string;
 }) {
   return (
-    <form method="GET" className="flex items-end gap-2">
+    <form method="GET" className="flex flex-wrap items-end gap-2">
+      {subSolver !== undefined && (
+        <div>
+          <label htmlFor="overview-sub-solver" className={LABEL_CLS}>Sub-solver</label>
+          <input
+            id="overview-sub-solver"
+            type="text"
+            name="subSolver"
+            defaultValue={subSolver}
+            placeholder="All sub-solvers"
+            autoComplete="off"
+            spellCheck={false}
+            className={`${INPUT_CLS} w-[340px] max-w-full`}
+          />
+        </div>
+      )}
       <div>
         <label className={LABEL_CLS}>From</label>
         <input

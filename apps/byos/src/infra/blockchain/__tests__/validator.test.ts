@@ -1,4 +1,11 @@
-import { type CowOrder, encodeSettle, OrderKind, SigningScheme, TrampolineAbi } from "@byos/common";
+import {
+	type CowOrder,
+	encodeSettle,
+	OrderKind,
+	OrderStatus,
+	SigningScheme,
+	TrampolineAbi,
+} from "@byos/common";
 import {
 	type Address,
 	encodeAbiParameters,
@@ -103,6 +110,7 @@ function sampleRecord(order: CowOrder): OrderRecord {
 		preInteractions: [],
 		postInteractions: [],
 		erc20Balances: true,
+		status: OrderStatus.OPEN,
 	};
 }
 
@@ -217,6 +225,7 @@ function validatorAt(
 	minScore = 0n,
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
+	_minCollateral = 10n ** 16n,
 ): SimulationValidator {
 	return new SimulationValidator(
 		node.client,

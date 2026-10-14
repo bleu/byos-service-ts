@@ -29,7 +29,7 @@ export interface SolveConfig {
 	db: Db;
 	gasPriceRef: GasPriceRef;
 	onAuditEvent: (event: AuditEvent) => void;
-	holdbackMs?: number;
+	selectorBufferMs?: number;
 	logger?: Logger;
 }
 
@@ -92,11 +92,13 @@ export function createSolveRoute(config: SolveConfig) {
 			return c.json({ solutions: [] } satisfies SolveResponse);
 		}
 
-		if (config.holdbackMs && config.holdbackMs > 0) {
-			await new Promise((resolve) => setTimeout(resolve, config.holdbackMs));
+		// Keep the competition window open, then leave time to select and respond.
+		const snapshotDeadlineMs =
+			new Date(auction.deadline).getTime() - (config.selectorBufferMs ?? 200);
+		const waitMs = Math.max(0, snapshotDeadlineMs - Date.now());
+		if (waitMs > 0) {
+			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-
-		// Batch lookup: single query for all active proposals
 		const grouped = await store.activeByOrderUids(config.db, orderUids);
 
 		const solutions: Solution[] = [];
@@ -179,8 +181,7 @@ export function createSolveRoute(config: SolveConfig) {
 			// Record attribution before bidding: if we cannot record it, we
 			// do not bid it. Quote requests skip the write entirely.
 			if (auctionId !== null) {
-				const buyTokenInfo = auction.tokens[order.buyToken];
-				const buyTokenRefPrice = buyTokenInfo?.referencePrice ?? "0";
+				const buyTokenRefPrice = auction.tokens[order.buyToken]?.referencePrice ?? "0";
 				try {
 					await store.recordSolution(
 						config.db,
@@ -223,7 +224,6 @@ export function createSolveRoute(config: SolveConfig) {
 			);
 			solutionId++;
 		}
-
 		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);
 	});

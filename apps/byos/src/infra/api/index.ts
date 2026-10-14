@@ -31,7 +31,7 @@ export interface AppContext {
 	cL: bigint;
 	gasPriceRef: GasPriceRef;
 	solveBearerToken?: string;
-	holdbackMs?: number;
+	selectorBufferMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
 }
@@ -52,7 +52,9 @@ export interface PublicAppContext extends AppContext {
 	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
 	 */
 	rateLimits: RateLimitSettings;
-	runImmediateValidation: (proposalId: number) => Promise<void>;
+	enqueueValidation: (proposalId: number) => Promise<void>;
+	/** If set, only sub-solvers in this set (lowercase) are admitted. */
+	subsolverWhitelist?: Set<string> | null;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
@@ -83,7 +85,8 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
-		runImmediateValidation: ctx.runImmediateValidation,
+		enqueueValidation: ctx.enqueueValidation,
+		subsolverWhitelist: ctx.subsolverWhitelist,
 		logger: ctx.logger,
 		signerLimit: {
 			limiter,
@@ -110,7 +113,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		db: ctx.db,
 		gasPriceRef: ctx.gasPriceRef,
 		onAuditEvent: ctx.onAuditEvent,
-		holdbackMs: ctx.holdbackMs,
+		selectorBufferMs: ctx.selectorBufferMs,
 		logger: ctx.logger,
 	});
 

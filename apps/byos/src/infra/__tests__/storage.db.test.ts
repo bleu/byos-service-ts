@@ -363,6 +363,94 @@ describe("proposal store", () => {
 		expect(updated?.settlementTxHash).toBe(txHash);
 	});
 
+	it("records an attributed success after validation reports the order filled", async () => {
+		const txHash = `0x${"55".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		await store.recordSolution(ctx.db, 127, 1, id, "1");
+		await store.resolveVerdict(ctx.db, id, {
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		expect((await store.get(ctx.db, id))?.rejectionReason).toBe("SolverOutbid");
+
+		const [attributed] = await store.solutionProposals(ctx.db, 127, [1]);
+		if (!attributed) throw new Error("missing solution attribution");
+		const result = await store.applySettlementOutcome(ctx.db, attributed, {
+			kind: "succeeded",
+			txHash,
+		});
+		expect((await store.get(ctx.db, id))?.status).toBe("settled");
+		expect((await store.get(ctx.db, id))?.settlementTxHash).toBe(txHash);
+		expect((await store.get(ctx.db, id))?.rejectionReason).toBeNull();
+		expect("auditEvent" in result && result.auditEvent?.kind).toMatchObject({
+			type: "statusChanged",
+			from: "rejected",
+			to: "settled",
+			settlementTxHash: txHash,
+		});
+	});
+
+	it("ignores duplicate success and stale validation after recovering a settlement", async () => {
+		const txHash = `0x${"66".repeat(32)}` as Hex;
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		const active = (await store.get(ctx.db, id))!;
+		await store.resolveVerdict(ctx.db, id, {
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		await store.applySettlementOutcome(ctx.db, active, { kind: "succeeded", txHash });
+		const duplicate = await store.applySettlementOutcome(ctx.db, active, {
+			kind: "succeeded",
+			txHash,
+		});
+		expect(duplicate).toEqual({
+			auditEvent: null,
+			cancelledAuditEvents: [],
+			insertedPenalty: false,
+		});
+		const stale = await store.resolveVerdict(ctx.db, id, {
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		expect(stale).toMatchObject({ kind: "staleTransition" });
+		expect(await store.get(ctx.db, id)).toMatchObject({
+			status: "settled",
+			settlementTxHash: txHash,
+			rejectionReason: null,
+		});
+	});
+
+	it("keeps a filled order rejected without an attributed success", async () => {
+		const { id } = await store.insert(ctx.db, sampleProposal({ status: "active" }));
+		await store.resolveVerdict(ctx.db, id, {
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		expect(await store.get(ctx.db, id)).toMatchObject({
+			status: "rejected",
+			rejectionReason: "SolverOutbid",
+			settlementTxHash: null,
+		});
+	});
+
+	it("does not recover unrelated rejections on success", async () => {
+		const { id } = await store.insert(
+			ctx.db,
+			sampleProposal({ status: "rejected", rejectionReason: "InsufficientEscrow" }),
+		);
+		const rejected = (await store.get(ctx.db, id))!;
+		const result = await store.applySettlementOutcome(ctx.db, rejected, {
+			kind: "succeeded",
+			txHash: `0x${"77".repeat(32)}` as Hex,
+		});
+		expect("auditEvent" in result && result.auditEvent).toBeNull();
+		expect(await store.get(ctx.db, id)).toMatchObject({
+			status: "rejected",
+			rejectionReason: "InsufficientEscrow",
+			settlementTxHash: null,
+		});
+	});
+
 	// Requiring "executing" here would forfeit the debit whenever
 	// settlementStarted never landed — driver never sent it, its write failed,
 	// or the two notifications arrived out of order.

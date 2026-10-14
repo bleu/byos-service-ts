@@ -123,7 +123,7 @@ export const RejectionReason = {
 	ProposedSlippageOutrange: "ProposedSlippageOutrange",
 	/** Simulation succeeded but the trampoline did not emit an Executed event. */
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
-	/** Buy-token native price is unavailable — cannot evaluate the native-amount slippage cap. */
+	/** A required token native price is unavailable — cannot evaluate a native-value guard. */
 	NativePriceUnavailable: "NativePriceUnavailable",
 	/** A sibling in-flight proposal has no sell-token ref price yet — cannot compute cumulative exposure. */
 	InflightPriceUnavailable: "InflightPriceUnavailable",

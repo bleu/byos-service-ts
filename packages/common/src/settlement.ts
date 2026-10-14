@@ -5,7 +5,7 @@ import type { SettlementInteraction } from "./trampoline.js";
 import { encodeTrampolineInteractions } from "./trampoline.js";
 import type { ContractInteraction, Proposal } from "./types.js";
 
-export { OrderKind } from "@cowprotocol/cow-sdk";
+export { OrderKind, OrderStatus } from "@cowprotocol/cow-sdk";
 
 /**
  * Signing scheme as reported by the CoW orderbook API (string wire format).

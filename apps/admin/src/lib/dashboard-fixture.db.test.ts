@@ -41,6 +41,44 @@ describe("dashboard fixture", () => {
 				penalizedCount: 1,
 				bufferDebitedCount: 1,
 			});
+			// Mixed-case stored addresses and input must select the same cohort,
+			// including financial audit events and rejection breakdowns.
+			const address = "0xaBcDEFabcdefABCdefabCDefAbcdefABcDEfABCD";
+			await client`UPDATE proposals_log SET sub_solver = ${address}
+				WHERE sub_solver = '0x3333333333333333333333333333333333333333'`;
+			await client`UPDATE audit_events SET sub_solver = ${address}
+				WHERE sub_solver = '0x3333333333333333333333333333333333333333'`;
+			const filtered = await getOverviewStats(db, range, ` ${address.toUpperCase()} `);
+			expect(filtered).toMatchObject({
+				received: 3,
+				settled: 1,
+				settleFailed: 1,
+				simFailed: 0,
+				penalizedCount: 1,
+				bufferDebitedCount: 0,
+				rejectionBreakdown: [],
+			});
+			expect(await getOverviewStats(db, range, address.toLowerCase())).toEqual(filtered);
+			expect(await getOverviewStats(db, range, "  ")).toEqual(overview);
+			expect(
+				await getOverviewStats(db, range, "0x4444444444444444444444444444444444444444"),
+			).toMatchObject({
+				received: 0,
+				penalizedCount: 0,
+				penalizedAmountWei: "0",
+				rejectionBreakdown: [],
+			});
+
+			const rejectedSubSolver = await getOverviewStats(
+				db,
+				range,
+				"0x2222222222222222222222222222222222222222",
+			);
+			expect(rejectedSubSolver).toMatchObject({
+				received: 3,
+				penalizedCount: 0,
+				rejectionBreakdown: [{ reason: "invalidSignature", count: 1 }],
+			});
 			expect(await getSubsolverStats(db, range)).toHaveLength(3);
 			const proposals = await listProposals(db, { page: 1, limit: 20 });
 			expect(proposals.total).toBe(10);

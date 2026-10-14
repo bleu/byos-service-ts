@@ -71,6 +71,20 @@
 			"when": 1787780805000,
 			"tag": "0009_simulation_buy_amount",
 			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "7",
+			"when": 1791584886427,
+			"tag": "0010_solution_batches",
+			"breakpoints": true
+		},
+		{
+			"idx": 11,
+			"version": "7",
+			"when": 1791800000000,
+			"tag": "0011_revert_solution_batches",
+			"breakpoints": true
 		}
 	]
 }

@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-	entry: ["src/index.ts", "src/resume-debit.ts"],
+	entry: ["src/index.ts", "src/resume-debit.ts", "src/redis-history.ts"],
 	format: ["esm"],
 	target: "node22",
 	outDir: "dist",
