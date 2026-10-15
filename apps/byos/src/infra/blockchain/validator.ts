@@ -1,4 +1,4 @@
-import { EscrowAbi, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
+import { OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
@@ -15,7 +15,11 @@ import {
 } from "../../domain/scoring.js";
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import type { FetchOrder, OrderbookError } from "../orderbook.js";
-import type { EscrowValidator, GasPriceRef } from "./escrow.js";
+import {
+	createBatchedEscrowBalanceReader,
+	type EscrowValidator,
+	type GasPriceRef,
+} from "./escrow.js";
 import { buildSimulation } from "./simulation.js";
 
 /**
@@ -175,7 +179,9 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly fetchInflightData: FetchInflightData,
 		private readonly logger?: Logger,
 		private readonly submitter?: Address,
-		private readonly readEscrowBalance?: (subSolver: Address) => Promise<bigint>,
+		private readonly readEscrowBalance: (
+			subSolver: Address,
+		) => Promise<bigint> = createBatchedEscrowBalanceReader(publicClient, escrowAddress),
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -251,14 +257,7 @@ export class SimulationValidator implements ValidateProposal {
 		// unhandled rejections. Simulation can proceed while these reads finish.
 		const collateralReads = Promise.allSettled([
 			this.fetchInflightData(proposal.subSolver, proposal),
-			this.readEscrowBalance
-				? this.readEscrowBalance(proposal.subSolver)
-				: this.publicClient.readContract({
-						address: this.escrowAddress,
-						abi: EscrowAbi,
-						functionName: "effectiveBalance",
-						args: [proposal.subSolver],
-					}),
+			this.readEscrowBalance(proposal.subSolver),
 		]);
 		const orderbookStarted = performance.now();
 		// Order and native prices are read during immediate validation and every
@@ -323,23 +322,27 @@ export class SimulationValidator implements ValidateProposal {
 			return { kind: "reject", reason: slippageReason };
 		}
 
-		// Step 4: Resolve trampoline address
-		let trampoline: Address;
-		try {
-			trampoline = proposal.trampoline ?? (await this.resolveTrampoline(proposal.subSolver));
-		} catch (e) {
-			if (isRevertError(e))
-				return { kind: "simFailed", revertReason: extractRevertReasonFromThrown(e) ?? undefined };
-			return null; // transport error, defer
+		// Independent metadata reads start together so the shared viem client's
+		// Multicall3 batch can combine them on a cold cache. Keep failure
+		// classification per call: a trampoline revert is terminal, RPC errors defer.
+		const [trampolineResult, authenticatorResult] = await Promise.allSettled([
+			proposal.trampoline
+				? Promise.resolve(proposal.trampoline)
+				: this.resolveTrampoline(proposal.subSolver),
+			this.resolveAuthenticator(),
+		]);
+		if (trampolineResult.status === "rejected") {
+			const error: unknown = trampolineResult.reason;
+			if (isRevertError(error))
+				return {
+					kind: "simFailed",
+					revertReason: extractRevertReasonFromThrown(error) ?? undefined,
+				};
+			return null;
 		}
-
-		// Step 5: Resolve authenticator
-		let authenticator: Address;
-		try {
-			authenticator = await this.resolveAuthenticator();
-		} catch {
-			return null; // defer (authenticator() cannot revert)
-		}
+		if (authenticatorResult.status === "rejected") return null;
+		const trampoline = trampolineResult.value;
+		const authenticator = authenticatorResult.value;
 
 		// Step 6: Build simulation
 		const sim = buildSimulation({

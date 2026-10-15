@@ -64,8 +64,8 @@ it("admits pending siblings independently using persisted active exposure", asyn
 			signature: "0x",
 		};
 		const client = {
-			readContract: async (args: { functionName: string }) =>
-				args.functionName === "effectiveBalance" ? 500_000_000_000_000n : ADDRESS,
+			multicall: async () => [{ status: "success", result: 500_000_000_000_000n }],
+			readContract: async () => ADDRESS,
 			request: async () => [
 				{
 					calls: [

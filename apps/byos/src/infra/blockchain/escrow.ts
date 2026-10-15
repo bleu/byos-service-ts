@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { EscrowAbi } from "@byos/common";
 import type { Address, PublicClient } from "viem";
 import type { Proposal } from "../../domain/proposal.js";
@@ -9,12 +10,15 @@ export interface GasPriceRef {
 
 export class EscrowValidator implements ValidateProposal {
 	private cache = new Map<string, Promise<bigint>>();
+	private readonly readBalance: (subSolver: Address) => Promise<bigint>;
 
 	constructor(
-		private readonly publicClient: PublicClient,
-		private readonly escrowAddress: Address,
+		publicClient: PublicClient,
+		escrowAddress: Address,
 		private readonly minCollateral: bigint,
-	) {}
+	) {
+		this.readBalance = createBatchedEscrowBalanceReader(publicClient, escrowAddress);
+	}
 
 	beginTick(): void {
 		this.cache.clear();
@@ -26,17 +30,10 @@ export class EscrowValidator implements ValidateProposal {
 		const cached = this.cache.get(key);
 		if (cached !== undefined) return cached;
 
-		const balance = this.publicClient
-			.readContract({
-				address: this.escrowAddress,
-				abi: EscrowAbi,
-				functionName: "effectiveBalance",
-				args: [subSolver],
-			})
-			.catch((error: unknown) => {
-				if (this.cache.get(key) === balance) this.cache.delete(key);
-				throw error;
-			});
+		const balance = this.readBalance(subSolver).catch((error: unknown) => {
+			if (this.cache.get(key) === balance) this.cache.delete(key);
+			throw error;
+		});
 
 		this.cache.set(key, balance);
 		return balance;
@@ -87,4 +84,51 @@ export function createEscrowBalanceReader(
 
 		return results.map((r) => (r.status === "success" ? (r.result as bigint) : null));
 	};
+}
+
+/**
+ * Collect independent validation reads into bounded, explicit multicalls.
+ * This one-shot RPC collection window is not a background job scheduler.
+ * Per-tick caching and address deduplication belong to EscrowValidator.
+ */
+export function createBatchedEscrowBalanceReader(
+	publicClient: PublicClient,
+	escrowAddress: Address,
+	{ waitMs = 100, batchSize = 50 }: { waitMs?: number; batchSize?: number } = {},
+): (address: Address) => Promise<bigint> {
+	const readBatch = createEscrowBalanceReader(publicClient, escrowAddress);
+	let pending: {
+		address: Address;
+		resolve: (balance: bigint) => void;
+		reject: (error: unknown) => void;
+	}[] = [];
+	let scheduled = false;
+
+	const flush = async () => {
+		const requests = pending;
+		pending = [];
+		scheduled = false;
+		for (let offset = 0; offset < requests.length; offset += batchSize) {
+			const batch = requests.slice(offset, offset + batchSize);
+			try {
+				const balances = await readBatch(batch.map((request) => request.address));
+				for (const [index, request] of batch.entries()) {
+					const balance = balances[index];
+					if (balance == null) request.reject(new Error("Escrow balance unavailable"));
+					else request.resolve(balance);
+				}
+			} catch (error) {
+				for (const request of batch) request.reject(error);
+			}
+		}
+	};
+
+	return (address) =>
+		new Promise<bigint>((resolve, reject) => {
+			pending.push({ address, resolve, reject });
+			if (!scheduled) {
+				scheduled = true;
+				void delay(waitMs).then(flush);
+			}
+		});
 }

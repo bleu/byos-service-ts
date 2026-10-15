@@ -166,6 +166,7 @@ interface FakeNode {
 function fakeNode(opts?: {
 	simulateV1?: () => Promise<SimulateV1CallResult>;
 	addressOf?: () => Promise<string>;
+	authenticator?: () => Promise<string>;
 	/** Default Executed._delta (defaults to submittedProposal().quoteBuyAmount). */
 	delta?: bigint;
 }): FakeNode {
@@ -179,13 +180,11 @@ function fakeNode(opts?: {
 				counts.addressOf += 1;
 				return opts?.addressOf ? await opts.addressOf() : TRAMPOLINE;
 			}
-			if (args.functionName === "effectiveBalance") {
-				// Return a large balance so Gate 2 always passes in unit tests.
-				return 10n ** 30n;
-			}
-			// authenticator() or other view calls
+			if (args.functionName === "authenticator" && opts?.authenticator) return opts.authenticator();
 			return AUTHENTICATOR;
 		},
+		multicall: async ({ contracts }: { contracts: unknown[] }) =>
+			contracts.map(() => ({ status: "success", result: 10n ** 30n })),
 		getBlockNumber: async () => 1_000n,
 		request: async (args: unknown) => {
 			const typed = args as { method: string; params: unknown[] };
@@ -688,11 +687,10 @@ function collateralValidator(
 				options.gasUsed ?? 100_000n,
 			),
 	});
-	const readContract = node.client.readContract;
 	const client = {
 		...node.client,
-		readContract: async (args: Parameters<PublicClient["readContract"]>[0]) =>
-			args.functionName === "effectiveBalance" ? (options.balance ?? ETHER) : readContract(args),
+		multicall: async ({ contracts }: { contracts: unknown[] }) =>
+			contracts.map(() => ({ status: "success", result: options.balance ?? ETHER })),
 	} as unknown as PublicClient;
 	return new SimulationValidator(
 		client,
@@ -813,5 +811,34 @@ describe("collateral exposure equality boundary", () => {
 				)
 			)?.kind,
 		).toBe(kind);
+	});
+});
+
+describe("concurrent simulation metadata reads", () => {
+	it("starts authenticator lookup before trampoline resolution completes", async () => {
+		let release: (address: string) => void = () => {};
+		const trampoline = new Promise<string>((resolve) => {
+			release = resolve;
+		});
+		const node = fakeNode({
+			addressOf: () => trampoline,
+			authenticator: async () => {
+				release(TRAMPOLINE);
+				return AUTHENTICATOR;
+			},
+		});
+		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		expect((await validator.validate({ ...activeProposal(), trampoline: null }))?.kind).toBe(
+			"accept",
+		);
+	});
+	it("defers when authenticator lookup fails", async () => {
+		const node = fakeNode({
+			authenticator: async () => {
+				throw new Error("RPC unavailable");
+			},
+		});
+		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		expect(await validator.validate(activeProposal())).toBeNull();
 	});
 });

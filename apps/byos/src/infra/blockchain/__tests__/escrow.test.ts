@@ -40,14 +40,14 @@ function submittedProposal(overrides: Partial<Proposal> = {}): Proposal {
 	} as Proposal;
 }
 
-/** A client whose effectiveBalance read returns `balance`, counting calls. */
+/** A client whose multicall returns `balance`, counting batches. */
 function clientWithBalance(balance: bigint): PublicClient & { calls: () => number } {
 	let calls = 0;
 	return {
 		calls: () => calls,
-		readContract: async () => {
+		multicall: async () => {
 			calls += 1;
-			return balance;
+			return [{ status: "success", result: balance }];
 		},
 	} as unknown as PublicClient & { calls: () => number };
 }
@@ -96,7 +96,7 @@ describe("EscrowValidator — floor gate (single proposal)", () => {
 
 	it("transport error defers judgment", async () => {
 		const failing = {
-			readContract: async () => {
+			multicall: async () => {
 				throw new Error("connection refused");
 			},
 		} as unknown as PublicClient;
@@ -123,10 +123,10 @@ describe("shared authoritative balance snapshot", () => {
 	it("evicts failed reads so a transient failure can recover within the tick", async () => {
 		let calls = 0;
 		const client = {
-			readContract: async () => {
+			multicall: async () => {
 				calls++;
 				if (calls === 1) throw new Error("RPC timeout");
-				return MIN_COLLATERAL;
+				return [{ status: "success", result: MIN_COLLATERAL }];
 			},
 		} as unknown as PublicClient;
 		const validator = validatorWith(client);
