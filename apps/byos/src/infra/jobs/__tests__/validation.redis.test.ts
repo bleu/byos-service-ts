@@ -40,10 +40,15 @@ it("deduplicates ingestion and tick dispatch while validation is running", async
 		release();
 		await completed;
 		expect(calls).toBe(1);
+		// The refresh is immediately runnable: pause until completion observation
+		// is registered, or removeOnComplete can delete it before isFinished.
+		await worker.pause();
 		await enqueueProposalValidation(queue, 123);
 		const refresh = await queue.getJob("proposal-123");
 		if (!refresh) throw new Error("missing refresh job");
-		await refresh.waitUntilFinished(events, 5000);
+		const refreshed = refresh.waitUntilFinished(events, 5000);
+		worker.resume();
+		await refreshed;
 		expect(calls).toBe(2);
 	} finally {
 		release();
