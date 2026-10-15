@@ -8,7 +8,7 @@ export interface GasPriceRef {
 }
 
 export class EscrowValidator implements ValidateProposal {
-	private cache = new Map<string, bigint>();
+	private cache = new Map<string, Promise<bigint>>();
 
 	constructor(
 		private readonly publicClient: PublicClient,
@@ -20,17 +20,23 @@ export class EscrowValidator implements ValidateProposal {
 		this.cache.clear();
 	}
 
-	private async getBalance(subSolver: Address): Promise<bigint> {
+	/** One authoritative read per address per tick, including concurrent callers. */
+	async getBalance(subSolver: Address): Promise<bigint> {
 		const key = subSolver.toLowerCase();
 		const cached = this.cache.get(key);
 		if (cached !== undefined) return cached;
 
-		const balance = await this.publicClient.readContract({
-			address: this.escrowAddress,
-			abi: EscrowAbi,
-			functionName: "effectiveBalance",
-			args: [subSolver],
-		});
+		const balance = this.publicClient
+			.readContract({
+				address: this.escrowAddress,
+				abi: EscrowAbi,
+				functionName: "effectiveBalance",
+				args: [subSolver],
+			})
+			.catch((error: unknown) => {
+				if (this.cache.get(key) === balance) this.cache.delete(key);
+				throw error;
+			});
 
 		this.cache.set(key, balance);
 		return balance;

@@ -12,6 +12,7 @@ import {
 	solutions,
 } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
+import { nativeSellValue } from "../domain/collateral.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
 import type { Verdict } from "../domain/validator.js";
@@ -1309,33 +1310,6 @@ export async function listBySubSolver(
 }
 
 /**
- * Returns the id and gasUsed for all in-flight proposals of a sub-solver
- * (`submitted`, `active`, or `executing`). The caller excludes the proposal
- * being validated in memory so the full result can be cached per sub-solver
- * and reused across concurrent validations.
- *
- * `submitted` proposals have not been simulated yet — gasUsed is null.
- * `active` proposals carry a real gas estimate from simulation.
- * `executing` proposals may or may not have a gas estimate; same rule applies.
- */
-export async function inflightGasUsedBySubSolver(
-	db: Db,
-	subSolver: Address,
-): Promise<{ id: number; gasUsed: bigint | null }[]> {
-	const rows = await db
-		.select({ id: proposals.id, gasUsed: proposals.gasUsed })
-		.from(proposals)
-		.where(
-			and(
-				eq(proposals.subSolver, subSolver.toLowerCase()),
-				inArray(proposals.status, ["submitted", "active", "executing"]),
-			),
-		);
-
-	return rows.map((r) => ({ id: r.id, gasUsed: r.gasUsed != null ? BigInt(r.gasUsed) : null }));
-}
-
-/**
  * Returns in-flight proposal data and outstanding buffer balance for a subsolver.
  * Used by Gate 2 of the cumulative exposure check (CIP-87).
  * `sellAmountNative` is null when `sellTokenRefPrice` has not been written yet
@@ -1349,8 +1323,6 @@ export async function fetchInflightDataBySubSolver(
 	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
 	bufferBalance: bigint;
 }> {
-	const NATIVE_PRICE_SCALE = 10n ** 18n;
-
 	const [proposalRows, bufferRows] = await Promise.all([
 		db
 			.select({
@@ -1394,7 +1366,7 @@ export async function fetchInflightDataBySubSolver(
 		const gasUsed = r.gasUsed != null ? BigInt(r.gasUsed) : null;
 		let sellAmountNative: bigint | null = null;
 		if (r.sellTokenRefPrice != null && r.sellTokenRefPrice !== "0") {
-			sellAmountNative = (BigInt(r.sellAmount) * BigInt(r.sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+			sellAmountNative = nativeSellValue(BigInt(r.sellAmount), BigInt(r.sellTokenRefPrice));
 		}
 		return { id: r.id, gasUsed, sellAmountNative };
 	});

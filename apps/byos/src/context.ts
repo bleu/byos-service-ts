@@ -179,6 +179,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		(subSolver, current) => store.fetchInflightDataBySubSolver(db, subSolver, current),
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
+		escrowValidator.getBalance.bind(escrowValidator),
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);

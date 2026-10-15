@@ -2,6 +2,7 @@ import { EscrowAbi, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
+import { availableCollateral, penaltyCap, perProposalCL } from "../../domain/collateral.js";
 import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
@@ -174,6 +175,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly fetchInflightData: FetchInflightData,
 		private readonly logger?: Logger,
 		private readonly submitter?: Address,
+		private readonly readEscrowBalance?: (subSolver: Address) => Promise<bigint>,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -249,12 +251,14 @@ export class SimulationValidator implements ValidateProposal {
 		// unhandled rejections. Simulation can proceed while these reads finish.
 		const collateralReads = Promise.allSettled([
 			this.fetchInflightData(proposal.subSolver, proposal),
-			this.publicClient.readContract({
-				address: this.escrowAddress,
-				abi: EscrowAbi,
-				functionName: "effectiveBalance",
-				args: [proposal.subSolver],
-			}),
+			this.readEscrowBalance
+				? this.readEscrowBalance(proposal.subSolver)
+				: this.publicClient.readContract({
+						address: this.escrowAddress,
+						abi: EscrowAbi,
+						functionName: "effectiveBalance",
+						args: [proposal.subSolver],
+					}),
 		]);
 		const orderbookStarted = performance.now();
 		// Order and native prices are read during immediate validation and every
@@ -465,9 +469,9 @@ export class SimulationValidator implements ValidateProposal {
 
 		// Gate 2: cumulative collateral exposure check (CIP-87).
 		//
-		// Per-proposal penalty cap mirrors the protocol formula:
+		// Per-proposal penalty cap follows the deployment policy:
 		//   penaltyCap(o) = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
-		// where minCollateral serves as c̄ (the ~$20 USD absolute bound from CIP-87).
+		// minCollateral is the deployment absolute bound (ADR-0020).
 		//
 		// adjustedBalance = effectiveBalance − max(outstandingBufferBalance, 0)
 		// Gate passes iff: adjustedBalance >= Σ (penaltyCap(o) + simulatedGas × gasPrice)
@@ -478,32 +482,25 @@ export class SimulationValidator implements ValidateProposal {
 			const inflightData = inflightResult.value;
 			const escrowBalance = balanceResult.value;
 
-			const NATIVE_PRICE_SCALE = 10n ** 18n;
-
-			// Compute penalty cap for a single proposal given its native sell amount.
-			const penaltyCap = (sellAmountNative: bigint): bigint => {
-				const scaled = (sellAmountNative * this.collateralRatioBps) / 10_000n;
-				return scaled < this.minCollateral ? scaled : this.minCollateral;
-			};
-
 			// Legacy unpriced siblings reserve the absolute cap until revalidation.
 			let siblingExposure = 0n;
 			for (const p of inflightData.proposals) {
 				if (p.id === proposal.id) continue;
-				const cap =
-					p.sellAmountNative === null ? this.minCollateral : penaltyCap(p.sellAmountNative);
+				const cap = penaltyCap(p.sellAmountNative, this.collateralRatioBps, this.minCollateral);
 				const gas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
 				siblingExposure += cap + gas * this.gasPriceRef.value;
 			}
 
 			// Current proposal's contribution.
-			const currentSellAmountNative =
-				(proposal.sellAmount * sellTokenRefPrice) / NATIVE_PRICE_SCALE;
-			const currentExposure = penaltyCap(currentSellAmountNative) + gas * this.gasPriceRef.value;
-
-			// Credits offset delivery shortfalls; they cannot fund gas or penalties.
-			const bufferDebt = inflightData.bufferBalance > 0n ? inflightData.bufferBalance : 0n;
-			const adjustedBalance = escrowBalance - bufferDebt;
+			const currentExposure =
+				perProposalCL(
+					proposal.sellAmount,
+					sellTokenRefPrice,
+					this.collateralRatioBps,
+					this.minCollateral,
+				) +
+				gas * this.gasPriceRef.value;
+			const adjustedBalance = availableCollateral(escrowBalance, inflightData.bufferBalance);
 			if (siblingExposure + currentExposure > adjustedBalance) {
 				return { kind: "reject", reason: "ExposureCapExceeded" };
 			}

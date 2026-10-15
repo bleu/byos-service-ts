@@ -1,19 +1,35 @@
 const NATIVE_PRICE_SCALE = 10n ** 18n;
 
-/**
- * Per-proposal penalty cap (cL) following CIP-87:
- *   cL = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
- * where minCollateral is c̄ (~$20 USD absolute bound).
- * Mirrors the Gate 2 formula in SimulationValidator — both sides use the same cap.
- */
-export function perProposalCL(
-	sellAmount: string,
-	sellTokenRefPrice: string | null,
+/** Native-token wei represented by a token-atom amount and normalized price. */
+export function nativeSellValue(sellAmount: bigint, sellTokenRefPrice: bigint): bigint {
+	return (sellAmount * sellTokenRefPrice) / NATIVE_PRICE_SCALE;
+}
+
+/** Deployment policy cap. Legacy unpriced exposure reserves the absolute cap. */
+export function penaltyCap(
+	sellAmountNative: bigint | null,
 	collateralRatioBps: bigint,
 	minCollateral: bigint,
 ): bigint {
-	if (!sellTokenRefPrice || sellTokenRefPrice === "0") return minCollateral;
-	const sellAmountNative = (BigInt(sellAmount) * BigInt(sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
+	if (sellAmountNative === null) return minCollateral;
 	const scaled = (sellAmountNative * collateralRatioBps) / 10_000n;
 	return scaled < minCollateral ? scaled : minCollateral;
+}
+
+export function perProposalCL(
+	sellAmount: bigint,
+	sellTokenRefPrice: bigint | null,
+	collateralRatioBps: bigint,
+	minCollateral: bigint,
+): bigint {
+	const nativeValue =
+		sellTokenRefPrice === null || sellTokenRefPrice <= 0n
+			? null
+			: nativeSellValue(sellAmount, sellTokenRefPrice);
+	return penaltyCap(nativeValue, collateralRatioBps, minCollateral);
+}
+
+/** Delivery credits are not escrow available for gas or Track A penalties. */
+export function availableCollateral(escrowBalance: bigint, bufferBalance: bigint): bigint {
+	return escrowBalance - (bufferBalance > 0n ? bufferBalance : 0n);
 }

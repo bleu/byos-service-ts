@@ -105,3 +105,33 @@ describe("EscrowValidator — floor gate (single proposal)", () => {
 		expect(verdict).toBeNull();
 	});
 });
+
+describe("shared authoritative balance snapshot", () => {
+	it("coalesces concurrent reads, shares between gates, and refreshes next tick", async () => {
+		const client = clientWithBalance(MIN_COLLATERAL);
+		const validator = validatorWith(client);
+		await Promise.all([
+			validator.getBalance(submittedProposal().subSolver),
+			validator.getBalance(submittedProposal().subSolver),
+		]);
+		await validator.validate(submittedProposal());
+		expect(client.calls()).toBe(1);
+		validator.beginTick();
+		await validator.getBalance(submittedProposal().subSolver);
+		expect(client.calls()).toBe(2);
+	});
+	it("evicts failed reads so a transient failure can recover within the tick", async () => {
+		let calls = 0;
+		const client = {
+			readContract: async () => {
+				calls++;
+				if (calls === 1) throw new Error("RPC timeout");
+				return MIN_COLLATERAL;
+			},
+		} as unknown as PublicClient;
+		const validator = validatorWith(client);
+		expect(await validator.validate(submittedProposal())).toBeNull();
+		expect((await validator.validate(submittedProposal()))?.kind).toBe("accept");
+		expect(calls).toBe(2);
+	});
+});

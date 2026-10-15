@@ -193,8 +193,8 @@ export function createSolveRoute(config: SolveConfig) {
 						bestProposal.id,
 						buyTokenRefPrice,
 						perProposalCL(
-							bestProposal.sellAmount.toString(),
-							tokenInfo?.referencePrice ?? null,
+							bestProposal.sellAmount,
+							tokenInfo?.referencePrice ? BigInt(tokenInfo.referencePrice) : null,
 							config.collateralRatioBps ?? 4n,
 							config.minCollateral ?? 10n ** 16n,
 						),
