@@ -32,7 +32,7 @@ const ETHER = 10n ** 18n;
  * Converts a buy-token gap to ETH using the auction reference price.
  *
  * The result feeds into the buffer ledger. Positive entries (under-delivery)
- * accumulate until the outstanding balance exceeds c_L, then the full balance
+ * accumulate until the outstanding balance exceeds MIN_COLLATERAL / 5, then the full balance
  * is debited from escrow. Negative entries (over-delivery) offset future
  * shortfalls but are never paid out.
  */

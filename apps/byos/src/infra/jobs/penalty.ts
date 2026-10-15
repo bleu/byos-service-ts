@@ -306,7 +306,7 @@ export async function runNonSettlementDebits(
  * Step 1: Record a ledger entry per proposal (signed: positive = under-delivery,
  *         negative = over-delivery credit).
  * Step 2: For each subsolver with uncleared entries, check if the outstanding
- *         balance exceeds c_L. If so, slash the full balance from escrow and
+ *         balance exceeds MIN_COLLATERAL / 5. If so, slash the full balance from escrow and
  *         mark all entries cleared.
  *
  * Over-delivery credits offset future shortfalls but are never paid out.
@@ -409,7 +409,7 @@ export async function runBufferDebits(
 		logger.error({ err: e }, "buffer: failed to fetch subsolvers with uncleared entries");
 	}
 
-	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
+	// Step 3: For each affected subsolver, check if outstanding balance exceeds MIN_COLLATERAL / 5.
 	// Resume a buffer batch that was marked in-flight by a worker which then
 	// disappeared. Its source id names the exact entry set and its transaction
 	// (if any) is already durable, so this never creates a replacement debit.

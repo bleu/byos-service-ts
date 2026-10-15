@@ -41,8 +41,8 @@ export interface AppContext {
 	/** Request-path connection: bounded commands, no offline queue. */
 	requestRedis: Redis;
 	/** Resolved minimum escrow collateral: the chain's default, or the
-	 * MIN_COLLATERAL override. Feeds the validator threshold, the penalty
-	 * parameter c_l, and the request-path escrow floor gate. */
+	 * MIN_COLLATERAL override. Feeds the escrow floor, the absolute penalty
+	 * cap, buffer clearing threshold, and request-path escrow floor gate. */
 	minCollateralWei: bigint;
 	/** Resolved TrampolineFactory address: the chain's default from
 	 * `trampolineFactoryFor`, or the TRAMPOLINE_FACTORY override. */

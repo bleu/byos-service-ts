@@ -43,7 +43,7 @@ Both call sites share `checkLimit(key, limit, windowSecs)`, so the internals can
 rate = clamp(floor(balance / RATE_UNIT_WEI) * RATE_PER_UNIT, MIN_RATE, MAX_RATE)
 ```
 
-The tempting alternative is to reuse the reserve unit `floor(balance / threshold())` — the same integer that bounds live proposals — for symmetry with the escrow math. It is a trap. `threshold()` contains `gasPrice`, and `gasPriceRef.value` is overwritten by every auction, so a gas spike would collapse every sub-solver's allowance at once and turn a market condition into an API availability incident. Gas coupling is correct for the reserve cap and wrong for throughput.
+Do not reuse the collateral exposure calculation for throughput. Exposure depends on gas prices and proposal values; coupling the API budget to those inputs would turn market movements into availability incidents. ADR-0020 changes eligibility math without changing this gas-independent rate policy.
 
 `MAX_RATE` is load-bearing. Without it a single well-funded sub-solver's allowance can exceed the edge ceiling and starve everyone else while staying inside its own limit.
 
@@ -53,7 +53,7 @@ The tempting alternative is to reuse the reserve unit `floor(balance / threshold
 
 An unknown address is admitted at the lowest tier. An address known to be below the floor is rejected synchronously with `InsufficientEscrow`. The authoritative escrow check stays in the background validator, so ADR-0001's real property — no chain reads on the public request path — survives.
 
-The floor is `MIN_COLLATERAL`, deliberately not the validator's `ESCROW_GAS_ESTIMATION * gasPrice + minCollateral` threshold. It must sit at or below whatever the validator enforces, so the synchronous gate can never reject a proposal the validator would have accepted.
+The request-path floor remains `MIN_COLLATERAL`, matching the background floor gate. The separate post-simulation exposure gate is owned by ADR-0020. Keeping throughput and the request-path floor independent of gas prevents market-driven API churn.
 
 ### Balance tracking is an active set with eviction
 

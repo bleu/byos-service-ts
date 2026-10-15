@@ -199,7 +199,7 @@ export const solutions = pgTable(
 // --- buffer_entries ---
 // Per-proposal ledger for the quoteBuyAmount-vs-delivered gap. Positive native_token_amount
 // means under-delivery (debit); negative means over-delivery (credit).
-// Debits are slashed automatically when the outstanding balance exceeds c_L.
+// Debits are slashed automatically when the outstanding balance exceeds MIN_COLLATERAL / 5.
 // Credits offset future shortfalls but are never paid out.
 
 export const bufferEntries = pgTable(

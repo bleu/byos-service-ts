@@ -25,3 +25,5 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 - [0006 — Configuration](0006-configuration.md): Env vars + Zod validation, fail-fast, dotenv for dev, conditional groups
 - [0008 — Observability](0008-observability.md): pino structured logging, JSON/pretty output, BullMQ job metrics
 - [0009 — Testing Strategy](0009-testing-strategy.md): Vitest workspace projects (unit/db/redis/integration/e2e), unique DB per test, Hono in-process testing
+
+- [0020 — Deployment Collateral Policy](0020-deployment-collateral-policy.md): concurrent exposure admission, frozen penalty caps, and migration from fixed v1 sizing.

@@ -1,6 +1,6 @@
 # Slashing policy & attribution flow
 
-Status: accepted; revised 2026-08-14 (buffer debit for minBuyAmount/quoteBuyAmount)
+Status: accepted; penalty sizing and policy lifecycle superseded by ADR-0020
 
 Spec: docs/shared/design-document.md#penalties
       https://bleu.github.io/byos-docs/design-document#penalties
@@ -42,7 +42,7 @@ Hooks are handled by BYOS and the driver, not by sub-solvers (COW-1243). The ord
 
 A sell-order proposal can set `minBuyAmount` below `quoteBuyAmount`. The engine uses `quoteBuyAmount` to compute surplus and clearing prices. The on-chain floor is `minBuyAmount`. After settlement, the penalty job reads the delivered amount from the `Executed` event and records a signed ledger entry: positive when the sub-solver under-delivered, negative when it over-delivered. Credits offset debits naturally.
 
-The penalty job slashes the sub-solver's escrow only when the outstanding balance exceeds `c_L`. It debits the full accumulated balance in one transaction and marks all entries as cleared. This batching reduces on-chain costs and lets small shortfalls net out against over-deliveries before any charge lands.
+The penalty job batches net shortfalls before debiting escrow to reduce on-chain costs and let credits offset shortfalls. ADR-0020 supersedes the original `c_L` clearing threshold; the shared specification defines the current threshold.
 
 Buy orders must set `minBuyAmount` equal to `quoteBuyAmount`. The engine rejects buy-order proposals where the two values differ.
 
@@ -54,11 +54,11 @@ A driver `Cancelled`/`Expired`/`Fail` notification for an `Executing` proposal i
 
 ### Minimum escrow balance
 
-Sized to cover worst-case Track A: `gas + c_l` for a single settlement. This keeps the barrier to entry low for a permissionless system. Track B is inherently under-collateralized; gatekeeping is the primary Track B defense, not escrow sizing.
+The original single-settlement floor is superseded by ADR-0020. A low flat entry floor plus a separate exposure check preserves permissionless access. Track B remains inherently under-collateralized; gatekeeping is the primary defense.
 
 ### Policy lifecycle
 
-Immutable for v1. No unilateral updates. Changes require a v2 policy with a new escrow deployment or migration.
+Originally immutable for v1; ADR-0020 records the announced service/database migration to deployment-scoped ratio parameters and frozen event caps. Historical charges must not be silently repriced.
 
 ## Alternatives considered
 
@@ -71,7 +71,7 @@ Immutable for v1. No unilateral updates. Changes require a v2 policy with a new 
 - **Public slashing dashboard / reporting.** Rejected — leaks competitive intelligence about sub-solver routing quality.
 - **Permanent ban or debt tracking on escrow shortfall.** Rejected — meaningless in a permissionless system. The escrow loss itself is the penalty.
 - **Higher minimum escrow.** Rejected — Track B is inherently under-collateralized regardless of minimum size. Low barriers to entry matter.
-- **Versioned or updatable policy.** Rejected for v1 — adds complexity.
+- **Versioned or updatable policy.** Originally rejected for v1; reopened by ADR-0020 to support an announced deployment migration.
 
 ## Consequences
 
@@ -79,6 +79,6 @@ Immutable for v1. No unilateral updates. Changes require a v2 policy with a new 
 - **Track B has an unrecoverable gap.** If the sub-solver withdrew or escrow < claim, BYOS absorbs the shortfall. This is why gatekeeping is mandatory.
 - **Non-settlement penalty relies on BYOS's internal records.** Accepted trust assumption, consistent with the operator trust model.
 - **One sub-solver per settlement tx reduces batching efficiency.** Accepted — clean attribution enables indisputable debits.
-- **Immutable v1 policy means no ability to adjust parameters.** Mitigated by conservative initial sizing and the expectation that v1 is a learning phase.
+- **Policy migration requires coordination.** ADR-0020 supersedes fixed v1 sizing while preserving historical charge evidence.
 - **36h sub-solver challenge window for Track B is tight.** Accepted — BYOS needs the remaining 36h of its 72h CoW window.
 - **The service tracks a 5x off-chain reserve against pending Track-B claims** ([contracts ADR-0002](https://github.com/bleu/byos-contracts/blob/main/docs/adr/0002-escrow-contract.md)): reserve calculation and proposal-eligibility math are a BYOS-service responsibility and a critical path.
