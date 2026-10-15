@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import { perProposalCL } from "../../domain/collateral.js";
 import { gasCutSize } from "../../domain/gas-cut.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
@@ -26,6 +27,8 @@ import {
 } from "./types.js";
 
 export interface SolveConfig {
+	minCollateral?: bigint;
+	collateralRatioBps?: bigint;
 	db: Db;
 	gasPriceRef: GasPriceRef;
 	onAuditEvent: (event: AuditEvent) => void;
@@ -189,6 +192,12 @@ export function createSolveRoute(config: SolveConfig) {
 						solutionId,
 						bestProposal.id,
 						buyTokenRefPrice,
+						perProposalCL(
+							bestProposal.sellAmount.toString(),
+							tokenInfo?.referencePrice ?? null,
+							config.collateralRatioBps ?? 4n,
+							config.minCollateral ?? 10n ** 16n,
+						),
 					);
 				} catch {
 					continue;

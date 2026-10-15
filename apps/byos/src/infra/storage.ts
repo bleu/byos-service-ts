@@ -294,6 +294,8 @@ function rowToProposal(row: ProposalRow): Proposal {
 		createdAt: row.createdAt,
 		statusChangedAt: row.statusChangedAt,
 		sellTokenRefPrice: row.sellTokenRefPrice ?? null,
+		settlementPenaltyCap:
+			row.settlementPenaltyCap == null ? null : BigInt(row.settlementPenaltyCap),
 		surplusTokenRefPrice: row.surplusTokenRefPrice ?? null,
 		auctionGasPrice: row.auctionGasPrice ?? null,
 		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
@@ -629,7 +631,7 @@ export async function resolveVerdict(
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
 				...(simulationBuyAmount != null ? { simulationBuyAmount } : {}),
-				...(sellTokenRefPrice != null ? { sellTokenRefPrice } : {}),
+				...(sellTokenRefPrice != null ? { validationSellTokenRefPrice: sellTokenRefPrice } : {}),
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
@@ -846,6 +848,9 @@ export async function applySettlementOutcome(
 				pendingCancellation: false,
 				...(outcome.kind === "succeeded" ? { rejectionReason: null } : {}),
 				...(txHash ? { settlementTxHash: txHash.toLowerCase() } : {}),
+				...(outcome.kind === "reverted"
+					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
+					: {}),
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
@@ -853,6 +858,7 @@ export async function applySettlementOutcome(
 		if (insertPenalty) {
 			await tx.insert(penalties).values({
 				proposalId: proposal.id,
+				penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
 				subSolver: proposal.subSolver.toLowerCase(),
 				orderUid: proposal.orderUid.toLowerCase(),
 			});
@@ -1075,13 +1081,20 @@ export async function recordSolution(
 	solutionId: number,
 	proposalId: number,
 	buyTokenRefPrice: string,
+	penaltyCap: bigint | null = null,
 ): Promise<void> {
 	await db
 		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
+		.values({
+			auctionId,
+			solutionId,
+			proposalId,
+			buyTokenRefPrice,
+			penaltyCap: penaltyCap?.toString() ?? null,
+		})
 		.onConflictDoUpdate({
 			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId, buyTokenRefPrice },
+			set: { proposalId, buyTokenRefPrice, penaltyCap: penaltyCap?.toString() ?? null },
 		});
 }
 
@@ -1179,6 +1192,7 @@ export async function recordNonSettlementDebit(
 export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Promise<void> {
 	await db.insert(penalties).values({
 		proposalId: proposal.id,
+		penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
 		subSolver: proposal.subSolver.toLowerCase(),
 		orderUid: proposal.orderUid.toLowerCase(),
 	});
@@ -1345,7 +1359,7 @@ export async function fetchInflightDataBySubSolver(
 				status: proposals.status,
 				gasUsed: proposals.gasUsed,
 				sellAmount: proposals.sellAmount,
-				sellTokenRefPrice: proposals.sellTokenRefPrice,
+				sellTokenRefPrice: proposals.validationSellTokenRefPrice,
 			})
 			.from(proposals)
 			.where(
@@ -1459,6 +1473,8 @@ export async function solutionProposals(
 			pendingCancellation: proposals.pendingCancellation,
 			simulationFailureParams: proposals.simulationFailureParams,
 			sellTokenRefPrice: proposals.sellTokenRefPrice,
+			validationSellTokenRefPrice: proposals.validationSellTokenRefPrice,
+			settlementPenaltyCap: solutions.penaltyCap,
 			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
 			auctionGasPrice: proposals.auctionGasPrice,
 			clearingPrices: proposals.clearingPrices,
@@ -1655,23 +1671,20 @@ export async function clearBufferEntries(
 	return result.length;
 }
 
-export interface PendingPenaltyWithPrices extends PendingPenalty {
-	sellAmount: string;
-	sellTokenRefPrice: string | null;
+export interface PendingPenaltyWithCap extends PendingPenalty {
+	penaltyCap: bigint | null;
 }
 
-export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithPrices[]> {
+export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithCap[]> {
 	const rows = await db
 		.select({
 			id: penalties.id,
 			proposalId: penalties.proposalId,
 			subSolver: penalties.subSolver,
 			orderUid: penalties.orderUid,
-			sellAmount: proposals.sellAmount,
-			sellTokenRefPrice: proposals.sellTokenRefPrice,
+			penaltyCap: penalties.penaltyCap,
 		})
 		.from(penalties)
-		.innerJoin(proposals, eq(proposals.id, penalties.proposalId))
 		.where(sql`${penalties.penaltyTxHash} IS NULL`)
 		.orderBy(penalties.id);
 
@@ -1680,7 +1693,6 @@ export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithPrices
 		proposalId: r.proposalId,
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
-		sellAmount: r.sellAmount,
-		sellTokenRefPrice: r.sellTokenRefPrice ?? null,
+		penaltyCap: r.penaltyCap == null ? null : BigInt(r.penaltyCap),
 	}));
 }

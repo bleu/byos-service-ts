@@ -12,26 +12,6 @@ import {
 } from "../../domain/penalty.js";
 import * as store from "../storage.js";
 
-const NATIVE_PRICE_SCALE = 10n ** 18n;
-
-/**
- * Per-proposal penalty cap (cL) following CIP-87:
- *   cL = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
- * where minCollateral is c̄ (~$20 USD absolute bound).
- * Mirrors the Gate 2 formula in SimulationValidator — both sides use the same cap.
- */
-function perProposalCL(
-	sellAmount: string,
-	sellTokenRefPrice: string | null,
-	collateralRatioBps: bigint,
-	minCollateral: bigint,
-): bigint {
-	if (!sellTokenRefPrice || sellTokenRefPrice === "0") return minCollateral;
-	const sellAmountNative = (BigInt(sellAmount) * BigInt(sellTokenRefPrice)) / NATIVE_PRICE_SCALE;
-	const scaled = (sellAmountNative * collateralRatioBps) / 10_000n;
-	return scaled < minCollateral ? scaled : minCollateral;
-}
-
 const MAX_DEBIT_ATTEMPTS = 10;
 
 /**
@@ -189,7 +169,7 @@ export async function runRevertDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, collateralRatioBps, minCollateral, onAuditEvent, logger } = config;
+	const { db, operator, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
@@ -215,12 +195,7 @@ export async function runRevertDebits(
 			continue;
 		}
 
-		const cL = perProposalCL(
-			String(proposal.sellAmount),
-			proposal.sellTokenRefPrice ?? null,
-			collateralRatioBps,
-			minCollateral,
-		);
+		const cL = proposal.settlementPenaltyCap ?? minCollateral;
 		const amount = revertDebit(cost, cL);
 		const landedDebit = await durableDebit(
 			config,
@@ -272,7 +247,7 @@ export async function runNonSettlementDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, collateralRatioBps, minCollateral, onAuditEvent, logger } = config;
+	const { db, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.pendingPenalties>>;
 	try {
@@ -285,12 +260,7 @@ export async function runNonSettlementDebits(
 	for (const penalty of pending) {
 		if ((attempts.get(penalty.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
-		const cL = perProposalCL(
-			penalty.sellAmount,
-			penalty.sellTokenRefPrice,
-			collateralRatioBps,
-			minCollateral,
-		);
+		const cL = penalty.penaltyCap ?? minCollateral;
 		const amount = nonSettlementDebit(cL);
 		const reason = nonSettlementReason(penalty.orderUid);
 		const landedDebit = await durableDebit(

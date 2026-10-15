@@ -55,6 +55,7 @@ async function main() {
 	});
 
 	const internalApp = createInternalApp({
+		collateralRatioBps: BigInt(config.COLLATERAL_RATIO_BPS),
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
 		trampolineFactory: ctx.trampolineFactory,

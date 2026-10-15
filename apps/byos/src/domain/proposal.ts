@@ -31,6 +31,8 @@ export interface Proposal {
 	simulationFailureParams: unknown | null;
 	createdAt: Date;
 	statusChangedAt: Date;
+	/** Frozen cap for the attributed settlement; null on pre-policy rows. */
+	settlementPenaltyCap?: bigint | null;
 	sellTokenRefPrice: string | null;
 	surplusTokenRefPrice: string | null;
 	auctionGasPrice: string | null;

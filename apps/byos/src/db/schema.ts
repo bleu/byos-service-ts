@@ -87,6 +87,8 @@ export const proposals = pgTable(
 		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
 		simulationFailureParams: jsonb("simulation_failure_params"),
 		sellTokenRefPrice: text("sell_token_ref_price"),
+		validationSellTokenRefPrice: text("validation_sell_token_ref_price"),
+		settlementPenaltyCap: text("settlement_penalty_cap"),
 		surplusTokenRefPrice: text("surplus_token_ref_price"),
 		auctionGasPrice: text("auction_gas_price"),
 		clearingPrices: jsonb("clearing_prices"),
@@ -133,6 +135,8 @@ export const proposalsLog = pgTable(
 		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
 		simulationFailureParams: jsonb("simulation_failure_params"),
 		sellTokenRefPrice: text("sell_token_ref_price"),
+		validationSellTokenRefPrice: text("validation_sell_token_ref_price"),
+		settlementPenaltyCap: text("settlement_penalty_cap"),
 		surplusTokenRefPrice: text("surplus_token_ref_price"),
 		auctionGasPrice: text("auction_gas_price"),
 		clearingPrices: jsonb("clearing_prices"),
@@ -183,6 +187,7 @@ export const solutions = pgTable(
 			.notNull()
 			.references(() => proposals.id, { onDelete: "cascade" }),
 		buyTokenRefPrice: text("buy_token_ref_price").notNull(),
+		penaltyCap: text("penalty_cap"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [
@@ -230,6 +235,7 @@ export const penalties = pgTable(
 		subSolver: text("sub_solver").notNull(),
 		orderUid: text("order_uid").notNull(),
 		penaltyTxHash: text("penalty_tx_hash"),
+		penaltyCap: text("penalty_cap"),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(table) => [index("penalties_pending_idx").on(table.id).where(sql`penalty_tx_hash IS NULL`)],

@@ -911,3 +911,58 @@ describe("pending penalty retention", () => {
 		}
 	});
 });
+
+describe("immutable penalty caps", () => {
+	it("uses the notified auction cap after prices and later auction caps change", async () => {
+		const isolated = await createTestDb();
+		try {
+			const { id } = await store.insert(isolated.db, sampleProposal());
+			await store.transition(isolated.db, (await store.get(isolated.db, id))!, "active");
+			await store.recordSolution(isolated.db, 100, 1, id, "1", 4000n);
+			await store.recordSolution(isolated.db, 101, 1, id, "1", 9000n);
+			const attributed = (await store.solutionProposals(isolated.db, 100, [1]))[0]!;
+			await store.applySettlementOutcome(isolated.db, attributed, { kind: "started" });
+			await store.applySettlementOutcome(isolated.db, attributed, { kind: "abandoned" });
+			await store.saveSolutionPrices(isolated.db, id, {
+				sellTokenRefPrice: (10n ** 30n).toString(),
+				surplusTokenRefPrice: "1",
+				auctionGasPrice: "1",
+				clearingPrices: {},
+			});
+			await store.resolveVerdict(isolated.db, id, {
+				kind: "accept",
+				simulation: {
+					gasUsed: 100_000n,
+					trampoline: attributed.subSolver,
+					sellToken: attributed.sellToken,
+					buyToken: attributed.buyToken,
+					simulationBuyAmount: attributed.quoteBuyAmount,
+					sellTokenRefPrice: 10n ** 25n,
+				},
+			});
+			const calls: bigint[] = [];
+			const operator = durableTestOperator({
+				settlementCost: async () => 100n,
+				readExecutedDelta: async () => 0n,
+				debit: async (_address, amount) => {
+					calls.push(amount);
+					return PENALTY_TX;
+				},
+			});
+			await runNonSettlementDebits({ ...config(operator), db: isolated.db }, new Map());
+			expect(calls).toEqual([400n]);
+			const [row] = await isolated.db.select().from(proposals).where(eq(proposals.id, id));
+			expect(row?.sellTokenRefPrice).toBe((10n ** 30n).toString());
+			expect(row?.validationSellTokenRefPrice).toBe((10n ** 25n).toString());
+			const reverted = (await store.solutionProposals(isolated.db, 101, [1]))[0]!;
+			await store.applySettlementOutcome(isolated.db, reverted, {
+				kind: "reverted",
+				txHash: `0x${"12".repeat(32)}`,
+			});
+			await runRevertDebits({ ...config(operator), db: isolated.db }, new Map());
+			expect(calls).toEqual([400n, 9100n]);
+		} finally {
+			await isolated.cleanup();
+		}
+	});
+});
