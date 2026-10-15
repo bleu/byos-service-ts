@@ -1058,6 +1058,9 @@ export async function sweepDropped(db: Db, olderThanSecs: number): Promise<numbe
 		.where(
 			and(
 				inArray(proposals.status, SWEEPABLE_STATUSES),
+				// Pending non-settlement charges need the proposal's evidence and
+				// must remain discoverable through durable debit recovery.
+				sql`NOT EXISTS (SELECT 1 FROM ${penalties} WHERE ${penalties.proposalId} = ${proposals.id} AND ${penalties.penaltyTxHash} IS NULL)`,
 				sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
 			),
 		)

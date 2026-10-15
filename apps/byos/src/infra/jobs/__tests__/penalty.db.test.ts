@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries } from "../../../db/schema.js";
+import { bufferEntries, proposals } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -861,5 +861,53 @@ describe("buffer debits", () => {
 		expect(
 			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [secondEntryId], PENALTY_TX),
 		).toBe(1);
+	});
+});
+
+describe("pending penalty retention", () => {
+	it("keeps evidence through an outage and a signed debit retry, then permits retention", async () => {
+		const isolated = await createTestDb();
+		try {
+			const { id } = await store.insert(isolated.db, sampleProposal());
+			const proposal = (await store.get(isolated.db, id))!;
+			await store.queueNonSettlementPenalty(isolated.db, proposal);
+			await isolated.db
+				.update(proposals)
+				.set({ status: "cancelled", statusChangedAt: sql`now() - interval '2 hours'` })
+				.where(eq(proposals.id, id));
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
+			let broadcastingFails = true;
+			let signed = 0;
+			let landed = false;
+			const operator: DebitEscrow = {
+				settlementCost: async () => 0n,
+				readExecutedDelta: async () => 0n,
+				signDebit: async () => {
+					signed++;
+					return { rawTransaction: "0xab", hash: PENALTY_TX };
+				},
+				broadcastSignedDebit: async () => {
+					if (broadcastingFails) throw new Error("RPC unavailable");
+					landed = true;
+					return PENALTY_TX;
+				},
+				debitOutcome: async () => (landed ? "succeeded" : null),
+			};
+			const worker = { ...config(operator), db: isolated.db };
+			await runNonSettlementDebits(worker, new Map());
+			expect(signed).toBe(1);
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
+			expect(await store.pendingPenalties(isolated.db)).toHaveLength(1);
+			broadcastingFails = false;
+			await isolated.db.execute(
+				sql`UPDATE debit_operations SET next_retry_at = now() - interval '1 second'`,
+			);
+			await runNonSettlementDebits({ ...worker, workerId: "replacement-worker" }, new Map());
+			expect(signed).toBe(1);
+			expect(await store.pendingPenalties(isolated.db)).toHaveLength(0);
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(1);
+		} finally {
+			await isolated.cleanup();
+		}
 	});
 });
