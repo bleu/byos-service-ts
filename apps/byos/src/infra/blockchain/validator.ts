@@ -365,7 +365,9 @@ export class SimulationValidator implements ValidateProposal {
 				return null; // RPC error, defer
 			}
 
-			const adjustedBalance = escrowBalance - inflightData.bufferBalance;
+			// Credits offset delivery shortfalls; they cannot fund gas or penalties.
+			const bufferDebt = inflightData.bufferBalance > 0n ? inflightData.bufferBalance : 0n;
+			const adjustedBalance = escrowBalance - bufferDebt;
 			if (siblingExposure + currentExposure > adjustedBalance) {
 				return { kind: "reject", reason: "ExposureCapExceeded" };
 			}

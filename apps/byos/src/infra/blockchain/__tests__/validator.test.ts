@@ -757,3 +757,18 @@ describe("collateral admission", () => {
 		// Each proposal reserves 400 wei; their combined 800 wei exceeds 500 wei.
 	});
 });
+
+describe("buffer debt and collateral", () => {
+	it.each([
+		{ bufferBalance: -1_000_000n, balance: 399n, kind: "reject" },
+		{ bufferBalance: 0n, balance: 400n, kind: "accept" },
+		{ bufferBalance: 1n, balance: 400n, kind: "reject" },
+	])(
+		"checks $balance wei against signed buffer $bufferBalance",
+		async ({ bufferBalance, balance, kind }) => {
+			expect(
+				(await collateralValidator({ bufferBalance, balance }).validate(activeProposal()))?.kind,
+			).toBe(kind);
+		},
+	);
+});
