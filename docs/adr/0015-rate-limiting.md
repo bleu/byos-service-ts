@@ -43,7 +43,7 @@ Both call sites share `checkLimit(key, limit, windowSecs)`, so the internals can
 rate = clamp(floor(balance / RATE_UNIT_WEI) * RATE_PER_UNIT, MIN_RATE, MAX_RATE)
 ```
 
-Do not reuse the collateral exposure calculation for throughput. Exposure depends on gas prices and proposal values; coupling the API budget to those inputs would turn market movements into availability incidents. ADR-0020 changes eligibility math without changing this gas-independent rate policy.
+Do not reuse the collateral exposure calculation for throughput. Exposure depends on gas prices and proposal values; coupling the API budget to those inputs would turn market movements into availability incidents. The collateral policy in ADR-0003 leaves this gas-independent rate policy unchanged.
 
 `MAX_RATE` is load-bearing. Without it a single well-funded sub-solver's allowance can exceed the edge ceiling and starve everyone else while staying inside its own limit.
 
@@ -53,7 +53,7 @@ Do not reuse the collateral exposure calculation for throughput. Exposure depend
 
 An unknown address is admitted at the lowest tier. An address known to be below the floor is rejected synchronously with `InsufficientEscrow`. The authoritative escrow check stays in the background validator, so ADR-0001's real property — no chain reads on the public request path — survives.
 
-The request-path floor remains `MIN_COLLATERAL`, matching the background floor gate. The separate post-simulation exposure gate is owned by ADR-0020. Keeping throughput and the request-path floor independent of gas prevents market-driven API churn.
+The request-path floor remains `MIN_COLLATERAL`, matching the background floor gate. The separate post-simulation exposure gate is owned by ADR-0003. Keeping throughput and the request-path floor independent of gas prevents market-driven API churn.
 
 ### Balance tracking is an active set with eviction
 

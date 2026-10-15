@@ -474,7 +474,7 @@ export class SimulationValidator implements ValidateProposal {
 		//
 		// Per-proposal penalty cap follows the deployment policy:
 		//   penaltyCap(o) = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
-		// minCollateral is the deployment absolute bound (ADR-0020).
+		// minCollateral is the deployment absolute bound (ADR-0003).
 		//
 		// adjustedBalance = effectiveBalance − max(outstandingBufferBalance, 0)
 		// Gate passes iff: adjustedBalance >= Σ (penaltyCap(o) + simulatedGas × gasPrice)

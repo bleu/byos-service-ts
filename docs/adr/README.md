@@ -8,7 +8,7 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 
 - [0001 — Proposal API](0001-proposal-api.md): Public HTTP API for sub-solver proposal ingestion, EIP-712 auth, two-listener architecture; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
 - [0002 — Solver Engine](0002-solver-engine.md): `/solve` hot path, `surplus - gas` scoring, gas cut, Trampoline settlement crafting; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
-- [0003 — Slash Attribution Flow](0003-slash-attribution-flow.md): Track A (gas + revert penalty) and Track B (EBBO/fairness) risk classes; revised 2026-08-14 (buffer debit for minBuyAmount/quoteBuyAmount)
+- [0003 — Slash Attribution Flow](0003-slash-attribution-flow.md): Track A (gas + revert penalty) and Track B (EBBO/fairness) risk classes; revised 2026-10-15 (proportional penalty caps and concurrent admission)
 - [0005 — Crate Anatomy and Layering](0005-crate-anatomy-and-layering.md): `domain/` (pure) vs `infra/` (IO) separation, DTO conversion at edges
 - [0007 — Error Handling](0007-error-handling.md): Typed error kinds, machine-readable on the wire, `should_retry()` classification
 - [0010 — Settlement Outcome Source](0010-settlement-outcome-source.md): Driver `/notify` as source of truth (no chain watcher)
@@ -25,5 +25,3 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 - [0006 — Configuration](0006-configuration.md): Env vars + Zod validation, fail-fast, dotenv for dev, conditional groups
 - [0008 — Observability](0008-observability.md): pino structured logging, JSON/pretty output, BullMQ job metrics
 - [0009 — Testing Strategy](0009-testing-strategy.md): Vitest workspace projects (unit/db/redis/integration/e2e), unique DB per test, Hono in-process testing
-
-- [0020 — Deployment Collateral Policy](0020-deployment-collateral-policy.md): concurrent exposure admission, frozen penalty caps, and migration from fixed v1 sizing.

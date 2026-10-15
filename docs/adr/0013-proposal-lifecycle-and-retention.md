@@ -80,7 +80,7 @@ An audit event is emitted only after its proposal write commits, so a crash betw
 
 ### Retention
 
-- **Rejected, SimFailed, Expired, Cancelled**: deleted 1 hour after reaching the state, except while referenced by an unresolved non-settlement penalty. Keeping that evidence preserves debit recovery through outages (ADR-0020).
+- **Rejected, SimFailed, Expired, Cancelled**: deleted 1 hour after reaching the state, except while referenced by an unresolved non-settlement penalty. Keeping that evidence preserves debit recovery through outages.
 - **Settled, SettleFailed, Penalized**: kept indefinitely, no sweep code.
 - **`audit_events`**: no deletion path.
 
