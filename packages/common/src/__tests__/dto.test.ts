@@ -6,6 +6,7 @@ import {
 	getProposalResponseSchema,
 	isTerminalStatus,
 	listProposalsResponseSchema,
+	rejectionReasonSchema,
 	Status,
 	statusSchema,
 } from "../dto.js";
@@ -246,4 +247,13 @@ describe("wire grammar", () => {
 		expect(accepts({ orderUid: `0x${"ab".repeat(55)}` })).toBe(false);
 		expect(accepts({ orderUid: `0x${"ab".repeat(57)}` })).toBe(false);
 	});
+});
+
+describe("historical rejection compatibility", () => {
+	it.each(["TradeValueCapExceeded", "InflightPriceUnavailable"])(
+		"reads deprecated %s responses",
+		(reason) => {
+			expect(rejectionReasonSchema.parse(reason)).toBe(reason);
+		},
+	);
 });

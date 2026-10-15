@@ -115,6 +115,8 @@ export const RejectionReason = {
 	TokenMismatch: "TokenMismatch",
 	OrderNotFound: "OrderNotFound",
 	Unprofitable: "Unprofitable",
+	/** @deprecated Historical response value; no longer emitted by validation. */
+	TradeValueCapExceeded: "TradeValueCapExceeded",
 	/** Another sub-solver's proposal was selected by BYOS for the same order at /solve time. */
 	SubsolverOutbid: "SubsolverOutbid",
 	/** An external solver won the CoW auction — the on-chain settlement reverted with "GPv2: order filled". */
@@ -125,7 +127,7 @@ export const RejectionReason = {
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
 	/** A required token native price is unavailable — cannot evaluate a native-value guard. */
 	NativePriceUnavailable: "NativePriceUnavailable",
-	/** A sibling in-flight proposal has no sell-token ref price yet — cannot compute cumulative exposure. */
+	/** @deprecated Historical response value; pending siblings no longer block validation. */
 	InflightPriceUnavailable: "InflightPriceUnavailable",
 } as const;
 
@@ -139,6 +141,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.TokenMismatch,
 	RejectionReason.OrderNotFound,
 	RejectionReason.Unprofitable,
+	RejectionReason.TradeValueCapExceeded,
 	RejectionReason.SubsolverOutbid,
 	RejectionReason.SolverOutbid,
 	RejectionReason.ProposedSlippageOutrange,

@@ -799,3 +799,19 @@ describe("post-simulation collateral", () => {
 		expect(verdict).toBeNull();
 	});
 });
+
+describe("collateral exposure equality boundary", () => {
+	it.each([
+		{ balance: 100_399n, kind: "reject" },
+		{ balance: 100_400n, kind: "accept" },
+		{ balance: 100_401n, kind: "accept" },
+	])("admits $balance wei with a 100400 wei exposure: $kind", async ({ balance, kind }) => {
+		expect(
+			(
+				await collateralValidator({ balance, gasPrice: 1n, gasUsed: 100_000n }).validate(
+					activeProposal(),
+				)
+			)?.kind,
+		).toBe(kind);
+	});
+});

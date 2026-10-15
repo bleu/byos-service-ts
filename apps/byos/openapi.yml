@@ -544,12 +544,16 @@ components:
           never win an auction. Fix: improve the price or
           resubmit when gas is cheaper.
         - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
-          exposure (sum of `penaltyCap + gas` across all active, submitted,
-          and executing proposals) would exceed their adjusted escrow balance
-          (effectiveBalance minus outstanding buffer). Fix: wait for in-flight
-          proposals to settle before submitting more.
-        - `InflightPriceUnavailable` — a sibling in-flight proposal has no
-          sell-token reference price yet. Fix: wait briefly and resubmit.
+          exposure (current proposal plus active and executing siblings,
+          excluding older active routes replaced on acceptance) would exceed
+          effectiveBalance minus positive outstanding buffer debt. The current
+          proposal uses fresh simulated gas. Equality passes. Submitted siblings
+          are excluded; concurrent validations may temporarily overcommit escrow.
+          Fix: deposit more collateral or wait for in-flight proposals to settle.
+        - `TradeValueCapExceeded` — deprecated historical response value from
+          the former trade-value guard; no longer emitted by validation.
+        - `InflightPriceUnavailable` — deprecated historical response value;
+          pending siblings no longer cause this rejection.
       type: string
       enum:
         - InsufficientEscrow
@@ -560,6 +564,12 @@ components:
         - Unprofitable
         - NativePriceUnavailable
         - InflightPriceUnavailable
+        - TradeValueCapExceeded
+        - TokenMismatch
+        - SubsolverOutbid
+        - SolverOutbid
+        - ProposedSlippageOutrange
+        - SimulationMissingExecutedEvent
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at
