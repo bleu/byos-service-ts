@@ -20,12 +20,15 @@ import { buildSimulation } from "./simulation.js";
 /**
  * Per-subsolver in-flight data needed for Gate 2 cumulative exposure check.
  * `sellAmountNative` is null for proposals whose sell-token ref price has not
- * yet been written (i.e. not yet accepted by the validator) — the caller must
- * treat this as a hard reject (InflightPriceUnavailable).
+ * yet been written on legacy active rows — reserve the absolute cap until
+ * revalidation supplies a price. Submitted siblings are excluded by the store.
  * `bufferBalance` is the sum of uncleared buffer_entries.nativeTokenAmount for
  * the subsolver, subtracted from effectiveBalance to get the adjusted balance.
  */
-export type FetchInflightData = (subSolver: Address) => Promise<{
+export type FetchInflightData = (
+	subSolver: Address,
+	current?: Proposal,
+) => Promise<{
 	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
 	bufferBalance: bigint;
 }>;
@@ -317,7 +320,7 @@ export class SimulationValidator implements ValidateProposal {
 		{
 			let inflightData: Awaited<ReturnType<FetchInflightData>>;
 			try {
-				inflightData = await this.fetchInflightData(proposal.subSolver);
+				inflightData = await this.fetchInflightData(proposal.subSolver, proposal);
 			} catch {
 				return null; // transient DB error, defer
 			}
@@ -330,15 +333,14 @@ export class SimulationValidator implements ValidateProposal {
 				return scaled < this.minCollateral ? scaled : this.minCollateral;
 			};
 
-			// Check siblings first — hard-reject if any lack a ref price.
+			// Legacy unpriced siblings reserve the absolute cap until revalidation.
 			let siblingExposure = 0n;
 			for (const p of inflightData.proposals) {
 				if (p.id === proposal.id) continue;
-				if (p.sellAmountNative === null) {
-					return { kind: "reject", reason: "InflightPriceUnavailable" };
-				}
-				const gas = p.gasUsed ?? 0n;
-				siblingExposure += penaltyCap(p.sellAmountNative) + gas * this.gasPriceRef.value;
+				const cap =
+					p.sellAmountNative === null ? this.minCollateral : penaltyCap(p.sellAmountNative);
+				const gas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
+				siblingExposure += cap + gas * this.gasPriceRef.value;
 			}
 
 			// Current proposal's contribution.

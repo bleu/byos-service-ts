@@ -669,3 +669,91 @@ describe("SimulationValidator gap check", () => {
 		// (in practice this accepts — sell surplus with zero gas cost)
 	});
 });
+
+function collateralValidator(
+	options: {
+		balance?: bigint;
+		bufferBalance?: bigint;
+		gasPrice?: bigint;
+		gasUsed?: bigint;
+		siblings?: Awaited<ReturnType<import("../validator.js").FetchInflightData>>["proposals"];
+		fetchInflight?: import("../validator.js").FetchInflightData;
+	} = {},
+) {
+	const node = fakeNode({
+		simulateV1: async () =>
+			simulateSuccess(
+				990_000n,
+				submittedProposal().orderUidHash as Hex,
+				options.gasUsed ?? 100_000n,
+			),
+	});
+	const readContract = node.client.readContract;
+	const client = {
+		...node.client,
+		readContract: async (args: Parameters<PublicClient["readContract"]>[0]) =>
+			args.functionName === "effectiveBalance" ? (options.balance ?? ETHER) : readContract(args),
+	} as unknown as PublicClient;
+	return new SimulationValidator(
+		client,
+		fakeOrderbook(sampleRecord(sampleOrder())),
+		SETTLEMENT,
+		ESCROW,
+		TRAMPOLINE_FACTORY,
+		{ value: options.gasPrice ?? 0n },
+		0n,
+		10_000n,
+		ETHER,
+		4n,
+		ETHER / 100n,
+		options.fetchInflight ??
+			(async () => ({
+				proposals: options.siblings ?? [],
+				bufferBalance: options.bufferBalance ?? 0n,
+			})),
+	);
+}
+
+function activeProposal(): Proposal {
+	return { ...submittedProposal(), status: "active", gasUsed: 100_000n };
+}
+
+describe("collateral admission", () => {
+	it("reserves the absolute cap for a legacy unpriced sibling without rejecting it as unavailable", async () => {
+		const validator = collateralValidator({
+			siblings: [{ id: 2, gasUsed: null, sellAmountNative: null }],
+		});
+		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
+	});
+
+	it("counts the current active proposal once", async () => {
+		const validator = collateralValidator({
+			balance: 400n,
+			siblings: [{ id: 1, gasUsed: 100_000n, sellAmountNative: 1_000_000n }],
+		});
+		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
+	});
+
+	it("deliberately allows concurrent admissions to share the same collateral snapshot", async () => {
+		let readers = 0;
+		let release: () => void = () => {};
+		const ready = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const validator = collateralValidator({
+			balance: 500n,
+			fetchInflight: async () => {
+				readers++;
+				if (readers === 2) release();
+				await ready;
+				return { proposals: [], bufferBalance: 0n };
+			},
+		});
+		const verdicts = await Promise.all([
+			validator.validate(activeProposal()),
+			validator.validate({ ...activeProposal(), id: 2 }),
+		]);
+		expect(verdicts.map((v) => v?.kind)).toEqual(["accept", "accept"]);
+		// Each proposal reserves 400 wei; their combined 800 wei exceeds 500 wei.
+	});
+});

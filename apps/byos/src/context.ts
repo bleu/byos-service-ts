@@ -176,7 +176,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
 		BigInt(config.COLLATERAL_RATIO_BPS),
 		minCollateralWei,
-		(subSolver) => store.fetchInflightDataBySubSolver(db, subSolver),
+		(subSolver, current) => store.fetchInflightDataBySubSolver(db, subSolver, current),
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 	);

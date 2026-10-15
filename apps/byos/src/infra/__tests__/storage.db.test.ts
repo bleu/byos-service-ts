@@ -773,3 +773,35 @@ describe("log redaction", () => {
 		expect(row?.simulationFailureParams).toBeNull();
 	});
 });
+
+describe("collateral admission siblings", () => {
+	it("excludes submitted and replaced active routes but retains executing exposure", async () => {
+		const isolated = await createTestDb();
+		try {
+			const input = sampleProposal();
+			const old = await store.insert(isolated.db, input);
+			await store.transition(isolated.db, (await store.get(isolated.db, old.id))!, "active");
+			const executing = await store.insert(
+				isolated.db,
+				sampleProposal({ orderUid: `0x${"bc".repeat(56)}` }),
+			);
+			await store.transition(isolated.db, (await store.get(isolated.db, executing.id))!, "active");
+			await store.applySettlementOutcome(
+				isolated.db,
+				(await store.get(isolated.db, executing.id))!,
+				{ kind: "started" },
+			);
+			const current = await store.insert(isolated.db, sampleProposal());
+			await store.insert(isolated.db, sampleProposal());
+			const snapshot = await store.fetchInflightDataBySubSolver(
+				isolated.db,
+				input.subSolver,
+				(await store.get(isolated.db, current.id))!,
+			);
+			expect(snapshot.proposals.map((p) => p.id)).toEqual([executing.id]);
+			expect(snapshot.proposals[0]?.sellAmountNative).toBeNull();
+		} finally {
+			await isolated.cleanup();
+		}
+	});
+});

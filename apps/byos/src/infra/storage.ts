@@ -596,7 +596,7 @@ export async function resolveVerdict(
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
 					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
-					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice?.toString() ?? null;
+					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice.toString();
 				}
 				break;
 			case "reject":
@@ -1327,6 +1327,7 @@ export async function inflightGasUsedBySubSolver(
 export async function fetchInflightDataBySubSolver(
 	db: Db,
 	subSolver: Address,
+	current?: Proposal,
 ): Promise<{
 	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
 	bufferBalance: bigint;
@@ -1337,6 +1338,8 @@ export async function fetchInflightDataBySubSolver(
 		db
 			.select({
 				id: proposals.id,
+				orderUid: proposals.orderUid,
+				status: proposals.status,
 				gasUsed: proposals.gasUsed,
 				sellAmount: proposals.sellAmount,
 				sellTokenRefPrice: proposals.sellTokenRefPrice,
@@ -1345,7 +1348,7 @@ export async function fetchInflightDataBySubSolver(
 			.where(
 				and(
 					eq(proposals.subSolver, subSolver.toLowerCase()),
-					inArray(proposals.status, ["submitted", "active", "executing"]),
+					inArray(proposals.status, ["active", "executing"]),
 				),
 			),
 		db
@@ -1358,7 +1361,19 @@ export async function fetchInflightDataBySubSolver(
 
 	const bufferBalance = bufferRows.reduce((sum, r) => sum + BigInt(r.nativeTokenAmount), 0n);
 
-	const proposalData = proposalRows.map((r) => {
+	// Older active routes in the replacement group are cancelled by acceptance.
+	// Executing routes remain reserved; the current row is added by the validator.
+	const siblings = proposalRows.filter(
+		(r) =>
+			!current ||
+			(r.id !== current.id &&
+				!(
+					r.status === "active" &&
+					r.id < current.id &&
+					r.orderUid === current.orderUid.toLowerCase()
+				)),
+	);
+	const proposalData = siblings.map((r) => {
 		const gasUsed = r.gasUsed != null ? BigInt(r.gasUsed) : null;
 		let sellAmountNative: bigint | null = null;
 		if (r.sellTokenRefPrice != null && r.sellTokenRefPrice !== "0") {

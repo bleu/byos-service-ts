@@ -12,8 +12,8 @@ export interface SimulationOutcome {
 	simulationBuyAmount: bigint;
 	/** Native price of the sell token at validation time (1 token = N native wei / 1e18).
 	 * Persisted so siblings can compute their cumulative exposure without re-fetching prices.
-	 * Optional for backwards compatibility with test helpers that predate this field. */
-	sellTokenRefPrice?: bigint;
+	 */
+	sellTokenRefPrice: bigint;
 }
 
 /** Parameters captured at simulation revert time — stored for permanent debug access. */
