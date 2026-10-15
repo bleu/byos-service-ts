@@ -245,6 +245,17 @@ export class SimulationValidator implements ValidateProposal {
 	}
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {
+		// Settle all independent reads immediately so early returns cannot leave
+		// unhandled rejections. Simulation can proceed while these reads finish.
+		const collateralReads = Promise.allSettled([
+			this.fetchInflightData(proposal.subSolver, proposal),
+			this.publicClient.readContract({
+				address: this.escrowAddress,
+				abi: EscrowAbi,
+				functionName: "effectiveBalance",
+				args: [proposal.subSolver],
+			}),
+		]);
 		const orderbookStarted = performance.now();
 		// Order and native prices are read during immediate validation and every
 		// background revalidation. The sell price is required for all order kinds.
@@ -306,71 +317,6 @@ export class SimulationValidator implements ValidateProposal {
 		);
 		if (slippageReason) {
 			return { kind: "reject", reason: slippageReason };
-		}
-
-		// Gate 2: cumulative collateral exposure check (CIP-87).
-		//
-		// Per-proposal penalty cap mirrors the protocol formula:
-		//   penaltyCap(o) = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
-		// where minCollateral serves as c̄ (the ~$20 USD absolute bound from CIP-87).
-		//
-		// adjustedBalance = effectiveBalance − outstandingBufferBalance
-		// Gate passes iff: adjustedBalance > Σ penaltyCap(o) + gasEstimate × gasPrice
-		//   summed over all active proposals for this subsolver, including this one.
-		{
-			let inflightData: Awaited<ReturnType<FetchInflightData>>;
-			try {
-				inflightData = await this.fetchInflightData(proposal.subSolver, proposal);
-			} catch {
-				return null; // transient DB error, defer
-			}
-
-			const NATIVE_PRICE_SCALE = 10n ** 18n;
-
-			// Compute penalty cap for a single proposal given its native sell amount.
-			const penaltyCap = (sellAmountNative: bigint): bigint => {
-				const scaled = (sellAmountNative * this.collateralRatioBps) / 10_000n;
-				return scaled < this.minCollateral ? scaled : this.minCollateral;
-			};
-
-			// Legacy unpriced siblings reserve the absolute cap until revalidation.
-			let siblingExposure = 0n;
-			for (const p of inflightData.proposals) {
-				if (p.id === proposal.id) continue;
-				const cap =
-					p.sellAmountNative === null ? this.minCollateral : penaltyCap(p.sellAmountNative);
-				const gas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
-				siblingExposure += cap + gas * this.gasPriceRef.value;
-			}
-
-			// Current proposal's contribution.
-			const currentSellAmountNative =
-				(proposal.sellAmount * sellTokenRefPrice) / NATIVE_PRICE_SCALE;
-			const currentExposure =
-				penaltyCap(currentSellAmountNative) +
-				BigInt(ESCROW_GAS_ESTIMATION) * this.gasPriceRef.value;
-
-			// effectiveBalance from the escrow cache is not available here; we read it
-			// via the EscrowValidator which runs first. Use the on-chain value directly.
-			// Import EscrowAbi and read effectiveBalance.
-			let escrowBalance: bigint;
-			try {
-				escrowBalance = await this.publicClient.readContract({
-					address: this.escrowAddress,
-					abi: EscrowAbi,
-					functionName: "effectiveBalance",
-					args: [proposal.subSolver],
-				});
-			} catch {
-				return null; // RPC error, defer
-			}
-
-			// Credits offset delivery shortfalls; they cannot fund gas or penalties.
-			const bufferDebt = inflightData.bufferBalance > 0n ? inflightData.bufferBalance : 0n;
-			const adjustedBalance = escrowBalance - bufferDebt;
-			if (siblingExposure + currentExposure > adjustedBalance) {
-				return { kind: "reject", reason: "ExposureCapExceeded" };
-			}
 		}
 
 		// Step 4: Resolve trampoline address
@@ -516,6 +462,52 @@ export class SimulationValidator implements ValidateProposal {
 		}
 
 		const gas = BigInt(call.gasUsed);
+
+		// Gate 2: cumulative collateral exposure check (CIP-87).
+		//
+		// Per-proposal penalty cap mirrors the protocol formula:
+		//   penaltyCap(o) = min(collateralRatioBps / 10_000 × sellAmountNative, minCollateral)
+		// where minCollateral serves as c̄ (the ~$20 USD absolute bound from CIP-87).
+		//
+		// adjustedBalance = effectiveBalance − max(outstandingBufferBalance, 0)
+		// Gate passes iff: adjustedBalance >= Σ (penaltyCap(o) + simulatedGas × gasPrice)
+		//   summed over all active proposals for this subsolver, including this one.
+		{
+			const [inflightResult, balanceResult] = await collateralReads;
+			if (inflightResult.status === "rejected" || balanceResult.status === "rejected") return null;
+			const inflightData = inflightResult.value;
+			const escrowBalance = balanceResult.value;
+
+			const NATIVE_PRICE_SCALE = 10n ** 18n;
+
+			// Compute penalty cap for a single proposal given its native sell amount.
+			const penaltyCap = (sellAmountNative: bigint): bigint => {
+				const scaled = (sellAmountNative * this.collateralRatioBps) / 10_000n;
+				return scaled < this.minCollateral ? scaled : this.minCollateral;
+			};
+
+			// Legacy unpriced siblings reserve the absolute cap until revalidation.
+			let siblingExposure = 0n;
+			for (const p of inflightData.proposals) {
+				if (p.id === proposal.id) continue;
+				const cap =
+					p.sellAmountNative === null ? this.minCollateral : penaltyCap(p.sellAmountNative);
+				const gas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
+				siblingExposure += cap + gas * this.gasPriceRef.value;
+			}
+
+			// Current proposal's contribution.
+			const currentSellAmountNative =
+				(proposal.sellAmount * sellTokenRefPrice) / NATIVE_PRICE_SCALE;
+			const currentExposure = penaltyCap(currentSellAmountNative) + gas * this.gasPriceRef.value;
+
+			// Credits offset delivery shortfalls; they cannot fund gas or penalties.
+			const bufferDebt = inflightData.bufferBalance > 0n ? inflightData.bufferBalance : 0n;
+			const adjustedBalance = escrowBalance - bufferDebt;
+			if (siblingExposure + currentExposure > adjustedBalance) {
+				return { kind: "reject", reason: "ExposureCapExceeded" };
+			}
+		}
 
 		// Step 10: Profitability gate (first validation only).
 		// effectiveBuyAmount() inside profitability() uses simulationBuyAmount

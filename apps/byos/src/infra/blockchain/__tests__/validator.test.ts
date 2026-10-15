@@ -772,3 +772,30 @@ describe("buffer debt and collateral", () => {
 		},
 	);
 });
+
+describe("post-simulation collateral", () => {
+	it("rejects high-gas routes that fit only the old 200k estimate", async () => {
+		const verdict = await collateralValidator({
+			balance: 300_400n,
+			gasPrice: 1n,
+			gasUsed: 1_000_000n,
+		}).validate(activeProposal());
+		expect(verdict).toEqual({ kind: "reject", reason: "ExposureCapExceeded" });
+	});
+	it("uses fresh gas when revalidation is cheaper than the previous estimate", async () => {
+		const verdict = await collateralValidator({
+			balance: 100_400n,
+			gasPrice: 1n,
+			gasUsed: 100_000n,
+		}).validate({ ...activeProposal(), gasUsed: 1_000_000n });
+		expect(verdict?.kind).toBe("accept");
+	});
+	it("defers on a failed collateral snapshot", async () => {
+		const verdict = await collateralValidator({
+			fetchInflight: async () => {
+				throw new Error("DB unavailable");
+			},
+		}).validate(activeProposal());
+		expect(verdict).toBeNull();
+	});
+});
