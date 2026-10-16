@@ -84,9 +84,10 @@ class BinanceProvider implements RouteProvider {
 			callData: swapTx.data,
 		});
 
+		const minBuyAmount = BigInt(swapTx.minReceiveAmount);
 		return {
-			quoteBuyAmount: BigInt(quote.toTokenAmount),
-			minBuyAmount: BigInt(swapTx.minReceiveAmount),
+			quoteBuyAmount: minBuyAmount,
+			minBuyAmount,
 			interactions,
 		};
 	}
