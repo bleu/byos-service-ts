@@ -85,16 +85,16 @@ export class BinanceClient {
 	}
 
 	/**
-	 * Fetches the best SWAP-mode quote for a sell order. Returns null if no SWAP
-	 * quote is available (e.g. Binance returns RFQ-only or no route).
+	 * Fetches all SWAP-mode quotes for a sell order. Returns an empty array if no
+	 * SWAP quote is available (e.g. Binance returns RFQ-only or no route).
 	 */
-	async getQuote(
+	async getQuotes(
 		fromToken: Address,
 		toToken: Address,
 		sellAmount: bigint,
 		walletAddress: Address,
 		slippageBps: number,
-	): Promise<QuoteData | null> {
+	): Promise<QuoteData[]> {
 		const slippagePercent = (slippageBps / 100).toString();
 		const quotes = await this.apiGet<QuoteData[]>("/api/v1/dex/aggregator/quote", {
 			binanceChainId: this.chainId.toString(),
@@ -104,9 +104,7 @@ export class BinanceClient {
 			userWalletAddress: walletAddress,
 			slippagePercent,
 		});
-		const swapQuotes = quotes.filter((q) => q.executionMode === "SWAP");
-		if (swapQuotes.length === 0) return null;
-		return swapQuotes.find((q) => q.isBest) ?? swapQuotes[0] ?? null;
+		return quotes.filter((q) => q.executionMode === "SWAP");
 	}
 
 	/**

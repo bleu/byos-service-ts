@@ -36,23 +36,39 @@ class BinanceProvider implements RouteProvider {
 	) {}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
-		const quote = await this.client.getQuote(
+		const quotes = await this.client.getQuotes(
 			order.sellToken,
 			order.buyToken,
 			order.remainingSell,
 			this.trampoline,
 			this.slippageBps,
 		);
-		if (!quote) return null;
+		if (quotes.length === 0) return null;
 
-		const swapTx = await this.client.buildSwap(
-			quote.quoteId,
-			order.sellToken,
-			order.buyToken,
-			order.remainingSell,
-			this.trampoline,
-			this.slippageBps,
+		// Build swap txs for all quotes in parallel, then pick the one with the
+		// smallest calldata — simpler routes are less likely to revert.
+		const swapTxs = await Promise.all(
+			quotes.map((q) =>
+				this.client.buildSwap(
+					q.quoteId,
+					order.sellToken,
+					order.buyToken,
+					order.remainingSell,
+					this.trampoline,
+					this.slippageBps,
+				),
+			),
 		);
+		// Zip quotes with their swap txs and pick the one with the smallest calldata.
+		const pairs = quotes.map((q, i) => ({ quote: q, swapTx: swapTxs[i] }));
+		const best = pairs.reduce((a, b) =>
+			(b.swapTx?.data.length ?? Number.MAX_SAFE_INTEGER) <
+			(a.swapTx?.data.length ?? Number.MAX_SAFE_INTEGER)
+				? b
+				: a,
+		);
+		if (!best.swapTx) return null;
+		const { quote, swapTx } = best;
 
 		// approveTarget is the contract that pulls sellTokens during the swap.
 		const interactions: ProviderRoute["interactions"] = [
