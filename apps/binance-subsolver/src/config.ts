@@ -13,6 +13,7 @@ const envSchema = z.object({
 	BINANCE_API_KEY: z.string(),
 	BINANCE_SECRET_KEY: z.string(),
 	BINANCE_ROUTER: addressSchema,
+	GPV2_SETTLEMENT: addressSchema,
 	BINANCE_SLIPPAGE_BPS: z.coerce.number().int().min(0).max(10_000).default(50),
 	BINANCE_QUOTE_CONCURRENCY: z.coerce.number().int().positive().default(32),
 	BYOS_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(100),
@@ -36,6 +37,7 @@ export interface Config {
 	binanceApiKey: string;
 	binanceSecretKey: string;
 	binanceRouter: Address;
+	gpv2Settlement: Address;
 	binanceSlippageBps: number;
 	binanceQuoteConcurrency: number;
 	byosRequestsPerMinute: number;
@@ -70,6 +72,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		binanceApiKey: result.data.BINANCE_API_KEY,
 		binanceSecretKey: result.data.BINANCE_SECRET_KEY,
 		binanceRouter: result.data.BINANCE_ROUTER as Address,
+		gpv2Settlement: result.data.GPV2_SETTLEMENT as Address,
 		binanceSlippageBps: result.data.BINANCE_SLIPPAGE_BPS,
 		binanceQuoteConcurrency: result.data.BINANCE_QUOTE_CONCURRENCY,
 		byosRequestsPerMinute: result.data.BYOS_REQUESTS_PER_MINUTE,

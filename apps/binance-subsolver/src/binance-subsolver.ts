@@ -34,6 +34,7 @@ class BinanceProvider implements RouteProvider {
 		private readonly client: BinanceClient,
 		private readonly trampoline: Address,
 		private readonly router: Address,
+		private readonly settlement: Address,
 		private readonly approvalCache: ApprovalCache,
 		private readonly publicClient: PublicClient,
 		private readonly slippageBps: number,
@@ -78,13 +79,29 @@ class BinanceProvider implements RouteProvider {
 			});
 		}
 
+		const minBuyAmount = BigInt(swapTx.minReceiveAmount);
+
 		interactions.push({
 			target: swapTx.to,
 			value: BigInt(swapTx.value || "0"),
 			callData: swapTx.data,
 		});
 
-		const minBuyAmount = BigInt(swapTx.minReceiveAmount);
+		// Binance sends buyTokens to userWalletAddress (trampoline), not to
+		// settlement. Transfer the guaranteed minimum to settlement so the
+		// Trampoline's floor check (settlement buy balance delta) passes.
+		// Any surplus above minReceiveAmount stays in the trampoline and can
+		// be recovered via claimToken.
+		interactions.push({
+			target: order.buyToken,
+			value: 0n,
+			callData: encodeFunctionData({
+				abi: erc20Abi,
+				functionName: "transfer",
+				args: [this.settlement, minBuyAmount],
+			}),
+		});
+
 		return {
 			quoteBuyAmount: minBuyAmount,
 			minBuyAmount,
@@ -118,6 +135,7 @@ export class BinanceSubsolver {
 			binanceClient,
 			trampoline,
 			config.binanceRouter,
+			config.gpv2Settlement,
 			approvalCache,
 			publicClient,
 			config.binanceSlippageBps,

@@ -27,6 +27,7 @@ const config: Config = {
 	binanceApiKey: "key",
 	binanceSecretKey: "secret",
 	binanceRouter: router,
+	gpv2Settlement: "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
 	binanceSlippageBps: 50,
 	binanceQuoteConcurrency: 1,
 	byosRequestsPerMinute: 100,
