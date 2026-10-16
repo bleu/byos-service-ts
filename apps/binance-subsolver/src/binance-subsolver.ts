@@ -49,25 +49,27 @@ class BinanceProvider implements RouteProvider {
 		);
 		if (!quote) return null;
 
-		const swapTx = await this.client.buildSwap(
-			quote.quoteId,
-			order.sellToken,
-			order.buyToken,
-			order.remainingSell,
-			this.trampoline,
-			this.slippageBps,
-		);
+		const [swapTx, needsApprove] = await Promise.all([
+			this.client.buildSwap(
+				quote.quoteId,
+				order.sellToken,
+				order.buyToken,
+				order.remainingSell,
+				this.trampoline,
+				this.slippageBps,
+			),
+			// approveTarget is known from the quote, no need to wait for buildSwap
+			this.approvalCache.needsApproval(
+				order.sellToken,
+				this.trampoline,
+				quote.approveTarget,
+				this.publicClient,
+			),
+		]);
 
 		const interactions: ProviderRoute["interactions"] = [];
-
-		// Use approveTarget from the quote — this is the contract that will pull
-		// sellTokens, which may differ from the router address.
-		const needsApprove = await this.approvalCache.needsApproval(
-			order.sellToken,
-			this.trampoline,
-			quote.approveTarget,
-			this.publicClient,
-		);
+		// Use approveTarget from the quote — the contract that pulls sellTokens,
+		// which may differ from the top-level router address.
 		if (needsApprove) {
 			interactions.push({
 				target: order.sellToken,
