@@ -38,6 +38,12 @@ services:
       postgres:
         condition: service_healthy
 
+  binance-subsolver:
+    build: .
+    command: ["node", "apps/binance-subsolver/dist/index.js"]
+    profiles: ["binance-subsolver"]
+    env_file: .env.binance-subsolver.example
+
   fynd-subsolver:
     build: .
     command: ["node", "apps/fynd-subsolver/dist/index.js"]

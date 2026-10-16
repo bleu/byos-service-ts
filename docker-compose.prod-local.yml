@@ -134,6 +134,27 @@ services:
         byos:
           condition: service_healthy
 
+    binance-subsolver:
+      image: byos-service:local
+      restart: unless-stopped
+      command: ["node", "apps/binance-subsolver/dist/index.js"]
+      env_file: .env.binance-subsolver
+      environment:
+        BYOS_URL: http://byos:9585
+      deploy:
+        resources:
+          limits:
+            memory: "256M"
+            cpus: "0.2"
+      logging:
+        driver: json-file
+        options:
+          max-size: "50m"
+          max-file: "5"
+      depends_on:
+        byos:
+          condition: service_healthy
+
     # private-mm-subsolver:
     #   image: byos-service:local
     #   restart: unless-stopped
