@@ -10,9 +10,6 @@ import { BinanceClient } from "./binance-client.js";
 import { BinanceSubsolver } from "./binance-subsolver.js";
 import { parseConfig } from "./config.js";
 
-const delay = (milliseconds: number) =>
-	new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-
 async function main() {
 	const config = parseConfig();
 	const logger = pino({

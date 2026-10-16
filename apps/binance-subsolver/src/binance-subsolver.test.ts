@@ -2,8 +2,8 @@ import { byosDomain } from "@byos/common";
 import type { ByosClient, OrderbookOrder } from "@byos/subsolver-core";
 import { RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
-import { type Address, maxUint256 } from "viem";
 import type { PublicClient } from "viem";
+import { type Address, maxUint256 } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalCache } from "./approval-cache.js";
 import type { BinanceClient } from "./binance-client.js";
@@ -54,7 +54,9 @@ function order(index: number): OrderbookOrder {
 function subsolver(
 	proposals: ReturnType<typeof vi.fn>,
 	orders: readonly OrderbookOrder[],
-	publicClient: PublicClient = { readContract: vi.fn(async () => maxUint256) } as unknown as PublicClient,
+	publicClient: PublicClient = {
+		readContract: vi.fn(async () => maxUint256),
+	} as unknown as PublicClient,
 ): BinanceSubsolver {
 	const byos = {
 		proposals,

@@ -1,5 +1,5 @@
-import { type Address, erc20Abi, maxUint256 } from "viem";
 import type { PublicClient } from "viem";
+import { type Address, erc20Abi, maxUint256 } from "viem";
 
 /**
  * Tracks which sell tokens the trampoline has already approved for the Binance

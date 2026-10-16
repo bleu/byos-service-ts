@@ -3,18 +3,18 @@ import {
 	type ByosClient,
 	ByosRateLimitError,
 	buildProposalFromRoute,
-	type OrderbookOrder,
-	prioritizeCandidates,
-	type RequestBudget,
-	randomNonce,
-	quoteBatch,
-	type RouteProvider,
 	type CandidateOrder,
+	type OrderbookOrder,
 	type ProviderRoute,
+	prioritizeCandidates,
+	quoteBatch,
+	type RequestBudget,
+	type RouteProvider,
+	randomNonce,
 } from "@byos/subsolver-core";
 import type pino from "pino";
-import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
 import type { PublicClient } from "viem";
+import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
 import type { ApprovalCache } from "./approval-cache.js";
 import type { BinanceClient } from "./binance-client.js";
 import type { Config } from "./config.js";
@@ -105,7 +105,7 @@ export class BinanceSubsolver {
 		private readonly orderbook: Orderbook,
 		private readonly byos: ByosClient,
 		binanceClient: BinanceClient,
-		private readonly trampoline: Address,
+		readonly trampoline: Address,
 		approvalCache: ApprovalCache,
 		publicClient: PublicClient,
 		private readonly domain: ReturnType<typeof byosDomain>,
@@ -192,7 +192,11 @@ export class BinanceSubsolver {
 			(uid) => this.live.has(uid.toLowerCase()),
 		).map((ranked) => ranked.candidate);
 		this.logger.debug({ count: candidates.length }, "sending candidates to Binance for quoting");
-		const results = await quoteBatch(this.provider, candidates, this.config.binanceQuoteConcurrency);
+		const results = await quoteBatch(
+			this.provider,
+			candidates,
+			this.config.binanceQuoteConcurrency,
+		);
 		let routesFound = 0;
 		let noRoute = 0;
 		let errors = 0;

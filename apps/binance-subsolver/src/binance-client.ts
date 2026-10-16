@@ -58,7 +58,7 @@ export class BinanceClient {
 		body = "",
 	): Record<string, string> {
 		const timestamp = new Date().toISOString();
-		const requestPath = `/build${apiPath}` + (queryString ? `?${queryString}` : "");
+		const requestPath = `/build${apiPath}${queryString ? `?${queryString}` : ""}`;
 		const preHash = timestamp + method + requestPath + body;
 		const signature = crypto
 			.createHmac("sha256", this.secretKey)
