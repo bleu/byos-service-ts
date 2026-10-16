@@ -26,7 +26,8 @@ export function nonSettlementReason(orderUid: string): Hex {
 export interface PenaltyWorkerConfig {
 	db: Db;
 	operator: DebitEscrow;
-	cL: bigint;
+	collateralRatioBps: bigint;
+	minCollateral: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger: Logger;
 	/** Unique process-instance identity used only for expiring database leases. */
@@ -168,7 +169,7 @@ export async function runRevertDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, cL, onAuditEvent, logger } = config;
+	const { db, operator, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
 	try {
@@ -194,6 +195,7 @@ export async function runRevertDebits(
 			continue;
 		}
 
+		const cL = proposal.settlementPenaltyCap ?? minCollateral;
 		const amount = revertDebit(cost, cL);
 		const landedDebit = await durableDebit(
 			config,
@@ -245,7 +247,7 @@ export async function runNonSettlementDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, cL, onAuditEvent, logger } = config;
+	const { db, minCollateral, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.pendingPenalties>>;
 	try {
@@ -258,6 +260,7 @@ export async function runNonSettlementDebits(
 	for (const penalty of pending) {
 		if ((attempts.get(penalty.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
+		const cL = penalty.penaltyCap ?? minCollateral;
 		const amount = nonSettlementDebit(cL);
 		const reason = nonSettlementReason(penalty.orderUid);
 		const landedDebit = await durableDebit(
@@ -303,7 +306,7 @@ export async function runNonSettlementDebits(
  * Step 1: Record a ledger entry per proposal (signed: positive = under-delivery,
  *         negative = over-delivery credit).
  * Step 2: For each subsolver with uncleared entries, check if the outstanding
- *         balance exceeds c_L. If so, slash the full balance from escrow and
+ *         balance exceeds MIN_COLLATERAL / 5. If so, slash the full balance from escrow and
  *         mark all entries cleared.
  *
  * Over-delivery credits offset future shortfalls but are never paid out.
@@ -315,7 +318,7 @@ export async function runBufferDebits(
 	config: PenaltyWorkerConfig,
 	attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, operator, cL, onAuditEvent, logger } = config;
+	const { db, operator, minCollateral, onAuditEvent, logger } = config;
 
 	// Step 1: Snapshot settled proposals with loose slippage that have
 	// no ledger entry yet.
@@ -406,7 +409,7 @@ export async function runBufferDebits(
 		logger.error({ err: e }, "buffer: failed to fetch subsolvers with uncleared entries");
 	}
 
-	// Step 3: For each affected subsolver, check if outstanding balance exceeds c_L.
+	// Step 3: For each affected subsolver, check if outstanding balance exceeds MIN_COLLATERAL / 5.
 	// Resume a buffer batch that was marked in-flight by a worker which then
 	// disappeared. Its source id names the exact entry set and its transaction
 	// (if any) is already durable, so this never creates a replacement debit.
@@ -450,7 +453,10 @@ export async function runBufferDebits(
 			continue;
 		}
 
-		if (balance <= cL) continue;
+		// Buffer slash threshold: a fixed fraction of MIN_COLLATERAL.
+		// Deliberately simpler than per-proposal scaling — the buffer accumulates
+		// across many orders and a per-order sum would require joining all entries.
+		if (balance <= minCollateral / 5n) continue;
 
 		const entries = await store.unclearedBufferEntries(db, subSolver);
 		const entryIds = entries.map((entry) => entry.id);

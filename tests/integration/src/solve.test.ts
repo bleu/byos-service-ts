@@ -99,6 +99,7 @@ async function seedSimulatedProposal(
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
 			simulationBuyAmount: buyAmount,
+			sellTokenRefPrice: 10n ** 18n,
 		},
 	});
 
