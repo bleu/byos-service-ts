@@ -5,7 +5,6 @@ import pino from "pino";
 import type { Address } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { ApprovalCache } from "./approval-cache.js";
 import { BinanceClient } from "./binance-client.js";
 import { BinanceSubsolver } from "./binance-subsolver.js";
 import { parseConfig } from "./config.js";
@@ -40,8 +39,6 @@ async function main() {
 		new ByosClient(config.byosUrl, domain, signFn),
 		binanceClient,
 		trampoline as Address,
-		new ApprovalCache(),
-		publicClient,
 		domain,
 		signFn,
 		logger,

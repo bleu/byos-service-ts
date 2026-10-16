@@ -13,9 +13,7 @@ import {
 	randomNonce,
 } from "@byos/subsolver-core";
 import type pino from "pino";
-import type { PublicClient } from "viem";
 import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
-import type { ApprovalCache } from "./approval-cache.js";
 import type { BinanceClient } from "./binance-client.js";
 import type { Config } from "./config.js";
 
@@ -34,8 +32,6 @@ class BinanceProvider implements RouteProvider {
 		private readonly client: BinanceClient,
 		private readonly trampoline: Address,
 		private readonly settlement: Address,
-		private readonly approvalCache: ApprovalCache,
-		private readonly publicClient: PublicClient,
 		private readonly slippageBps: number,
 	) {}
 
@@ -49,29 +45,18 @@ class BinanceProvider implements RouteProvider {
 		);
 		if (!quote) return null;
 
-		const [swapTx, needsApprove] = await Promise.all([
-			this.client.buildSwap(
-				quote.quoteId,
-				order.sellToken,
-				order.buyToken,
-				order.remainingSell,
-				this.trampoline,
-				this.slippageBps,
-			),
-			// approveTarget is known from the quote, no need to wait for buildSwap
-			this.approvalCache.needsApproval(
-				order.sellToken,
-				this.trampoline,
-				quote.approveTarget,
-				this.publicClient,
-			),
-		]);
+		const swapTx = await this.client.buildSwap(
+			quote.quoteId,
+			order.sellToken,
+			order.buyToken,
+			order.remainingSell,
+			this.trampoline,
+			this.slippageBps,
+		);
 
-		const interactions: ProviderRoute["interactions"] = [];
-		// Use approveTarget from the quote — the contract that pulls sellTokens,
-		// which may differ from the top-level router address.
-		if (needsApprove) {
-			interactions.push({
+		// approveTarget is the contract that pulls sellTokens during the swap.
+		const interactions: ProviderRoute["interactions"] = [
+			{
 				target: order.sellToken,
 				value: 0n,
 				callData: encodeFunctionData({
@@ -79,8 +64,8 @@ class BinanceProvider implements RouteProvider {
 					functionName: "approve",
 					args: [quote.approveTarget, maxUint256],
 				}),
-			});
-		}
+			},
+		];
 
 		const minBuyAmount = BigInt(swapTx.minReceiveAmount);
 
@@ -127,8 +112,6 @@ export class BinanceSubsolver {
 		private readonly byos: ByosClient,
 		binanceClient: BinanceClient,
 		readonly trampoline: Address,
-		approvalCache: ApprovalCache,
-		publicClient: PublicClient,
 		private readonly domain: ReturnType<typeof byosDomain>,
 		private readonly signFn: (params: unknown) => Promise<`0x${string}`>,
 		private readonly logger: pino.Logger,
@@ -138,8 +121,6 @@ export class BinanceSubsolver {
 			binanceClient,
 			trampoline,
 			config.gpv2Settlement,
-			approvalCache,
-			publicClient,
 			config.binanceSlippageBps,
 		);
 	}

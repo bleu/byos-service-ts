@@ -2,17 +2,13 @@ import { byosDomain } from "@byos/common";
 import type { ByosClient, OrderbookOrder } from "@byos/subsolver-core";
 import { RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
-import type { PublicClient } from "viem";
-import { type Address, maxUint256 } from "viem";
 import { describe, expect, it, vi } from "vitest";
-import { ApprovalCache } from "./approval-cache.js";
 import type { BinanceClient } from "./binance-client.js";
 import { BinanceSubsolver } from "./binance-subsolver.js";
 import type { Config } from "./config.js";
 
 const factory = "0x0000000000000000000000000000000000000001" as const;
 const trampolineAddress = "0x0000000000000000000000000000000000000005" as const;
-const approveTarget = "0x0000000000000000000000000000000000000006" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
@@ -54,9 +50,6 @@ function order(index: number): OrderbookOrder {
 function subsolver(
 	proposals: ReturnType<typeof vi.fn>,
 	orders: readonly OrderbookOrder[],
-	publicClient: PublicClient = {
-		readContract: vi.fn(async () => maxUint256),
-	} as unknown as PublicClient,
 ): BinanceSubsolver {
 	const byos = {
 		proposals,
@@ -71,8 +64,6 @@ function subsolver(
 		byos,
 		binanceClient,
 		trampolineAddress,
-		new ApprovalCache(),
-		publicClient,
 		byosDomain(56, factory),
 		async () => "0x" as `0x${string}`,
 		logger,
@@ -117,57 +108,5 @@ describe("BinanceSubsolver", () => {
 
 		// proposals() called once; all orders are live so Binance skips them
 		expect(proposals).toHaveBeenCalledTimes(1);
-	});
-
-	it("skips the approve interaction when the token is already approved above maxUint256/2", async () => {
-		const cache = new ApprovalCache();
-		const alreadyApprovedToken = "0x0000000000000000000000000000000000000003" as Address;
-		const readContract = vi.fn(async () => maxUint256);
-		const publicClientMock = { readContract } as unknown as PublicClient;
-
-		const needsApprove = await cache.needsApproval(
-			alreadyApprovedToken,
-			trampolineAddress,
-			approveTarget,
-			publicClientMock,
-		);
-
-		expect(needsApprove).toBe(false);
-		expect(readContract).toHaveBeenCalledOnce();
-
-		// Second call must use cache, not re-read
-		const needsApprove2 = await cache.needsApproval(
-			alreadyApprovedToken,
-			trampolineAddress,
-			approveTarget,
-			publicClientMock,
-		);
-		expect(needsApprove2).toBe(false);
-		expect(readContract).toHaveBeenCalledOnce();
-	});
-
-	it("requires an approve interaction when allowance is at or below maxUint256/2", async () => {
-		const cache = new ApprovalCache();
-		const unapprovedToken = "0x0000000000000000000000000000000000000003" as Address;
-		const readContract = vi.fn(async () => maxUint256 / 2n);
-		const publicClientMock = { readContract } as unknown as PublicClient;
-
-		const needsApprove = await cache.needsApproval(
-			unapprovedToken,
-			trampolineAddress,
-			approveTarget,
-			publicClientMock,
-		);
-
-		expect(needsApprove).toBe(true);
-		// Should re-check on every call since it was never cached
-		const needsApprove2 = await cache.needsApproval(
-			unapprovedToken,
-			trampolineAddress,
-			approveTarget,
-			publicClientMock,
-		);
-		expect(needsApprove2).toBe(true);
-		expect(readContract).toHaveBeenCalledTimes(2);
 	});
 });
