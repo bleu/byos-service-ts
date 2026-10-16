@@ -12,7 +12,7 @@ import type { Config } from "./config.js";
 
 const factory = "0x0000000000000000000000000000000000000001" as const;
 const trampolineAddress = "0x0000000000000000000000000000000000000005" as const;
-const router = "0x0000000000000000000000000000000000000006" as const;
+const approveTarget = "0x0000000000000000000000000000000000000006" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
@@ -26,7 +26,6 @@ const config: Config = {
 	trampolineFactory: factory,
 	binanceApiKey: "key",
 	binanceSecretKey: "secret",
-	binanceRouter: router,
 	gpv2Settlement: "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
 	binanceSlippageBps: 50,
 	binanceQuoteConcurrency: 1,
@@ -129,7 +128,7 @@ describe("BinanceSubsolver", () => {
 		const needsApprove = await cache.needsApproval(
 			alreadyApprovedToken,
 			trampolineAddress,
-			router,
+			approveTarget,
 			publicClientMock,
 		);
 
@@ -140,7 +139,7 @@ describe("BinanceSubsolver", () => {
 		const needsApprove2 = await cache.needsApproval(
 			alreadyApprovedToken,
 			trampolineAddress,
-			router,
+			approveTarget,
 			publicClientMock,
 		);
 		expect(needsApprove2).toBe(false);
@@ -156,7 +155,7 @@ describe("BinanceSubsolver", () => {
 		const needsApprove = await cache.needsApproval(
 			unapprovedToken,
 			trampolineAddress,
-			router,
+			approveTarget,
 			publicClientMock,
 		);
 
@@ -165,7 +164,7 @@ describe("BinanceSubsolver", () => {
 		const needsApprove2 = await cache.needsApproval(
 			unapprovedToken,
 			trampolineAddress,
-			router,
+			approveTarget,
 			publicClientMock,
 		);
 		expect(needsApprove2).toBe(true);

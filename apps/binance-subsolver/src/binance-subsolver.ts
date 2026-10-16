@@ -33,7 +33,6 @@ class BinanceProvider implements RouteProvider {
 	constructor(
 		private readonly client: BinanceClient,
 		private readonly trampoline: Address,
-		private readonly router: Address,
 		private readonly settlement: Address,
 		private readonly approvalCache: ApprovalCache,
 		private readonly publicClient: PublicClient,
@@ -61,10 +60,12 @@ class BinanceProvider implements RouteProvider {
 
 		const interactions: ProviderRoute["interactions"] = [];
 
+		// Use approveTarget from the quote — this is the contract that will pull
+		// sellTokens, which may differ from the router address.
 		const needsApprove = await this.approvalCache.needsApproval(
 			order.sellToken,
 			this.trampoline,
-			this.router,
+			quote.approveTarget,
 			this.publicClient,
 		);
 		if (needsApprove) {
@@ -74,7 +75,7 @@ class BinanceProvider implements RouteProvider {
 				callData: encodeFunctionData({
 					abi: erc20Abi,
 					functionName: "approve",
-					args: [this.router, maxUint256],
+					args: [quote.approveTarget, maxUint256],
 				}),
 			});
 		}
@@ -134,7 +135,6 @@ export class BinanceSubsolver {
 		this.provider = new BinanceProvider(
 			binanceClient,
 			trampoline,
-			config.binanceRouter,
 			config.gpv2Settlement,
 			approvalCache,
 			publicClient,
