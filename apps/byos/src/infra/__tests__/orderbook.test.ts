@@ -144,6 +144,19 @@ describe("OrderbookClient — order mapping", () => {
 		expect(record.order.signingScheme).toBe(SigningScheme.PreSign);
 	});
 
+	it("presign orders use owner as signature instead of the empty 0x the API returns", async () => {
+		makeApiMock({
+			getOrder: vi.fn().mockResolvedValue(
+				fakeOrder({ signingScheme: "presign", signature: "0x" }),
+			),
+		});
+
+		const record = await new OrderbookClient(SupportedChainId.MAINNET).order(REAL_UID);
+
+		// fakeOrder.owner is "0xd2e80d60aff5377587e49ff32c9bad639d6f68bc"
+		expect(record.order.signature).toBe("0xd2e80d60aff5377587e49ff32c9bad639d6f68bc");
+	});
+
 	it("unknown kind throws transient instead of coercing", async () => {
 		makeApiMock({ getOrder: vi.fn().mockResolvedValue(fakeOrder({ kind: "twap" })) });
 
