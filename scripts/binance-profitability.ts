@@ -26,7 +26,7 @@ const GPV2_SETTLEMENT = "0x9008d19f58aabd9ed0d60971565aa8510560ab41" as const;
 const ORDERBOOK_API = "https://api.cow.fi/bnb/api/v1";
 const BINANCE_BASE_URL = "https://web3.binance.com/build";
 const BSC_CHAIN_ID = "56";
-const SLIPPAGE_PERCENT = "0.5";
+const SLIPPAGE_PERCENT = "0.05";
 const MAX_ORDERS = 50;
 // ================================
 
@@ -47,7 +47,7 @@ function makeHeaders(
 	body = "",
 ): Record<string, string> {
 	const timestamp = new Date().toISOString();
-	const requestPath = `/build${apiPath}` + (queryString ? `?${queryString}` : "");
+	const requestPath = `/build${apiPath}${queryString ? `?${queryString}` : ""}`;
 	const preHash = timestamp + method + requestPath + body;
 	const signature = crypto
 		.createHmac("sha256", BINANCE_SECRET_KEY!)
@@ -217,12 +217,12 @@ async function getTokenSymbols(tokens: string[]): Promise<Map<string, string>> {
 
 	const map = new Map<string, string>();
 	for (let i = 0; i < tokens.length; i++) {
-		const key = tokens[i]!.toLowerCase();
+		const key = tokens[i]?.toLowerCase();
 		const result = results[i];
 		if (result?.status === "success") {
 			map.set(key, result.result as string);
 		} else {
-			map.set(key, tokens[i]!.slice(2, 8).toUpperCase());
+			map.set(key, tokens[i]?.slice(2, 8).toUpperCase());
 		}
 	}
 	return map;

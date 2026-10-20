@@ -133,8 +133,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 					proposalData,
 					parsed.interactionsHash,
 				);
-				ecdsaMatched =
-					recovered.toLowerCase() === parsed.subSolverAddress.toLowerCase();
+				ecdsaMatched = recovered.toLowerCase() === parsed.subSolverAddress.toLowerCase();
 			} catch {
 				// Signature is not a valid 65-byte ECDSA sig; fall through to EIP-1271.
 			}

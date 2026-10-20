@@ -1,17 +1,8 @@
-import { Kind } from "@byos/common";
-import { hashProposalData, computeInteractionsHash, byosDomain } from "@byos/common";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { keccak256 } from "viem";
+import { computeInteractionsHash, hashProposalData, Kind } from "@byos/common";
 import type { Address, Hex } from "viem";
-import {
-	CHAIN_ID,
-	TRAMPOLINE_FACTORY,
-	DOMAIN,
-	SIGNER_ACCOUNT,
-	SIGN_FN,
-	createTestApp,
-	type TestApp,
-} from "./helpers.js";
+import { keccak256 } from "viem";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createTestApp, DOMAIN, SIGN_FN, SIGNER_ACCOUNT, type TestApp } from "./helpers.js";
 
 // A nonce counter isolated to this file so parallel test files don't collide.
 let nonce = 10_000n;
@@ -93,7 +84,7 @@ describe("EIP-1271 contract sub-solvers", () => {
 			const { signProposal } = await import("@byos/common");
 			const validUntil = BigInt(Math.floor(Date.now() / 1000)) + 300n;
 			const n = nonce++;
-			const interactionsHash = computeInteractionsHash(INTERACTIONS);
+			const _interactionsHash = computeInteractionsHash(INTERACTIONS);
 			const proposal = {
 				orderUidHash: keccak256(ORDER_UID),
 				sellToken: SELL_TOKEN,

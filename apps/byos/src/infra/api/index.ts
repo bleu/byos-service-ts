@@ -1,7 +1,7 @@
+import type { Eip1271Verifier } from "@byos/common";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
-import type { Eip1271Verifier } from "@byos/common";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import type { BalanceCache } from "../../domain/balance-cache.js";

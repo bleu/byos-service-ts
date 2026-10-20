@@ -4,9 +4,9 @@ import {
 	type Hex,
 	hashTypedData,
 	keccak256,
+	type PublicClient,
 	recoverTypedDataAddress,
 	type TypedDataDomain,
-	type PublicClient,
 } from "viem";
 import { interactionComponents } from "./abis/trampoline.js";
 import type { ContractInteraction, Proposal } from "./types.js";
@@ -238,9 +238,7 @@ export type Eip1271Verifier = (
  * Catches all errors and returns `false` — a reverting or absent contract is
  * an invalid signature, matching the semantics of OZ's `SignatureChecker`.
  */
-export function makeEip1271Verifier(
-	client: Pick<PublicClient, "readContract">,
-): Eip1271Verifier {
+export function makeEip1271Verifier(client: Pick<PublicClient, "readContract">): Eip1271Verifier {
 	return async (subSolverAddress, digest, signature) => {
 		try {
 			const result = await client.readContract({
