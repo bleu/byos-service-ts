@@ -146,9 +146,7 @@ describe("OrderbookClient — order mapping", () => {
 
 	it("presign orders use owner as signature instead of the empty 0x the API returns", async () => {
 		makeApiMock({
-			getOrder: vi.fn().mockResolvedValue(
-				fakeOrder({ signingScheme: "presign", signature: "0x" }),
-			),
+			getOrder: vi.fn().mockResolvedValue(fakeOrder({ signingScheme: "presign", signature: "0x" })),
 		});
 
 		const record = await new OrderbookClient(SupportedChainId.MAINNET).order(REAL_UID);

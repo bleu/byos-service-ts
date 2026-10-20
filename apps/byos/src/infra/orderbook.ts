@@ -122,9 +122,7 @@ function sdkOrderToRecord(
 		// signature, but GPv2Settlement.recoverPreSigner requires the owner's
 		// 20-byte address so it can look up the pre-signature on-chain.
 		signature:
-			sdkOrder.signingScheme === "presign"
-				? (sdkOrder.owner as Hex)
-				: (sdkOrder.signature as Hex),
+			sdkOrder.signingScheme === "presign" ? (sdkOrder.owner as Hex) : (sdkOrder.signature as Hex),
 	};
 
 	const preInteractions = (sdkOrder.interactions?.pre ?? []).map(
