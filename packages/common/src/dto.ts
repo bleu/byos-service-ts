@@ -46,6 +46,9 @@ export const createProposalRequestSchema = z.object({
 	validUntil: u256String,
 	nonce: u256String,
 	signature: hexString,
+	/** Required when the sub-solver is an EIP-1271 contract signer. Absent for
+	 * EOA sub-solvers (address is recovered from the ECDSA signature). See ADR-0020. */
+	subSolverAddress: addressString.optional(),
 });
 
 export type CreateProposalRequest = z.infer<typeof createProposalRequestSchema>;

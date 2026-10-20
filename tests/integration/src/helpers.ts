@@ -6,7 +6,7 @@ import type { RateLimiter } from "@byos/byos/src/domain/rate-limit.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
-import type { ContractInteraction } from "@byos/common";
+import type { ContractInteraction, Eip1271Verifier } from "@byos/common";
 import {
 	byosDomain,
 	computeInteractionsHash,
@@ -70,6 +70,8 @@ export interface TestAppOverrides {
 	floorWei?: bigint;
 	/** Called when a proposal is accepted via POST /proposals. Defaults to a no-op. */
 	enqueueValidation?: (proposalId: number) => Promise<void>;
+	/** EIP-1271 verifier mock. Omit to simulate a deployment without EIP-1271 support. */
+	verifyEip1271?: Eip1271Verifier;
 }
 
 /** Production defaults straight from the config schema, so the e2e assertions
@@ -106,6 +108,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		rateLimiter: overrides.rateLimiter,
 		balances: overrides.balances,
 		rateLimits: testRateLimits(overrides),
+		verifyEip1271: overrides.verifyEip1271,
 	};
 
 	const publicApp = createPublicApp(appCtx);

@@ -21,6 +21,8 @@ export interface ParsedProposal {
 	validUntil: bigint;
 	nonce: bigint;
 	signature: Hex;
+	/** Present when the sub-solver is an EIP-1271 contract signer. See ADR-0020. */
+	subSolverAddress?: Address;
 }
 
 /** Parses a CreateProposalRequest into domain-ready fields. */
@@ -53,6 +55,9 @@ export function parseCreateProposalRequest(body: CreateProposalRequest): ParsedP
 		validUntil: BigInt(body.validUntil),
 		nonce: BigInt(body.nonce),
 		signature: hex(body.signature),
+		...(body.subSolverAddress !== undefined
+			? { subSolverAddress: body.subSolverAddress.toLowerCase() as Address }
+			: {}),
 	};
 }
 

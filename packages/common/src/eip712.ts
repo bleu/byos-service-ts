@@ -6,6 +6,7 @@ import {
 	keccak256,
 	recoverTypedDataAddress,
 	type TypedDataDomain,
+	type PublicClient,
 } from "viem";
 import { interactionComponents } from "./abis/trampoline.js";
 import type { ContractInteraction, Proposal } from "./types.js";
@@ -200,6 +201,59 @@ export async function signReadAuth(
 		primaryType: "ReadAuth",
 		message: { version: READ_AUTH_VERSION },
 	});
+}
+
+// --- EIP-1271 ---
+
+/** The magic return value from EIP-1271 `isValidSignature` that means "valid". */
+export const EIP1271_MAGIC_VALUE = "0x1626ba7e" as const;
+
+const eip1271Abi = [
+	{
+		type: "function",
+		name: "isValidSignature",
+		inputs: [
+			{ name: "_hash", type: "bytes32" },
+			{ name: "_signature", type: "bytes" },
+		],
+		outputs: [{ name: "", type: "bytes4" }],
+		stateMutability: "view",
+	},
+] as const;
+
+/**
+ * Injectable EIP-1271 verifier. Called only when a proposal carries
+ * `subSolverAddress` and ECDSA recovery does not match that address.
+ * Returns `true` iff the contract's `isValidSignature` returns the magic value.
+ * Should never throw — callers treat any exception as a failed verification.
+ */
+export type Eip1271Verifier = (
+	subSolverAddress: Address,
+	digest: Hex,
+	signature: Hex,
+) => Promise<boolean>;
+
+/**
+ * Builds the production `Eip1271Verifier` from a viem `PublicClient`.
+ * Catches all errors and returns `false` — a reverting or absent contract is
+ * an invalid signature, matching the semantics of OZ's `SignatureChecker`.
+ */
+export function makeEip1271Verifier(
+	client: Pick<PublicClient, "readContract">,
+): Eip1271Verifier {
+	return async (subSolverAddress, digest, signature) => {
+		try {
+			const result = await client.readContract({
+				address: subSolverAddress,
+				abi: eip1271Abi,
+				functionName: "isValidSignature",
+				args: [digest, signature],
+			});
+			return result.toLowerCase() === EIP1271_MAGIC_VALUE;
+		} catch {
+			return false;
+		}
+	};
 }
 
 /** Computes the EIP-712 hash for a ProposalData message (useful for testing). */

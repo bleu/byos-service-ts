@@ -6,6 +6,7 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 
 ### Domain ADRs
 
+- [0020 — EIP-1271 contract sub-solvers](0020-eip1271-sub-solvers.md): Optional `subSolverAddress` field, try-ECDSA-then-EIP-1271 verification, injectable `verifyEip1271`, `Eip1271NotAvailable` 503
 - [0001 — Proposal API](0001-proposal-api.md): Public HTTP API for sub-solver proposal ingestion, EIP-712 auth, two-listener architecture; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
 - [0002 — Solver Engine](0002-solver-engine.md): `/solve` hot path, `surplus - gas` scoring, gas cut, Trampoline settlement crafting; revised 2026-08-14 (minBuyAmount/quoteBuyAmount split)
 - [0003 — Slash Attribution Flow](0003-slash-attribution-flow.md): Track A (gas + revert penalty) and Track B (EBBO/fairness) risk classes; revised 2026-08-14 (buffer debit for minBuyAmount/quoteBuyAmount)

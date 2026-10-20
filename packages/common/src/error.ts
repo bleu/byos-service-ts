@@ -2,6 +2,10 @@
 export const Kind = {
 	InvalidSignature: "InvalidSignature",
 	SignatureRecoveryFailed: "SignatureRecoveryFailed",
+	/** Returned when a proposal carries `subSolverAddress` (EIP-1271 path) but
+	 * the service is not configured with a `verifyEip1271` function. 503 so
+	 * clients retry rather than treating this as a permanent rejection. */
+	Eip1271NotAvailable: "Eip1271NotAvailable",
 	InsufficientEscrow: "InsufficientEscrow",
 	ProposalExpired: "ProposalExpired",
 	ProposalLifetimeExceeded: "ProposalLifetimeExceeded",
