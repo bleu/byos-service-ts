@@ -1,13 +1,16 @@
-import { readFileSync } from "node:fs";
-import { parse } from "smol-toml";
 import { type Address, isAddress } from "viem";
 import { z } from "zod";
 
+const addressSchema = z.string().refine(isAddress, { message: "must be a valid address" });
+
 const envSchema = z.object({
-	ORDERBOOK_URL: z.string(),
+	DISCOVERY_URL: z.string(),
+	DISCOVERY_METHOD: z.enum(["orderbook", "aws"]),
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
+	CHAIN_ID: z.coerce.number().int().positive(),
+	TRAMPOLINE_FACTORY: addressSchema,
 	FYND_URL: z.string().url().default("http://fynd:3000"),
 	FYND_SLIPPAGE_BPS: z.coerce.number().int().min(0).max(10_000).default(50),
 	FYND_QUOTE_CONCURRENCY: z.coerce.number().int().positive().default(32),
@@ -16,18 +19,22 @@ const envSchema = z.object({
 	BYOS_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(100),
 	BYOS_READ_RESERVE: z.coerce.number().int().nonnegative().default(10),
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
+	PROPOSAL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
+	POLL_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(2),
 	JSON_LOGS: z.enum(["true", "false"]).optional(),
-	CONFIG_PATH: z.string().optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 
 export interface Config {
-	orderBookUrl: string;
+	discoveryUrl: string;
+	discoveryMethod: "orderbook" | "aws";
 	byosUrl: string;
 	rpcUrl: string;
 	privateKey: `0x${string}`;
 	logLevel: string;
 	jsonLogs: boolean;
+	chainId: number;
+	trampolineFactory: Address;
 	fyndUrl: string;
 	fyndSlippageBps: number;
 	fyndQuoteConcurrency: number;
@@ -36,7 +43,8 @@ export interface Config {
 	byosRequestsPerMinute: number;
 	byosReadReserve: number;
 	proposalRefreshIntervalSeconds: number;
-	toml: { chainId: number; trampolineFactory: Address; proposalTtl: number; pollInterval: number };
+	proposalTtlSeconds: number;
+	pollIntervalSeconds: number;
 }
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -47,21 +55,13 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 			.join("\n");
 		throw new Error(`Invalid configuration:\n${errors}`);
 	}
-	const raw = parse(readFileSync(result.data.CONFIG_PATH ?? "config.toml", "utf-8")) as Record<
-		string,
-		unknown
-	>;
-	const chainId = positiveInteger(raw["chain-id"] ?? raw.chainId, "chain-id");
-	if (chainId !== 56) throw new Error("Fynd subsolver requires BSC (chain-id = 56)");
-	const trampolineFactory = raw["trampoline-factory"] ?? raw.trampolineFactory;
-	if (typeof trampolineFactory !== "string" || !isAddress(trampolineFactory)) {
-		throw new Error("trampoline-factory must be a valid address");
-	}
+	if (result.data.CHAIN_ID !== 56) throw new Error("Fynd subsolver requires BSC (CHAIN_ID = 56)");
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
 	return {
-		orderBookUrl: result.data.ORDERBOOK_URL,
+		discoveryUrl: result.data.DISCOVERY_URL,
+		discoveryMethod: result.data.DISCOVERY_METHOD,
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
@@ -69,6 +69,8 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		jsonLogs:
 			result.data.JSON_LOGS === "true" ||
 			(result.data.JSON_LOGS === undefined && env.NODE_ENV === "production"),
+		chainId: result.data.CHAIN_ID,
+		trampolineFactory: result.data.TRAMPOLINE_FACTORY as Address,
 		fyndUrl: result.data.FYND_URL,
 		fyndSlippageBps: result.data.FYND_SLIPPAGE_BPS,
 		fyndQuoteConcurrency: result.data.FYND_QUOTE_CONCURRENCY,
@@ -77,35 +79,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		byosRequestsPerMinute: result.data.BYOS_REQUESTS_PER_MINUTE,
 		byosReadReserve: result.data.BYOS_READ_RESERVE,
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,
-		toml: {
-			chainId,
-			trampolineFactory,
-			proposalTtl: positiveInteger(
-				raw["proposal-ttl-secs"] ?? raw.proposalTtl ?? 60,
-				"proposal-ttl-secs",
-			),
-			pollInterval: nonNegativeInteger(
-				raw["poll-interval-secs"] ?? raw.pollInterval ?? 2,
-				"poll-interval-secs",
-			),
-		},
+		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
+		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
 	};
-}
-
-function positiveInteger(value: unknown, name: string): number {
-	const number =
-		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
-	if (!Number.isSafeInteger(number) || number <= 0) {
-		throw new Error(`${name} must be a positive whole number`);
-	}
-	return number;
-}
-
-function nonNegativeInteger(value: unknown, name: string): number {
-	const number =
-		typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
-	if (!Number.isSafeInteger(number) || number < 0) {
-		throw new Error(`${name} must be a non-negative whole number`);
-	}
-	return number;
 }
