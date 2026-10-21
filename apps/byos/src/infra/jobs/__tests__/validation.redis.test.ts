@@ -40,18 +40,15 @@ it("deduplicates ingestion and tick dispatch while validation is running", async
 		release();
 		await completed;
 		expect(calls).toBe(1);
-		// Set up the completion listener BEFORE enqueueing — the worker is now
-		// unblocked and could finish the second job before waitUntilFinished
-		// registers its listener, causing a "Missing key" error from BullMQ.
-		const secondJobDone = new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => reject(new Error("second job timed out")), 5000);
-			events.once("completed", () => {
-				clearTimeout(timer);
-				resolve();
-			});
-		});
+		// The refresh is immediately runnable: pause until completion observation
+		// is registered, or removeOnComplete can delete it before isFinished.
+		await worker.pause();
 		await enqueueProposalValidation(queue, 123);
-		await secondJobDone;
+		const refresh = await queue.getJob("proposal-123");
+		if (!refresh) throw new Error("missing refresh job");
+		const refreshed = refresh.waitUntilFinished(events, 5000);
+		worker.resume();
+		await refreshed;
 		expect(calls).toBe(2);
 	} finally {
 		release();

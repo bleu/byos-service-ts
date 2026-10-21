@@ -115,7 +115,7 @@ export const RejectionReason = {
 	TokenMismatch: "TokenMismatch",
 	OrderNotFound: "OrderNotFound",
 	Unprofitable: "Unprofitable",
-	/** Proposal sell value is at or way above MIN_COLLATERAL in native token. */
+	/** @deprecated Historical response value; no longer emitted by validation. */
 	TradeValueCapExceeded: "TradeValueCapExceeded",
 	/** Another sub-solver's proposal was selected by BYOS for the same order at /solve time. */
 	SubsolverOutbid: "SubsolverOutbid",
@@ -127,6 +127,8 @@ export const RejectionReason = {
 	SimulationMissingExecutedEvent: "SimulationMissingExecutedEvent",
 	/** A required token native price is unavailable — cannot evaluate a native-value guard. */
 	NativePriceUnavailable: "NativePriceUnavailable",
+	/** @deprecated Historical response value; pending siblings no longer block validation. */
+	InflightPriceUnavailable: "InflightPriceUnavailable",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -145,6 +147,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.ProposedSlippageOutrange,
 	RejectionReason.SimulationMissingExecutedEvent,
 	RejectionReason.NativePriceUnavailable,
+	RejectionReason.InflightPriceUnavailable,
 ]);
 
 // --- Proposal Metadata ---

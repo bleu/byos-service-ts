@@ -41,8 +41,8 @@ export interface AppContext {
 	/** Request-path connection: bounded commands, no offline queue. */
 	requestRedis: Redis;
 	/** Resolved minimum escrow collateral: the chain's default, or the
-	 * MIN_COLLATERAL override. Feeds the validator threshold, the penalty
-	 * parameter c_l, and the request-path escrow floor gate. */
+	 * MIN_COLLATERAL override. Feeds the escrow floor, the absolute penalty
+	 * cap, buffer clearing threshold, and request-path escrow floor gate. */
 	minCollateralWei: bigint;
 	/** Resolved TrampolineFactory address: the chain's default from
 	 * `trampolineFactoryFor`, or the TRAMPOLINE_FACTORY override. */
@@ -153,15 +153,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	const settlementAddress: Address =
 		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
-	// One validator shared by the proposal queue.
-	const inflightFetch = (subSolver: Address) => store.inflightGasUsedBySubSolver(db, subSolver);
-	const escrowValidator = new EscrowValidator(
-		publicClient,
-		escrowAddress,
-		minCollateralWei,
-		gasPriceRef,
-		inflightFetch,
-	);
+	// Escrow validator
+	const escrowValidator = new EscrowValidator(publicClient, escrowAddress, minCollateralWei);
 
 	// Orderbook client. Resolve the base URL explicitly so that local chains
 	// (e.g. foundry/31337) get the LOCAL_ORDERBOOK_URL fallback from
@@ -181,9 +174,12 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MIN_PROPOSAL_SCORE),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_BPS),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
+		BigInt(config.COLLATERAL_RATIO_BPS),
 		minCollateralWei,
+		(subSolver, current) => store.fetchInflightDataBySubSolver(db, subSolver, current),
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
+		escrowValidator.getBalance.bind(escrowValidator),
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);

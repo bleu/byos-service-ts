@@ -29,6 +29,7 @@ export interface AppContext {
 	trampolineFactory: Address;
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
+	collateralRatioBps?: bigint;
 	gasPriceRef: GasPriceRef;
 	solveBearerToken?: string;
 	selectorBufferMs?: number;
@@ -110,6 +111,8 @@ export function createInternalApp(ctx: AppContext): Hono {
 	app.get("/healthz", (c) => c.json({ status: "ok" }));
 
 	const solve = createSolveRoute({
+		minCollateral: ctx.cL,
+		collateralRatioBps: ctx.collateralRatioBps,
 		db: ctx.db,
 		gasPriceRef: ctx.gasPriceRef,
 		onAuditEvent: ctx.onAuditEvent,

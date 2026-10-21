@@ -166,6 +166,7 @@ interface FakeNode {
 function fakeNode(opts?: {
 	simulateV1?: () => Promise<SimulateV1CallResult>;
 	addressOf?: () => Promise<string>;
+	authenticator?: () => Promise<string>;
 	/** Default Executed._delta (defaults to submittedProposal().quoteBuyAmount). */
 	delta?: bigint;
 }): FakeNode {
@@ -179,9 +180,11 @@ function fakeNode(opts?: {
 				counts.addressOf += 1;
 				return opts?.addressOf ? await opts.addressOf() : TRAMPOLINE;
 			}
-			// authenticator() or other view calls
+			if (args.functionName === "authenticator" && opts?.authenticator) return opts.authenticator();
 			return AUTHENTICATOR;
 		},
+		multicall: async ({ contracts }: { contracts: unknown[] }) =>
+			contracts.map(() => ({ status: "success", result: 10n ** 30n })),
 		getBlockNumber: async () => 1_000n,
 		request: async (args: unknown) => {
 			const typed = args as { method: string; params: unknown[] };
@@ -221,7 +224,7 @@ function validatorAt(
 	minScore = 0n,
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
-	minCollateral = 10n ** 16n,
+	_minCollateral = 10n ** 16n,
 ): SimulationValidator {
 	return new SimulationValidator(
 		node.client,
@@ -233,7 +236,9 @@ function validatorAt(
 		minScore,
 		maxSlippageBps,
 		maxSlippageNative,
-		minCollateral,
+		0n, // collateralRatioBps = 0 → Gate 2 exposure is 0, always passes
+		0n, // minCollateral = 0 → penaltyCap = 0
+		async () => ({ proposals: [], bufferBalance: 0n }), // fetchInflightData: no siblings
 	);
 }
 
@@ -664,81 +669,176 @@ describe("SimulationValidator gap check", () => {
 	});
 });
 
-// The same validate() is dispatched immediately after ingestion and on ticks.
-describe("native sell-value safeguard", () => {
-	for (const kind of [OrderKind.SELL, OrderKind.BUY]) {
-		for (const status of ["submitted", "active"] as const) {
-			it(`rejects ${kind} proposals at the cap during ${status} validation before simulation`, async () => {
-				const proposal = { ...submittedProposal(), status };
-				const record = sampleRecord(sampleOrder({ kind }));
-				const node = fakeNode();
-				const verdict = await validatorAt(
-					node,
-					fakeOrderbook(record),
-					0n,
-					0n,
-					10_000n,
-					10n ** 36n,
-					100n,
-				).validate(proposal);
-				expect(verdict).toEqual({ kind: "reject", reason: "TradeValueCapExceeded" });
-				expect(node.counts.simulateV1).toBe(0);
-			});
-		}
-	}
-
-	it("values the proposed partial fill using the sell price, not the full order or buy price", async () => {
-		const proposal = { ...submittedProposal(), status: "active" as const, sellAmount: 500_000n };
-		const record = sampleRecord(sampleOrder({ partiallyFillable: true, sellAmount: 10_000_000n }));
-		const node = fakeNode();
-		const orderbook: FetchOrder = {
-			order: async () => record,
-			nativePrice: async (token) =>
-				token.toLowerCase() === proposal.sellToken.toLowerCase() ? ETHER : 100n * ETHER,
-		};
-		expect(
-			await validatorAt(node, orderbook, 0n, 0n, 10_000n, 10n ** 36n, 100n).validate(proposal),
-		).toMatchObject({ kind: "accept" });
-		expect(node.counts.simulateV1).toBe(1);
+function collateralValidator(
+	options: {
+		balance?: bigint;
+		bufferBalance?: bigint;
+		gasPrice?: bigint;
+		gasUsed?: bigint;
+		siblings?: Awaited<ReturnType<import("../validator.js").FetchInflightData>>["proposals"];
+		fetchInflight?: import("../validator.js").FetchInflightData;
+	} = {},
+) {
+	const node = fakeNode({
+		simulateV1: async () =>
+			simulateSuccess(
+				990_000n,
+				submittedProposal().orderUidHash as Hex,
+				options.gasUsed ?? 100_000n,
+			),
 	});
+	const client = {
+		...node.client,
+		multicall: async ({ contracts }: { contracts: unknown[] }) =>
+			contracts.map(() => ({ status: "success", result: options.balance ?? ETHER })),
+	} as unknown as PublicClient;
+	return new SimulationValidator(
+		client,
+		fakeOrderbook(sampleRecord(sampleOrder())),
+		SETTLEMENT,
+		ESCROW,
+		TRAMPOLINE_FACTORY,
+		{ value: options.gasPrice ?? 0n },
+		0n,
+		10_000n,
+		ETHER,
+		4n,
+		ETHER / 100n,
+		options.fetchInflight ??
+			(async () => ({
+				proposals: options.siblings ?? [],
+				bufferBalance: options.bufferBalance ?? 0n,
+			})),
+	);
+}
 
-	it("rechecks current sell-token price for an already active proposal", async () => {
-		const proposal = { ...submittedProposal(), status: "active" as const };
-		const node = fakeNode();
-		let sellPrice = ETHER / 2n;
-		const orderbook: FetchOrder = {
-			order: async () => sampleRecord(sampleOrder()),
-			nativePrice: async (token) => (token === proposal.sellToken ? sellPrice : ETHER),
-		};
-		const validator = validatorAt(node, orderbook, 0n, 0n, 10_000n, 10n ** 36n, 100n);
-		expect(await validator.validate(proposal)).toMatchObject({ kind: "accept" });
-		sellPrice = ETHER;
-		expect(await validator.validate(proposal)).toEqual({
-			kind: "reject",
-			reason: "TradeValueCapExceeded",
+function activeProposal(): Proposal {
+	return { ...submittedProposal(), status: "active", gasUsed: 100_000n };
+}
+
+describe("collateral admission", () => {
+	it("reserves the absolute cap for a legacy unpriced sibling without rejecting it as unavailable", async () => {
+		const validator = collateralValidator({
+			siblings: [{ id: 2, gasUsed: null, sellAmountNative: null }],
 		});
-		expect(node.counts.simulateV1).toBe(1);
+		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
 	});
 
-	for (const kind of [OrderKind.SELL, OrderKind.BUY]) {
-		for (const failure of ["notFound", "transient", "zero"] as const) {
-			it(`${kind} sell price ${failure} prevents admission`, async () => {
-				const proposal = submittedProposal();
-				const node = fakeNode();
-				const orderbook: FetchOrder = {
-					order: async () => sampleRecord(sampleOrder({ kind })),
-					nativePrice: async (token) => {
-						if (token !== proposal.sellToken) return ETHER;
-						if (failure === "zero") return 0n;
-						throw { kind: failure };
-					},
-				};
-				const verdict = await validatorAt(node, orderbook).validate(proposal);
-				expect(verdict).toEqual(
-					failure === "transient" ? null : { kind: "reject", reason: "NativePriceUnavailable" },
-				);
-				expect(node.counts.simulateV1).toBe(0);
-			});
-		}
-	}
+	it("counts the current active proposal once", async () => {
+		const validator = collateralValidator({
+			balance: 400n,
+			siblings: [{ id: 1, gasUsed: 100_000n, sellAmountNative: 1_000_000n }],
+		});
+		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
+	});
+
+	it("deliberately allows concurrent admissions to share the same collateral snapshot", async () => {
+		let readers = 0;
+		let release: () => void = () => {};
+		const ready = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const validator = collateralValidator({
+			balance: 500n,
+			fetchInflight: async () => {
+				readers++;
+				if (readers === 2) release();
+				await ready;
+				return { proposals: [], bufferBalance: 0n };
+			},
+		});
+		const verdicts = await Promise.all([
+			validator.validate(activeProposal()),
+			validator.validate({ ...activeProposal(), id: 2 }),
+		]);
+		expect(verdicts.map((v) => v?.kind)).toEqual(["accept", "accept"]);
+		// Each proposal reserves 400 wei; their combined 800 wei exceeds 500 wei.
+	});
+});
+
+describe("buffer debt and collateral", () => {
+	it.each([
+		{ bufferBalance: -1_000_000n, balance: 399n, kind: "reject" },
+		{ bufferBalance: 0n, balance: 400n, kind: "accept" },
+		{ bufferBalance: 1n, balance: 400n, kind: "reject" },
+	])(
+		"checks $balance wei against signed buffer $bufferBalance",
+		async ({ bufferBalance, balance, kind }) => {
+			expect(
+				(await collateralValidator({ bufferBalance, balance }).validate(activeProposal()))?.kind,
+			).toBe(kind);
+		},
+	);
+});
+
+describe("post-simulation collateral", () => {
+	it("rejects high-gas routes that fit only the old 200k estimate", async () => {
+		const verdict = await collateralValidator({
+			balance: 300_400n,
+			gasPrice: 1n,
+			gasUsed: 1_000_000n,
+		}).validate(activeProposal());
+		expect(verdict).toEqual({ kind: "reject", reason: "ExposureCapExceeded" });
+	});
+	it("uses fresh gas when revalidation is cheaper than the previous estimate", async () => {
+		const verdict = await collateralValidator({
+			balance: 100_400n,
+			gasPrice: 1n,
+			gasUsed: 100_000n,
+		}).validate({ ...activeProposal(), gasUsed: 1_000_000n });
+		expect(verdict?.kind).toBe("accept");
+	});
+	it("defers on a failed collateral snapshot", async () => {
+		const verdict = await collateralValidator({
+			fetchInflight: async () => {
+				throw new Error("DB unavailable");
+			},
+		}).validate(activeProposal());
+		expect(verdict).toBeNull();
+	});
+});
+
+describe("collateral exposure equality boundary", () => {
+	it.each([
+		{ balance: 100_399n, kind: "reject" },
+		{ balance: 100_400n, kind: "accept" },
+		{ balance: 100_401n, kind: "accept" },
+	])("admits $balance wei with a 100400 wei exposure: $kind", async ({ balance, kind }) => {
+		expect(
+			(
+				await collateralValidator({ balance, gasPrice: 1n, gasUsed: 100_000n }).validate(
+					activeProposal(),
+				)
+			)?.kind,
+		).toBe(kind);
+	});
+});
+
+describe("concurrent simulation metadata reads", () => {
+	it("starts authenticator lookup before trampoline resolution completes", async () => {
+		let release: (address: string) => void = () => {};
+		const trampoline = new Promise<string>((resolve) => {
+			release = resolve;
+		});
+		const node = fakeNode({
+			addressOf: () => trampoline,
+			authenticator: async () => {
+				release(TRAMPOLINE);
+				return AUTHENTICATOR;
+			},
+		});
+		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		expect((await validator.validate({ ...activeProposal(), trampoline: null }))?.kind).toBe(
+			"accept",
+		);
+	});
+	it("defers when authenticator lookup fails", async () => {
+		const node = fakeNode({
+			authenticator: async () => {
+				throw new Error("RPC unavailable");
+			},
+		});
+		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		expect(await validator.validate(activeProposal())).toBeNull();
+	});
 });

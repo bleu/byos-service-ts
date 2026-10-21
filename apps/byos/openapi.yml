@@ -529,11 +529,6 @@ components:
 
         - `InsufficientEscrow` — the sub-solver's escrow balance is below
           the required minimum. Fix: deposit escrow and resubmit.
-        - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
-          exposure (sum of `gasUsed * gasPrice + minCollateral` across all
-          active, submitted, and executing proposals) would exceed their
-          effective escrow balance. Fix: wait for in-flight proposals to
-          settle before submitting more.
         - `UnsupportedOrder` — the order is outside the simulation envelope
           (hooks, non-erc20 balances).
         - `AmountMismatch` — for fill-or-kill orders, the proposal amount
@@ -541,10 +536,6 @@ components:
           zero, exceeds the order, or violates the limit price.
         - `OrderNotFound` — the orderbook does not know the proposal's
           order UID.
-        - `TradeValueCapExceeded` — the proposal sell amount, valued using
-          the orderbook sell-token native price, is at or above
-          `10_000 * MIN_COLLATERAL`. Applies to sell and buy orders, including
-          partial fills, during immediate validation and revalidation.
         - `NativePriceUnavailable` — a required native token price is missing
           or the sell-token price is non-positive; native-value guards cannot
           be evaluated. Temporary lookup failures defer validation.
@@ -552,6 +543,17 @@ components:
           below the minimum (`score = surplus - gas`), so it could
           never win an auction. Fix: improve the price or
           resubmit when gas is cheaper.
+        - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
+          exposure (current proposal plus active and executing siblings,
+          excluding older active routes replaced on acceptance) would exceed
+          effectiveBalance minus positive outstanding buffer debt. The current
+          proposal uses fresh simulated gas. Equality passes. Submitted siblings
+          are excluded; concurrent validations may temporarily overcommit escrow.
+          Fix: deposit more collateral or wait for in-flight proposals to settle.
+        - `TradeValueCapExceeded` — deprecated historical response value from
+          the former trade-value guard; no longer emitted by validation.
+        - `InflightPriceUnavailable` — deprecated historical response value;
+          pending siblings no longer cause this rejection.
       type: string
       enum:
         - InsufficientEscrow
@@ -560,8 +562,14 @@ components:
         - AmountMismatch
         - OrderNotFound
         - Unprofitable
-        - TradeValueCapExceeded
         - NativePriceUnavailable
+        - InflightPriceUnavailable
+        - TradeValueCapExceeded
+        - TokenMismatch
+        - SubsolverOutbid
+        - SolverOutbid
+        - ProposedSlippageOutrange
+        - SimulationMissingExecutedEvent
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at
