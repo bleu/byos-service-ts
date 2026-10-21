@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
+import { byosDomain, orderbookUrlFor, TrampolineFactoryAbi } from "@byos/common";
 import {
+	AwsOrderbookClient,
 	ByosClient,
 	FyndConfigurationError,
 	FyndProvider,
@@ -41,27 +42,31 @@ async function main() {
 	const publicClient = createPublicClient({ transport });
 	const account = privateKeyToAccount(config.privateKey);
 	const trampoline = await publicClient.readContract({
-		address: config.toml.trampolineFactory,
+		address: config.trampolineFactory,
 		abi: TrampolineFactoryAbi,
 		functionName: "addressOf",
 		args: [account.address],
 	});
 	logger.info({ trampoline, subSolver: account.address }, "resolved Fynd trampoline");
-	const domain = byosDomain(config.toml.chainId, config.toml.trampolineFactory);
+	const domain = byosDomain(config.chainId, config.trampolineFactory);
 	const wallet = createWalletClient({ account, transport });
 	const signFn = (params: unknown) => wallet.signTypedData(params as never);
 	const fynd = new FyndProvider({
 		client: new FyndClient({ baseUrl: config.fyndUrl, timeoutMs: 7000, retry: { maxAttempts: 2 } }),
-		chainId: config.toml.chainId,
+		chainId: config.chainId,
 		trampoline: trampoline as Address,
 		settlement: config.gpv2Settlement,
 		slippageBps: config.fyndSlippageBps,
 		maxQuoteAgeSeconds: config.fyndMaxQuoteAgeSeconds,
 	});
 	await waitForFyndStartup(fynd, logger);
+	const orderbook =
+		config.discoveryMethod === "aws"
+			? new AwsOrderbookClient(config.discoveryUrl, orderbookUrlFor(config.chainId))
+			: new OrderbookClient(config.discoveryUrl);
 	const subsolver = new FyndSubsolver(
 		config,
-		new OrderbookClient(config.orderBookUrl),
+		orderbook,
 		new ByosClient(config.byosUrl, domain, signFn),
 		fynd,
 		domain,
@@ -76,9 +81,9 @@ async function main() {
 		} catch (error) {
 			logger.warn({ err: error }, "poll failed");
 		}
-		timer = setTimeout(tick, config.toml.pollInterval * 1000);
+		timer = setTimeout(tick, config.pollIntervalSeconds * 1000);
 	};
-	let timer = setTimeout(tick, config.toml.pollInterval * 1000);
+	let timer = setTimeout(tick, config.pollIntervalSeconds * 1000);
 	const shutdown = () => {
 		logger.info("shutting down");
 		clearTimeout(timer);

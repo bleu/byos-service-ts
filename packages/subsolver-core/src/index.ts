@@ -1,3 +1,4 @@
+export { AwsOrderbookClient } from "./aws-orderbook-client.js";
 export { ByosClient, ByosRateLimitError, type ProposalMetadata } from "./byos-client.js";
 export {
 	FyndConfigurationError,

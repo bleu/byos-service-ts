@@ -10,12 +10,15 @@ const factory = "0x0000000000000000000000000000000000000001" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
-	orderBookUrl: "http://orderbook",
+	discoveryUrl: "http://orderbook",
+	discoveryMethod: "orderbook",
 	byosUrl: "http://byos",
 	rpcUrl: "http://rpc",
 	privateKey: "0x01",
 	logLevel: "silent",
 	jsonLogs: true,
+	chainId: 56,
+	trampolineFactory: factory,
 	fyndUrl: "http://fynd",
 	fyndSlippageBps: 50,
 	fyndQuoteConcurrency: 1,
@@ -24,7 +27,8 @@ const config: Config = {
 	byosRequestsPerMinute: 100,
 	byosReadReserve: 10,
 	proposalRefreshIntervalSeconds: 15,
-	toml: { chainId: 56, trampolineFactory: factory, proposalTtl: 60, pollInterval: 2 },
+	proposalTtlSeconds: 60,
+	pollIntervalSeconds: 2,
 };
 
 function order(index: number): OrderbookOrder {
