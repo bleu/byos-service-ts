@@ -1,3 +1,4 @@
+export { AwsOrderbookClient } from "./aws-orderbook-client.js";
 export { ByosClient, ByosRateLimitError, type ProposalMetadata } from "./byos-client.js";
 export {
 	FyndConfigurationError,
@@ -5,7 +6,6 @@ export {
 	type FyndProviderConfig,
 } from "./fynd-provider.js";
 export { randomNonce } from "./nonce.js";
-export { AwsOrderbookClient } from "./aws-orderbook-client.js";
 export { OrderbookClient, type OrderbookOrder } from "./orderbook-client.js";
 export {
 	ceilDiv,
