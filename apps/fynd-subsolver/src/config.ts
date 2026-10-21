@@ -26,10 +26,8 @@ const envSchema = z.object({
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 
-export interface Config {
+interface BaseConfig {
 	orderbookUrl: string;
-	discoveryMethod: "orderbook" | "aws";
-	awsUrl?: string;
 	byosUrl: string;
 	rpcUrl: string;
 	privateKey: `0x${string}`;
@@ -48,6 +46,10 @@ export interface Config {
 	proposalTtlSeconds: number;
 	pollIntervalSeconds: number;
 }
+
+export type Config =
+	| (BaseConfig & { discoveryMethod: "orderbook" })
+	| (BaseConfig & { discoveryMethod: "aws"; awsUrl: string });
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
