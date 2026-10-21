@@ -4,8 +4,9 @@ import { z } from "zod";
 const addressSchema = z.string().refine(isAddress, { message: "must be a valid address" });
 
 const envSchema = z.object({
-	DISCOVERY_URL: z.string(),
+	ORDERBOOK_URL: z.string(),
 	DISCOVERY_METHOD: z.enum(["orderbook", "aws"]),
+	AWS_URL: z.string().optional(),
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
@@ -25,9 +26,8 @@ const envSchema = z.object({
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 
-export interface Config {
-	discoveryUrl: string;
-	discoveryMethod: "orderbook" | "aws";
+interface BaseConfig {
+	orderbookUrl: string;
 	byosUrl: string;
 	rpcUrl: string;
 	privateKey: `0x${string}`;
@@ -47,6 +47,10 @@ export interface Config {
 	pollIntervalSeconds: number;
 }
 
+export type Config =
+	| (BaseConfig & { discoveryMethod: "orderbook" })
+	| (BaseConfig & { discoveryMethod: "aws"; awsUrl: string });
+
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
 	if (!result.success) {
@@ -59,9 +63,8 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
-	return {
-		discoveryUrl: result.data.DISCOVERY_URL,
-		discoveryMethod: result.data.DISCOVERY_METHOD,
+	const base = {
+		orderbookUrl: result.data.ORDERBOOK_URL,
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
@@ -82,4 +85,9 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
 	};
+	if (result.data.DISCOVERY_METHOD === "aws") {
+		if (!result.data.AWS_URL) throw new Error("AWS_URL is required when DISCOVERY_METHOD is aws");
+		return { ...base, discoveryMethod: "aws" as const, awsUrl: result.data.AWS_URL };
+	}
+	return { ...base, discoveryMethod: "orderbook" as const };
 }

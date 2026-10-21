@@ -28,16 +28,16 @@ interface SolverCompetitionLatest {
 
 /** Discovers solvable orders from S3-hosted autopilot JSON files. */
 export class AwsOrderbookClient {
-	private readonly discoveryUrl: string;
-	private readonly competitionApiUrl: string;
+	private readonly awsUrl: string;
+	private readonly orderbookUrl: string;
 
-	constructor(discoveryUrl: string, competitionApiUrl: string) {
-		this.discoveryUrl = discoveryUrl.replace(/\/+$/, "");
-		this.competitionApiUrl = competitionApiUrl.replace(/\/+$/, "");
+	constructor(awsUrl: string, orderbookUrl: string) {
+		this.awsUrl = awsUrl.replace(/\/+$/, "");
+		this.orderbookUrl = orderbookUrl.replace(/\/+$/, "");
 	}
 
 	async solvableOrders(): Promise<OrderbookOrder[]> {
-		const response = await fetch(`${this.competitionApiUrl}/api/v2/solver_competition/latest`);
+		const response = await fetch(`${this.orderbookUrl}/api/v2/solver_competition/latest`);
 		if (!response.ok) {
 			throw new Error(`competition API ${response.status}: ${await response.text()}`);
 		}
@@ -79,7 +79,7 @@ export class AwsOrderbookClient {
 
 	private async fetchAuction(id: number): Promise<AutopilotDto | null> {
 		try {
-			const response = await fetch(`${this.discoveryUrl}/autopilot/${id}.json`);
+			const response = await fetch(`${this.awsUrl}/autopilot/${id}.json`);
 			if (!response.ok) return null;
 			return (await response.json()) as AutopilotDto;
 		} catch {

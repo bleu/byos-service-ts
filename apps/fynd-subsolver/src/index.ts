@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { byosDomain, orderbookUrlFor, TrampolineFactoryAbi } from "@byos/common";
+import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
 import {
 	AwsOrderbookClient,
 	ByosClient,
@@ -62,8 +62,8 @@ async function main() {
 	await waitForFyndStartup(fynd, logger);
 	const orderbook =
 		config.discoveryMethod === "aws"
-			? new AwsOrderbookClient(config.discoveryUrl, orderbookUrlFor(config.chainId))
-			: new OrderbookClient(config.discoveryUrl);
+			? new AwsOrderbookClient(config.awsUrl, config.orderbookUrl)
+			: new OrderbookClient(config.orderbookUrl);
 	const subsolver = new FyndSubsolver(
 		config,
 		orderbook,
