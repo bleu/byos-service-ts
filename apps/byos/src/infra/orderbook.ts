@@ -118,7 +118,11 @@ function sdkOrderToRecord(
 		kind: mapKind(sdkOrder.kind),
 		partiallyFillable: sdkOrder.partiallyFillable,
 		signingScheme: mapSigningScheme(sdkOrder.signingScheme),
-		signature: sdkOrder.signature as Hex,
+		// For presign orders the orderbook API returns "0x" (empty bytes) as the
+		// signature, but GPv2Settlement.recoverPreSigner requires the owner's
+		// 20-byte address so it can look up the pre-signature on-chain.
+		signature:
+			sdkOrder.signingScheme === "presign" ? (sdkOrder.owner as Hex) : (sdkOrder.signature as Hex),
 	};
 
 	const preInteractions = (sdkOrder.interactions?.pre ?? []).map(
