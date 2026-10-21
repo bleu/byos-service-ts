@@ -1,6 +1,8 @@
 import {
 	byosDomain,
 	createProposalRequestSchema,
+	type Eip1271Verifier,
+	hashProposalData,
 	recoverCanceller,
 	recoverProposer,
 	recoverReader,
@@ -32,6 +34,8 @@ export interface RoutesConfig {
 	signerLimit: SignerLimitConfig;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
+	/** EIP-1271 verifier. Required for contract sub-solvers. See ADR-0020. */
+	verifyEip1271?: Eip1271Verifier;
 	logger?: Logger;
 }
 
@@ -58,13 +62,21 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		const body = parseResult.data;
 
-		// The schema pins the hex grammar; the shape of a signature (exactly
-		// 65 bytes) is its own failure kind, as in Rust's Signature::try_from.
+		// The schema pins the hex grammar. For EOA signers (no subSolverAddress)
+		// the signature must be exactly 65 bytes, as in Rust's Signature::try_from.
+		// For contract signers the EIP-1271 contract decides validity, so we only
+		// enforce a generous upper bound (4096 bytes) to prevent abuse.
 		const signatureDigits = body.signature.startsWith("0x")
 			? body.signature.length - 2
 			: body.signature.length;
-		if (signatureDigits !== 130) {
-			throw new AppError(Kind.InvalidSignature);
+		if (body.subSolverAddress === undefined) {
+			if (signatureDigits !== 130) {
+				throw new AppError(Kind.InvalidSignature);
+			}
+		} else {
+			if (signatureDigits === 0 || signatureDigits > 8192) {
+				throw new AppError(Kind.InvalidSignature);
+			}
 		}
 
 		let parsed: ReturnType<typeof parseCreateProposalRequest>;
@@ -74,26 +86,74 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.BadRequest, "Failed to parse proposal fields");
 		}
 
-		// Recover sub-solver from EIP-712 signature
+		// Resolve sub-solver address. For EOA signers, recover it from the ECDSA
+		// signature. For contract signers (`subSolverAddress` present), try ECDSA
+		// first (covers EOAs that declare their address); if that misses, fall back
+		// to an EIP-1271 on-chain call. See ADR-0020.
 		let subSolver: Address;
-		try {
-			subSolver = await recoverProposer(
-				parsed.signature,
-				domain,
-				{
-					orderUidHash: parsed.orderUidHash,
-					sellToken: parsed.sellToken,
-					buyToken: parsed.buyToken,
-					sellAmount: parsed.sellAmount,
-					minBuyAmount: parsed.minBuyAmount,
-					quoteBuyAmount: parsed.quoteBuyAmount,
-					validUntil: parsed.validUntil,
-					nonce: parsed.nonce,
-				},
-				parsed.interactionsHash,
-			);
-		} catch {
-			throw new AppError(Kind.SignatureRecoveryFailed);
+		if (parsed.subSolverAddress === undefined) {
+			// Existing EOA path — no change.
+			try {
+				subSolver = await recoverProposer(
+					parsed.signature,
+					domain,
+					{
+						orderUidHash: parsed.orderUidHash,
+						sellToken: parsed.sellToken,
+						buyToken: parsed.buyToken,
+						sellAmount: parsed.sellAmount,
+						minBuyAmount: parsed.minBuyAmount,
+						quoteBuyAmount: parsed.quoteBuyAmount,
+						validUntil: parsed.validUntil,
+						nonce: parsed.nonce,
+					},
+					parsed.interactionsHash,
+				);
+			} catch {
+				throw new AppError(Kind.SignatureRecoveryFailed);
+			}
+		} else {
+			// Contract signer path. Try ECDSA first — no RPC, covers EOAs that
+			// opt in to declaring their address.
+			const proposalData = {
+				orderUidHash: parsed.orderUidHash,
+				sellToken: parsed.sellToken,
+				buyToken: parsed.buyToken,
+				sellAmount: parsed.sellAmount,
+				minBuyAmount: parsed.minBuyAmount,
+				quoteBuyAmount: parsed.quoteBuyAmount,
+				validUntil: parsed.validUntil,
+				nonce: parsed.nonce,
+			};
+			let ecdsaMatched = false;
+			try {
+				const recovered = await recoverProposer(
+					parsed.signature,
+					domain,
+					proposalData,
+					parsed.interactionsHash,
+				);
+				ecdsaMatched = recovered.toLowerCase() === parsed.subSolverAddress.toLowerCase();
+			} catch {
+				// Signature is not a valid 65-byte ECDSA sig; fall through to EIP-1271.
+			}
+
+			if (ecdsaMatched) {
+				subSolver = parsed.subSolverAddress;
+			} else {
+				// ECDSA didn't match — try EIP-1271 on-chain call.
+				if (!config.verifyEip1271) {
+					throw new AppError(Kind.Eip1271NotAvailable);
+				}
+				const digest = hashProposalData(domain, proposalData, parsed.interactionsHash);
+				const valid = await config
+					.verifyEip1271(parsed.subSolverAddress, digest, parsed.signature)
+					.catch(() => false);
+				if (!valid) {
+					throw new AppError(Kind.SignatureRecoveryFailed);
+				}
+				subSolver = parsed.subSolverAddress;
+			}
 		}
 
 		if (config.subsolverWhitelist && !config.subsolverWhitelist.has(subSolver.toLowerCase())) {

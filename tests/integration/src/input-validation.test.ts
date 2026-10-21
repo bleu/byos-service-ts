@@ -125,6 +125,82 @@ describe("signature validation", () => {
 		const body = await resp.json();
 		expect(body.kind).toBe("BadRequest");
 	});
+
+	// When subSolverAddress is present the 65-byte rule is relaxed but
+	// extreme edge cases are still rejected.
+	it("rejects empty signature when subSolverAddress is present", async () => {
+		const resp = await app.publicApp.request("/proposals", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
+				sellAmount: "1000",
+				minBuyAmount: "900",
+				quoteBuyAmount: "900",
+				interactions: [],
+				validUntil: String(Math.floor(Date.now() / 1000) + 200),
+				nonce: "1",
+				signature: "0x", // empty
+				subSolverAddress: `0x${"cc".repeat(20)}`,
+			}),
+		});
+		expect(resp.status).toBe(400);
+		const body = await resp.json();
+		expect(body.kind).toBe("InvalidSignature");
+	});
+
+	it("rejects oversized signature (> 4096 bytes) when subSolverAddress is present", async () => {
+		const resp = await app.publicApp.request("/proposals", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
+				sellAmount: "1000",
+				minBuyAmount: "900",
+				quoteBuyAmount: "900",
+				interactions: [],
+				validUntil: String(Math.floor(Date.now() / 1000) + 200),
+				nonce: "1",
+				signature: `0x${"ab".repeat(4097)}`, // 4097 bytes — one over the limit
+				subSolverAddress: `0x${"cc".repeat(20)}`,
+			}),
+		});
+		expect(resp.status).toBe(400);
+		const body = await resp.json();
+		expect(body.kind).toBe("InvalidSignature");
+	});
+
+	it("accepts variable-length signature when subSolverAddress is present (100 bytes)", async () => {
+		// The service will try ECDSA (fail), then EIP-1271 (not configured → 503).
+		// The important thing here is that the request is NOT rejected for signature
+		// length; we only verify it gets past the length check.
+		const resp = await app.publicApp.request("/proposals", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				orderUid: `0x${"ab".repeat(56)}`,
+				sellToken: `0x${"11".repeat(20)}`,
+				buyToken: `0x${"22".repeat(20)}`,
+				sellAmount: "1000",
+				minBuyAmount: "900",
+				quoteBuyAmount: "900",
+				interactions: [],
+				validUntil: String(Math.floor(Date.now() / 1000) + 200),
+				nonce: "1",
+				signature: `0x${"ab".repeat(100)}`, // 100 bytes — not 65, but valid range
+				subSolverAddress: `0x${"cc".repeat(20)}`,
+			}),
+		});
+		// Not 400 InvalidSignature for length — the length check passed.
+		// (Will be 503 Eip1271NotAvailable because verifier is not configured.)
+		expect(resp.status).not.toBe(400);
+		const body = await resp.json();
+		expect(body.kind).not.toBe("InvalidSignature");
+	});
 });
 
 describe("proposal ID edge cases", () => {

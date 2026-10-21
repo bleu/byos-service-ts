@@ -16,12 +16,15 @@ const STATUS_MAP: Record<string, number> = {
 	[Kind.RateLimited]: 429,
 	[Kind.Internal]: 500,
 	[Kind.ServiceUnavailable]: 503,
+	[Kind.Eip1271NotAvailable]: 503,
 };
 
 /** Default descriptions per kind, as served by the Rust error type. */
 const DEFAULT_DESCRIPTIONS: Record<string, string> = {
 	[Kind.InvalidSignature]: "Invalid EIP-712 signature",
 	[Kind.SignatureRecoveryFailed]: "Could not recover signer from signature",
+	[Kind.Eip1271NotAvailable]:
+		"This deployment does not support EIP-1271 contract signers; contact the operator",
 	[Kind.InsufficientEscrow]: "Sub-solver escrow balance below minimum",
 	[Kind.ProposalExpired]: "Proposal validUntil is in the past",
 	[Kind.ProposalLifetimeExceeded]: "Proposal validUntil exceeds the maximum proposal lifetime",

@@ -26,7 +26,7 @@ const GPV2_SETTLEMENT = "0x9008d19f58aabd9ed0d60971565aa8510560ab41" as const;
 const ORDERBOOK_API = "https://api.cow.fi/bnb/api/v1";
 const BINANCE_BASE_URL = "https://web3.binance.com/build";
 const BSC_CHAIN_ID = "56";
-const SLIPPAGE_PERCENT = "0.5";
+const SLIPPAGE_PERCENT = "0.05";
 const MAX_ORDERS = 50;
 // ================================
 

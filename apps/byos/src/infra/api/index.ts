@@ -1,3 +1,4 @@
+import type { Eip1271Verifier } from "@byos/common";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
@@ -56,6 +57,12 @@ export interface PublicAppContext extends AppContext {
 	enqueueValidation: (proposalId: number) => Promise<void>;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
+	/**
+	 * EIP-1271 contract signature verifier. Required to serve proposals from
+	 * contract sub-solvers. When absent, any proposal carrying `subSolverAddress`
+	 * that fails ECDSA is rejected with 503 Eip1271NotAvailable. See ADR-0020.
+	 */
+	verifyEip1271?: Eip1271Verifier;
 }
 
 /** Creates the public Hono app (sub-solver facing, port 9585). */
@@ -88,6 +95,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		onAuditEvent: ctx.onAuditEvent,
 		enqueueValidation: ctx.enqueueValidation,
 		subsolverWhitelist: ctx.subsolverWhitelist,
+		verifyEip1271: ctx.verifyEip1271,
 		logger: ctx.logger,
 		signerLimit: {
 			limiter,
