@@ -1,4 +1,0 @@
-chain-id = 56
-trampoline-factory = "0x934b5d82f45F154936E3f9e0aBc803d2fa4ad49c"
-proposal-ttl-secs = 60
-poll-interval-secs = 0

@@ -113,7 +113,7 @@ export class FyndSubsolver {
 		const candidates = prioritizeCandidates(
 			orders.map((order) => ({
 				...order,
-				chainId: this.config.toml.chainId,
+				chainId: this.config.chainId,
 				executedSellAmount: order.fullSellAmount - order.sellAmount,
 			})),
 			(uid) => this.live.has(uid.toLowerCase()),
@@ -154,7 +154,7 @@ export class FyndSubsolver {
 				return;
 			}
 			try {
-				const validUntil = now + BigInt(this.config.toml.proposalTtl);
+				const validUntil = now + BigInt(this.config.proposalTtlSeconds);
 				const proposal = await buildProposalFromRoute(
 					{
 						...order,
