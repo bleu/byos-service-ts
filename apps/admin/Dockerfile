@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:22 AS builder
+FROM node:22.23.4 AS builder
 WORKDIR /app
 RUN corepack enable pnpm
 
@@ -21,7 +21,7 @@ RUN DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/byos \
     pnpm --filter=@byos/admin run build
 
 # Stage 2: Runtime (standalone output is self-contained)
-FROM node:22-slim AS runner
+FROM node:22.23.4-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 
