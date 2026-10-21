@@ -60,16 +60,11 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		throw new Error(`Invalid configuration:\n${errors}`);
 	}
 	if (result.data.CHAIN_ID !== 56) throw new Error("Fynd subsolver requires BSC (CHAIN_ID = 56)");
-	if (result.data.DISCOVERY_METHOD === "aws" && !result.data.AWS_URL) {
-		throw new Error("AWS_URL is required when DISCOVERY_METHOD is aws");
-	}
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
-	return {
+	const base = {
 		orderbookUrl: result.data.ORDERBOOK_URL,
-		discoveryMethod: result.data.DISCOVERY_METHOD,
-		awsUrl: result.data.AWS_URL,
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
@@ -90,4 +85,9 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
 	};
+	if (result.data.DISCOVERY_METHOD === "aws") {
+		if (!result.data.AWS_URL) throw new Error("AWS_URL is required when DISCOVERY_METHOD is aws");
+		return { ...base, discoveryMethod: "aws" as const, awsUrl: result.data.AWS_URL };
+	}
+	return { ...base, discoveryMethod: "orderbook" as const };
 }
