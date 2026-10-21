@@ -4,8 +4,9 @@ import { z } from "zod";
 const addressSchema = z.string().refine(isAddress, { message: "must be a valid address" });
 
 const envSchema = z.object({
-	DISCOVERY_URL: z.string(),
+	ORDERBOOK_URL: z.string(),
 	DISCOVERY_METHOD: z.enum(["orderbook", "aws"]),
+	AWS_URL: z.string().optional(),
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
@@ -26,8 +27,9 @@ const envSchema = z.object({
 });
 
 export interface Config {
-	discoveryUrl: string;
+	orderbookUrl: string;
 	discoveryMethod: "orderbook" | "aws";
+	awsUrl?: string;
 	byosUrl: string;
 	rpcUrl: string;
 	privateKey: `0x${string}`;
@@ -56,12 +58,16 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		throw new Error(`Invalid configuration:\n${errors}`);
 	}
 	if (result.data.CHAIN_ID !== 56) throw new Error("Fynd subsolver requires BSC (CHAIN_ID = 56)");
+	if (result.data.DISCOVERY_METHOD === "aws" && !result.data.AWS_URL) {
+		throw new Error("AWS_URL is required when DISCOVERY_METHOD is aws");
+	}
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
 	return {
-		discoveryUrl: result.data.DISCOVERY_URL,
+		orderbookUrl: result.data.ORDERBOOK_URL,
 		discoveryMethod: result.data.DISCOVERY_METHOD,
+		awsUrl: result.data.AWS_URL,
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
