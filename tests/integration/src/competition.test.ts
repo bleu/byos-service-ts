@@ -95,6 +95,7 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
 			simulationBuyAmount: 2n * 10n ** 18n,
+			sellTokenRefPrice: 10n ** 18n,
 		},
 	});
 
@@ -167,6 +168,7 @@ async function seedSimulatedProposalOther(nonce: bigint, orderUid: `0x${string}`
 			sellToken: SELL_TOKEN as Address,
 			buyToken: BUY_TOKEN as Address,
 			simulationBuyAmount: 3n * 10n ** 18n,
+			sellTokenRefPrice: 10n ** 18n,
 		},
 	});
 

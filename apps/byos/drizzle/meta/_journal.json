@@ -85,6 +85,13 @@
 			"when": 1791800000000,
 			"tag": "0011_revert_solution_batches",
 			"breakpoints": true
+		},
+		{
+			"idx": 12,
+			"version": "7",
+			"when": 1792000000000,
+			"tag": "0012_penalty_cap_snapshots",
+			"breakpoints": true
 		}
 	]
 }

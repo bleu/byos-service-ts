@@ -1,105 +1,56 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { EscrowAbi } from "@byos/common";
 import type { Address, PublicClient } from "viem";
 import type { Proposal } from "../../domain/proposal.js";
-import { ESCROW_GAS_ESTIMATION } from "../../domain/scoring.js";
 import type { ValidateProposal, Verdict } from "../../domain/validator.js";
 
 export interface GasPriceRef {
 	value: bigint;
 }
 
-/**
- * Returns all in-flight proposals for a sub-solver with their gas estimates.
- * Does NOT exclude the proposal being validated — exclusion is applied in memory
- * so the result can be shared across concurrent validations of the same sub-solver.
- */
-export type FetchInflightGasUsed = (
-	subSolver: Address,
-) => Promise<{ id: number; gasUsed: bigint | null }[]>;
-
 export class EscrowValidator implements ValidateProposal {
-	private cache = new Map<string, bigint>();
-	// Promise-coalescing cache: concurrent validations for the same sub-solver
-	// share one DB round-trip. Cleared each tick so data never goes stale.
-	private inflightCache = new Map<string, Promise<{ id: number; gasUsed: bigint | null }[]>>();
+	private cache = new Map<string, Promise<bigint>>();
+	private readonly readBalance: (subSolver: Address) => Promise<bigint>;
 
 	constructor(
-		private readonly publicClient: PublicClient,
-		private readonly escrowAddress: Address,
+		publicClient: PublicClient,
+		escrowAddress: Address,
 		private readonly minCollateral: bigint,
-		private readonly gasPriceRef: GasPriceRef,
-		private readonly fetchInflightGasUsed: FetchInflightGasUsed | null = null,
-	) {}
-
-	/**
-	 * Per-proposal cost floor: conservative gas estimate × gas price + min collateral.
-	 * Used both as the single-proposal gate and as each in-flight proposal's
-	 * contribution when its gas estimate is unknown.
-	 */
-	private threshold(gasEstimate: bigint = ESCROW_GAS_ESTIMATION): bigint {
-		return gasEstimate * this.gasPriceRef.value + this.minCollateral;
+	) {
+		this.readBalance = createBatchedEscrowBalanceReader(publicClient, escrowAddress);
 	}
 
 	beginTick(): void {
 		this.cache.clear();
-		this.inflightCache.clear();
 	}
 
-	private async getBalance(subSolver: Address): Promise<bigint> {
+	/** One authoritative read per address per tick, including concurrent callers. */
+	async getBalance(subSolver: Address): Promise<bigint> {
 		const key = subSolver.toLowerCase();
 		const cached = this.cache.get(key);
 		if (cached !== undefined) return cached;
 
-		const balance = await this.publicClient.readContract({
-			address: this.escrowAddress,
-			abi: EscrowAbi,
-			functionName: "effectiveBalance",
-			args: [subSolver],
+		const balance = this.readBalance(subSolver).catch((error: unknown) => {
+			if (this.cache.get(key) === balance) this.cache.delete(key);
+			throw error;
 		});
 
 		this.cache.set(key, balance);
 		return balance;
 	}
 
-	/**
-	 * Computes the cumulative exposure for all in-flight proposals of a
-	 * sub-solver (excluding the one being validated).
-	 * Each proposal contributes: gasEstimate * gasPrice + minCollateral.
-	 * Proposals without a gas estimate contribute minCollateral only (gasEstimate = 0n).
-	 */
-	private async cumulativeExposure(subSolver: Address, excludeId: number): Promise<bigint> {
-		if (!this.fetchInflightGasUsed) return 0n;
-		const key = subSolver.toLowerCase();
-		let promise = this.inflightCache.get(key);
-		if (!promise) {
-			promise = this.fetchInflightGasUsed(subSolver);
-			this.inflightCache.set(key, promise);
-		}
-		const entries = await promise;
-		return entries
-			.filter((e) => e.id !== excludeId)
-			.reduce<bigint>((sum, e) => sum + this.threshold(e.gasUsed ?? 0n), 0n);
-	}
-
 	async validate(proposal: Proposal): Promise<Verdict | null> {
 		try {
 			const balance = await this.getBalance(proposal.subSolver);
 
-			// Gate 1: the proposal alone must not exceed the balance floor.
-			if (balance < this.threshold()) {
+			// Gate 1: the sub-solver must hold at least MIN_COLLATERAL.
+			if (balance < this.minCollateral) {
 				return { kind: "reject", reason: "InsufficientEscrow" };
-			}
-
-			// Gate 2: adding this proposal's cost to all in-flight proposals must
-			// not exceed the effective balance.
-			const exposure = await this.cumulativeExposure(proposal.subSolver, proposal.id);
-			if (exposure + this.threshold() > balance) {
-				return { kind: "reject", reason: "ExposureCapExceeded" };
 			}
 
 			return { kind: "accept", simulation: null };
 		} catch {
-			// All RPC/DB errors → defer (retry next tick)
+			// All RPC errors → defer (retry next tick)
 			return null;
 		}
 	}
@@ -133,4 +84,51 @@ export function createEscrowBalanceReader(
 
 		return results.map((r) => (r.status === "success" ? (r.result as bigint) : null));
 	};
+}
+
+/**
+ * Collect independent validation reads into bounded, explicit multicalls.
+ * This one-shot RPC collection window is not a background job scheduler.
+ * Per-tick caching and address deduplication belong to EscrowValidator.
+ */
+export function createBatchedEscrowBalanceReader(
+	publicClient: PublicClient,
+	escrowAddress: Address,
+	{ waitMs = 100, batchSize = 50 }: { waitMs?: number; batchSize?: number } = {},
+): (address: Address) => Promise<bigint> {
+	const readBatch = createEscrowBalanceReader(publicClient, escrowAddress);
+	let pending: {
+		address: Address;
+		resolve: (balance: bigint) => void;
+		reject: (error: unknown) => void;
+	}[] = [];
+	let scheduled = false;
+
+	const flush = async () => {
+		const requests = pending;
+		pending = [];
+		scheduled = false;
+		for (let offset = 0; offset < requests.length; offset += batchSize) {
+			const batch = requests.slice(offset, offset + batchSize);
+			try {
+				const balances = await readBatch(batch.map((request) => request.address));
+				for (const [index, request] of batch.entries()) {
+					const balance = balances[index];
+					if (balance == null) request.reject(new Error("Escrow balance unavailable"));
+					else request.resolve(balance);
+				}
+			} catch (error) {
+				for (const request of batch) request.reject(error);
+			}
+		}
+	};
+
+	return (address) =>
+		new Promise<bigint>((resolve, reject) => {
+			pending.push({ address, resolve, reject });
+			if (!scheduled) {
+				scheduled = true;
+				void delay(waitMs).then(flush);
+			}
+		});
 }

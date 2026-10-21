@@ -12,6 +12,7 @@ import {
 	solutions,
 } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
+import { nativeSellValue } from "../domain/collateral.js";
 import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
 import type { Verdict } from "../domain/validator.js";
@@ -294,6 +295,8 @@ function rowToProposal(row: ProposalRow): Proposal {
 		createdAt: row.createdAt,
 		statusChangedAt: row.statusChangedAt,
 		sellTokenRefPrice: row.sellTokenRefPrice ?? null,
+		settlementPenaltyCap:
+			row.settlementPenaltyCap == null ? null : BigInt(row.settlementPenaltyCap),
 		surplusTokenRefPrice: row.surplusTokenRefPrice ?? null,
 		auctionGasPrice: row.auctionGasPrice ?? null,
 		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
@@ -572,6 +575,7 @@ export async function resolveVerdict(
 		let buyToken: string | null = null;
 		let simulationFailureParams: unknown | null = null;
 		let simulationBuyAmount: string | null = null;
+		let sellTokenRefPrice: string | null = null;
 
 		switch (verdict.kind) {
 			case "accept":
@@ -595,6 +599,7 @@ export async function resolveVerdict(
 					sellToken = verdict.simulation.sellToken.toLowerCase();
 					buyToken = verdict.simulation.buyToken.toLowerCase();
 					simulationBuyAmount = verdict.simulation.simulationBuyAmount.toString();
+					sellTokenRefPrice = verdict.simulation.sellTokenRefPrice.toString();
 				}
 				break;
 			case "reject":
@@ -627,6 +632,7 @@ export async function resolveVerdict(
 				...(buyToken ? { buyToken } : {}),
 				...(simulationFailureParams != null ? { simulationFailureParams } : {}),
 				...(simulationBuyAmount != null ? { simulationBuyAmount } : {}),
+				...(sellTokenRefPrice != null ? { validationSellTokenRefPrice: sellTokenRefPrice } : {}),
 				...(statusChanged ? { statusChangedAt: sql`now()` } : {}),
 			})
 			.where(eq(proposals.id, id));
@@ -843,6 +849,9 @@ export async function applySettlementOutcome(
 				pendingCancellation: false,
 				...(outcome.kind === "succeeded" ? { rejectionReason: null } : {}),
 				...(txHash ? { settlementTxHash: txHash.toLowerCase() } : {}),
+				...(outcome.kind === "reverted"
+					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
+					: {}),
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
@@ -850,6 +859,7 @@ export async function applySettlementOutcome(
 		if (insertPenalty) {
 			await tx.insert(penalties).values({
 				proposalId: proposal.id,
+				penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
 				subSolver: proposal.subSolver.toLowerCase(),
 				orderUid: proposal.orderUid.toLowerCase(),
 			});
@@ -1055,6 +1065,9 @@ export async function sweepDropped(db: Db, olderThanSecs: number): Promise<numbe
 		.where(
 			and(
 				inArray(proposals.status, SWEEPABLE_STATUSES),
+				// Pending non-settlement charges need the proposal's evidence and
+				// must remain discoverable through durable debit recovery.
+				sql`NOT EXISTS (SELECT 1 FROM ${penalties} WHERE ${penalties.proposalId} = ${proposals.id} AND ${penalties.penaltyTxHash} IS NULL)`,
 				sql`status_changed_at < now() - make_interval(secs => ${olderThanSecs})`,
 			),
 		)
@@ -1069,13 +1082,20 @@ export async function recordSolution(
 	solutionId: number,
 	proposalId: number,
 	buyTokenRefPrice: string,
+	penaltyCap: bigint | null = null,
 ): Promise<void> {
 	await db
 		.insert(solutions)
-		.values({ auctionId, solutionId, proposalId, buyTokenRefPrice })
+		.values({
+			auctionId,
+			solutionId,
+			proposalId,
+			buyTokenRefPrice,
+			penaltyCap: penaltyCap?.toString() ?? null,
+		})
 		.onConflictDoUpdate({
 			target: [solutions.auctionId, solutions.solutionId],
-			set: { proposalId, buyTokenRefPrice },
+			set: { proposalId, buyTokenRefPrice, penaltyCap: penaltyCap?.toString() ?? null },
 		});
 }
 
@@ -1173,6 +1193,7 @@ export async function recordNonSettlementDebit(
 export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Promise<void> {
 	await db.insert(penalties).values({
 		proposalId: proposal.id,
+		penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
 		subSolver: proposal.subSolver.toLowerCase(),
 		orderUid: proposal.orderUid.toLowerCase(),
 	});
@@ -1289,30 +1310,68 @@ export async function listBySubSolver(
 }
 
 /**
- * Returns the id and gasUsed for all in-flight proposals of a sub-solver
- * (`submitted`, `active`, or `executing`). The caller excludes the proposal
- * being validated in memory so the full result can be cached per sub-solver
- * and reused across concurrent validations.
- *
- * `submitted` proposals have not been simulated yet — gasUsed is null.
- * `active` proposals carry a real gas estimate from simulation.
- * `executing` proposals may or may not have a gas estimate; same rule applies.
+ * Returns in-flight proposal data and outstanding buffer balance for a subsolver.
+ * Used by Gate 2 of the cumulative exposure check (CIP-87).
+ * `sellAmountNative` is null when `sellTokenRefPrice` has not been written yet
+ * (proposal not yet accepted by the validator).
  */
-export async function inflightGasUsedBySubSolver(
+export async function fetchInflightDataBySubSolver(
 	db: Db,
 	subSolver: Address,
-): Promise<{ id: number; gasUsed: bigint | null }[]> {
-	const rows = await db
-		.select({ id: proposals.id, gasUsed: proposals.gasUsed })
-		.from(proposals)
-		.where(
-			and(
-				eq(proposals.subSolver, subSolver.toLowerCase()),
-				inArray(proposals.status, ["submitted", "active", "executing"]),
+	current?: Proposal,
+): Promise<{
+	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
+	bufferBalance: bigint;
+}> {
+	const [proposalRows, bufferRows] = await Promise.all([
+		db
+			.select({
+				id: proposals.id,
+				orderUid: proposals.orderUid,
+				status: proposals.status,
+				gasUsed: proposals.gasUsed,
+				sellAmount: proposals.sellAmount,
+				sellTokenRefPrice: proposals.validationSellTokenRefPrice,
+			})
+			.from(proposals)
+			.where(
+				and(
+					eq(proposals.subSolver, subSolver.toLowerCase()),
+					inArray(proposals.status, ["active", "executing"]),
+				),
 			),
-		);
+		db
+			.select({ nativeTokenAmount: bufferEntries.nativeTokenAmount })
+			.from(bufferEntries)
+			.where(
+				and(eq(bufferEntries.subSolver, subSolver.toLowerCase()), eq(bufferEntries.cleared, false)),
+			),
+	]);
 
-	return rows.map((r) => ({ id: r.id, gasUsed: r.gasUsed != null ? BigInt(r.gasUsed) : null }));
+	const bufferBalance = bufferRows.reduce((sum, r) => sum + BigInt(r.nativeTokenAmount), 0n);
+
+	// Older active routes in the replacement group are cancelled by acceptance.
+	// Executing routes remain reserved; the current row is added by the validator.
+	const siblings = proposalRows.filter(
+		(r) =>
+			!current ||
+			(r.id !== current.id &&
+				!(
+					r.status === "active" &&
+					r.id < current.id &&
+					r.orderUid === current.orderUid.toLowerCase()
+				)),
+	);
+	const proposalData = siblings.map((r) => {
+		const gasUsed = r.gasUsed != null ? BigInt(r.gasUsed) : null;
+		let sellAmountNative: bigint | null = null;
+		if (r.sellTokenRefPrice != null && r.sellTokenRefPrice !== "0") {
+			sellAmountNative = nativeSellValue(BigInt(r.sellAmount), BigInt(r.sellTokenRefPrice));
+		}
+		return { id: r.id, gasUsed, sellAmountNative };
+	});
+
+	return { proposals: proposalData, bufferBalance };
 }
 
 export async function activeByOrderUids(
@@ -1386,6 +1445,8 @@ export async function solutionProposals(
 			pendingCancellation: proposals.pendingCancellation,
 			simulationFailureParams: proposals.simulationFailureParams,
 			sellTokenRefPrice: proposals.sellTokenRefPrice,
+			validationSellTokenRefPrice: proposals.validationSellTokenRefPrice,
+			settlementPenaltyCap: solutions.penaltyCap,
 			surplusTokenRefPrice: proposals.surplusTokenRefPrice,
 			auctionGasPrice: proposals.auctionGasPrice,
 			clearingPrices: proposals.clearingPrices,
@@ -1582,16 +1643,21 @@ export async function clearBufferEntries(
 	return result.length;
 }
 
-export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {
+export interface PendingPenaltyWithCap extends PendingPenalty {
+	penaltyCap: bigint | null;
+}
+
+export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithCap[]> {
 	const rows = await db
 		.select({
 			id: penalties.id,
 			proposalId: penalties.proposalId,
 			subSolver: penalties.subSolver,
 			orderUid: penalties.orderUid,
+			penaltyCap: penalties.penaltyCap,
 		})
 		.from(penalties)
-		.where(sql`penalty_tx_hash IS NULL`)
+		.where(sql`${penalties.penaltyTxHash} IS NULL`)
 		.orderBy(penalties.id);
 
 	return rows.map((r) => ({
@@ -1599,5 +1665,6 @@ export async function pendingPenalties(db: Db): Promise<PendingPenalty[]> {
 		proposalId: r.proposalId,
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
+		penaltyCap: r.penaltyCap == null ? null : BigInt(r.penaltyCap),
 	}));
 }

@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries } from "../../../db/schema.js";
+import { bufferEntries, proposals } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -83,7 +83,8 @@ function config(operator: DebitEscrow | LegacyDebitEscrow, events: AuditEvent[] 
 	return {
 		db: ctx.db,
 		operator: "debit" in operator ? durableTestOperator(operator) : operator,
-		cL: C_L,
+		collateralRatioBps: 0n,
+		minCollateral: C_L,
 		workerId: "test-worker",
 		onAuditEvent: (event: AuditEvent) => {
 			events.push(event);
@@ -564,11 +565,11 @@ describe("buffer debits", () => {
 	});
 
 	it("slashes when outstanding balance exceeds c_L", async () => {
-		// Create a proposal with a gap large enough to exceed c_L (0.01 ETH)
+		// Create a proposal with a gap large enough to exceed the buffer threshold (MIN_COLLATERAL/5 = 0.002 ETH)
 		const maxBuy = ETHER; // 1e18
 		const minBuy = ETHER / 2n;
 		// delivered = 0.98e18, gap = 0.02e18. With ref price = 1 ETH/token,
-		// nativeTokenAmount = 0.02 ETH = 2e16 > c_L (1e16).
+		// nativeTokenAmount = 0.02 ETH > threshold (0.002 ETH).
 		const delivered = (ETHER * 98n) / 100n;
 		const refPrice = ETHER.toString();
 
@@ -617,20 +618,20 @@ describe("buffer debits", () => {
 	});
 
 	it("credits offset debits before threshold check", async () => {
-		// First proposal: under-delivery of 0.008 ETH
+		// First proposal: under-delivery of 0.0008 ETH
 		const { tx: tx1 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
-		// Second proposal: over-delivery of 0.006 ETH
+		// Second proposal: over-delivery of 0.0006 ETH
 		const { tx: tx2 } = await settledBufferProposal(ETHER, ETHER / 2n, ETHER.toString());
 		const deltaByTx = new Map([
-			[tx1.toLowerCase(), ETHER - 8_000_000_000_000_000n], // gap = +0.008 ETH
-			[tx2.toLowerCase(), ETHER + 6_000_000_000_000_000n], // gap = -0.006 ETH
+			[tx1.toLowerCase(), ETHER - 800_000_000_000_000n], // gap = +0.0008 ETH
+			[tx2.toLowerCase(), ETHER + 600_000_000_000_000n], // gap = -0.0006 ETH
 		]);
 		const debitCalls: Array<{ subSolver: Address; amount: bigint }> = [];
 		const operator = bufferOperator(deltaByTx, debitCalls);
 
 		await runBufferDebits(config(operator, []), new Map());
 
-		// Net balance = 0.008 - 0.006 = 0.002 ETH < c_L (0.01 ETH)
+		// Net balance = 0.0008 - 0.0006 = 0.0002 ETH < buffer threshold (MIN_COLLATERAL/5 = 0.002 ETH)
 		// No slash should happen — entries remain uncleared
 		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared.length).toBeGreaterThanOrEqual(2);
@@ -860,5 +861,108 @@ describe("buffer debits", () => {
 		expect(
 			await store.finalizeBufferEntries(ctx.db, isolatedSolver, [secondEntryId], PENALTY_TX),
 		).toBe(1);
+	});
+});
+
+describe("pending penalty retention", () => {
+	it("keeps evidence through an outage and a signed debit retry, then permits retention", async () => {
+		const isolated = await createTestDb();
+		try {
+			const { id } = await store.insert(isolated.db, sampleProposal());
+			const proposal = (await store.get(isolated.db, id))!;
+			await store.queueNonSettlementPenalty(isolated.db, proposal);
+			await isolated.db
+				.update(proposals)
+				.set({ status: "cancelled", statusChangedAt: sql`now() - interval '2 hours'` })
+				.where(eq(proposals.id, id));
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
+			let broadcastingFails = true;
+			let signed = 0;
+			let landed = false;
+			const operator: DebitEscrow = {
+				settlementCost: async () => 0n,
+				readExecutedDelta: async () => 0n,
+				signDebit: async () => {
+					signed++;
+					return { rawTransaction: "0xab", hash: PENALTY_TX };
+				},
+				broadcastSignedDebit: async () => {
+					if (broadcastingFails) throw new Error("RPC unavailable");
+					landed = true;
+					return PENALTY_TX;
+				},
+				debitOutcome: async () => (landed ? "succeeded" : null),
+			};
+			const worker = { ...config(operator), db: isolated.db };
+			await runNonSettlementDebits(worker, new Map());
+			expect(signed).toBe(1);
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
+			expect(await store.pendingPenalties(isolated.db)).toHaveLength(1);
+			broadcastingFails = false;
+			await isolated.db.execute(
+				sql`UPDATE debit_operations SET next_retry_at = now() - interval '1 second'`,
+			);
+			await runNonSettlementDebits({ ...worker, workerId: "replacement-worker" }, new Map());
+			expect(signed).toBe(1);
+			expect(await store.pendingPenalties(isolated.db)).toHaveLength(0);
+			expect(await store.sweepDropped(isolated.db, 3600)).toBe(1);
+		} finally {
+			await isolated.cleanup();
+		}
+	});
+});
+
+describe("immutable penalty caps", () => {
+	it("uses the notified auction cap after prices and later auction caps change", async () => {
+		const isolated = await createTestDb();
+		try {
+			const { id } = await store.insert(isolated.db, sampleProposal());
+			await store.transition(isolated.db, (await store.get(isolated.db, id))!, "active");
+			await store.recordSolution(isolated.db, 100, 1, id, "1", 4000n);
+			await store.recordSolution(isolated.db, 101, 1, id, "1", 9000n);
+			const attributed = (await store.solutionProposals(isolated.db, 100, [1]))[0]!;
+			await store.applySettlementOutcome(isolated.db, attributed, { kind: "started" });
+			await store.applySettlementOutcome(isolated.db, attributed, { kind: "abandoned" });
+			await store.saveSolutionPrices(isolated.db, id, {
+				sellTokenRefPrice: (10n ** 30n).toString(),
+				surplusTokenRefPrice: "1",
+				auctionGasPrice: "1",
+				clearingPrices: {},
+			});
+			await store.resolveVerdict(isolated.db, id, {
+				kind: "accept",
+				simulation: {
+					gasUsed: 100_000n,
+					trampoline: attributed.subSolver,
+					sellToken: attributed.sellToken,
+					buyToken: attributed.buyToken,
+					simulationBuyAmount: attributed.quoteBuyAmount,
+					sellTokenRefPrice: 10n ** 25n,
+				},
+			});
+			const calls: bigint[] = [];
+			const operator = durableTestOperator({
+				settlementCost: async () => 100n,
+				readExecutedDelta: async () => 0n,
+				debit: async (_address, amount) => {
+					calls.push(amount);
+					return PENALTY_TX;
+				},
+			});
+			await runNonSettlementDebits({ ...config(operator), db: isolated.db }, new Map());
+			expect(calls).toEqual([400n]);
+			const [row] = await isolated.db.select().from(proposals).where(eq(proposals.id, id));
+			expect(row?.sellTokenRefPrice).toBe((10n ** 30n).toString());
+			expect(row?.validationSellTokenRefPrice).toBe((10n ** 25n).toString());
+			const reverted = (await store.solutionProposals(isolated.db, 101, [1]))[0]!;
+			await store.applySettlementOutcome(isolated.db, reverted, {
+				kind: "reverted",
+				txHash: `0x${"12".repeat(32)}`,
+			});
+			await runRevertDebits({ ...config(operator), db: isolated.db }, new Map());
+			expect(calls).toEqual([400n, 9100n]);
+		} finally {
+			await isolated.cleanup();
+		}
 	});
 });
