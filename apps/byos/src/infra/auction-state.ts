@@ -28,6 +28,12 @@ export interface AuctionStateBackend {
 	get(): Promise<AuctionState | null>;
 	set(state: AuctionState): Promise<void>;
 	clear(): Promise<void>;
+	/**
+	 * Atomically deletes the stored state only if its auctionId matches.
+	 * Prevents a finishing /solve from clearing state that belongs to a different
+	 * auction (e.g. an overlapping request or a quote request clearing a real one).
+	 */
+	clearIfOwned(auctionId: number): Promise<void>;
 }
 
 /** Process-local copy — set only on the replica that owns the current /solve. */
@@ -64,6 +70,18 @@ export async function getAuctionState(): Promise<AuctionState | null> {
 export async function clearAuctionState(): Promise<void> {
 	current = null;
 	if (backend) await backend.clear();
+}
+
+/**
+ * Clears auction state only if the stored state belongs to this auction.
+ * Safe to call from any /solve request: a finishing request cannot wipe state
+ * that was written by a concurrent request for a different auction.
+ */
+export async function clearAuctionStateIfOwned(auctionId: number): Promise<void> {
+	if (current?.auctionId === auctionId) {
+		current = null;
+	}
+	if (backend) await backend.clearIfOwned(auctionId);
 }
 
 // Test-only helpers — write directly to the module variable so tests stay
@@ -201,6 +219,22 @@ export function createRedisAuctionStateBackend(redis: Redis): AuctionStateBacken
 		},
 		async clear() {
 			await redis.del(AUCTION_STATE_KEY);
+		},
+		async clearIfOwned(auctionId) {
+			// Lua script: atomically delete only if the stored auctionId matches.
+			// Prevents a finishing /solve from clearing state written by a concurrent
+			// request for a different auction.
+			const script = `
+				local data = redis.call('GET', KEYS[1])
+				if not data then return 0 end
+				local ok, parsed = pcall(cjson.decode, data)
+				if not ok or type(parsed) ~= 'table' then return 0 end
+				if parsed.auctionId == tonumber(ARGV[1]) then
+					return redis.call('DEL', KEYS[1])
+				end
+				return 0
+			`;
+			await redis.eval(script, 1, AUCTION_STATE_KEY, String(auctionId));
 		},
 	};
 }

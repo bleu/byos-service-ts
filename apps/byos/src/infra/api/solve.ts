@@ -14,7 +14,11 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
-import { auctionOrderToRecord, clearAuctionState, setAuctionState } from "../auction-state.js";
+import {
+	auctionOrderToRecord,
+	clearAuctionStateIfOwned,
+	setAuctionState,
+} from "../auction-state.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
@@ -93,7 +97,9 @@ export function createSolveRoute(config: SolveConfig) {
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
 		if (orderUids.length === 0) {
-			await clearAuctionState();
+			// No orders → return immediately. We haven't set any state for this
+			// auction, so there's nothing to clear. A real auction's state (if any)
+			// must not be wiped by an unrelated empty request.
 			return c.json({ solutions: [] } satisfies SolveResponse);
 		}
 
@@ -254,8 +260,12 @@ export function createSolveRoute(config: SolveConfig) {
 		// the response reaches the driver.
 		if (auctionId !== null) {
 			await store.abandonAuctionProposals(config.db, auctionId);
+			// Only clear the shared state if it still belongs to this auction.
+			// An overlapping request for a newer auction may have already replaced
+			// it; clearing unconditionally would wipe that newer state.
+			// Quote requests (auctionId === null) never set state, so they never clear it.
+			await clearAuctionStateIfOwned(auctionId);
 		}
-		await clearAuctionState();
 
 		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);

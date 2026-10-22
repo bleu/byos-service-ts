@@ -256,7 +256,14 @@ export class SimulationValidator implements ValidateProposal {
 		if (!auctionState) return null;
 
 		const record = auctionState.orders.get(proposal.orderUid.toLowerCase());
-		if (!record) return { kind: "reject", reason: "OrderNotFound" };
+		if (!record) {
+			// Active proposals were already validated against their own auction window.
+			// Absence from the current auction means the auction changed — not that the
+			// order is invalid or the settlement is finished. Defer so the proposal
+			// stays live for settlement attribution and notify accounting.
+			if (proposal.status === "active") return null;
+			return { kind: "reject", reason: "OrderNotFound" };
+		}
 
 		const sellTokenRefPrice = auctionState.prices.get(proposal.sellToken.toLowerCase());
 		if (!sellTokenRefPrice || sellTokenRefPrice <= 0n) {
