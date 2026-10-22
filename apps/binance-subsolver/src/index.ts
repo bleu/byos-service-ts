@@ -1,6 +1,11 @@
 import "dotenv/config";
 import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
-import { ByosClient, OrderbookClient, RequestBudget } from "@byos/subsolver-core";
+import {
+	AwsOrderbookClient,
+	ByosClient,
+	OrderbookClient,
+	RequestBudget,
+} from "@byos/subsolver-core";
 import pino from "pino";
 import type { Address } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -33,9 +38,13 @@ async function main() {
 		config.binanceSecretKey,
 		config.chainId,
 	);
+	const orderbook =
+		config.discoveryMethod === "aws"
+			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement)
+			: new OrderbookClient(config.discoveryUrl);
 	const subsolver = new BinanceSubsolver(
 		config,
-		new OrderbookClient(config.orderBookUrl),
+		orderbook,
 		new ByosClient(config.byosUrl, domain, signFn),
 		binanceClient,
 		trampoline as Address,
