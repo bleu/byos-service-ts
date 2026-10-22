@@ -93,6 +93,7 @@ export const proposals = pgTable(
 		auctionGasPrice: text("auction_gas_price"),
 		clearingPrices: jsonb("clearing_prices"),
 		simulationBuyAmount: text("simulation_buy_amount"),
+		auctionId: bigint("auction_id", { mode: "number" }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
 	},
@@ -100,6 +101,7 @@ export const proposals = pgTable(
 		index("proposals_order_uid_status_idx").on(table.orderUid, table.status),
 		index("proposals_sub_solver_status_idx").on(table.subSolver, table.status),
 		index("proposals_status_status_changed_at_idx").on(table.status, table.statusChangedAt),
+		index("proposals_auction_id_status_idx").on(table.auctionId, table.status),
 		uniqueIndex("proposals_sub_solver_nonce_key").on(table.subSolver, table.nonce),
 	],
 );
@@ -141,6 +143,7 @@ export const proposalsLog = pgTable(
 		auctionGasPrice: text("auction_gas_price"),
 		clearingPrices: jsonb("clearing_prices"),
 		simulationBuyAmount: text("simulation_buy_amount"),
+		auctionId: bigint("auction_id", { mode: "number" }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		statusChangedAt: timestamp("status_changed_at", { withTimezone: true }).notNull().defaultNow(),
 	},

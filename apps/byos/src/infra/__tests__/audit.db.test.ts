@@ -49,6 +49,7 @@ function sampleProposal(): Proposal {
 		auctionGasPrice: null,
 		clearingPrices: null,
 		simulationBuyAmount: null,
+		auctionId: null,
 	};
 }
 

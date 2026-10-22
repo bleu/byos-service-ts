@@ -13,10 +13,10 @@ import {
 	type Hex,
 	type PublicClient,
 } from "viem";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { OrderRecord } from "../../../domain/order.js";
 import type { Proposal } from "../../../domain/proposal.js";
-import type { FetchOrder } from "../../orderbook.js";
+import { clearAuctionState, setAuctionState } from "../../auction-state.js";
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
 
@@ -146,8 +146,31 @@ function submittedProposal(): Proposal {
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		auctionId: null,
 	};
 }
+
+/**
+ * Populates the in-memory auction state used by SimulationValidator.
+ * By default prices all tokens at 1:1 (ETHER). Pass `prices` to override.
+ */
+function setupAuctionState(
+	record: OrderRecord,
+	prices?: Map<string, bigint>,
+): void {
+	const proposal = submittedProposal();
+	const defaultPrices = new Map([
+		[proposal.sellToken.toLowerCase(), ETHER],
+		[proposal.buyToken.toLowerCase(), ETHER],
+	]);
+	setAuctionState({
+		auctionId: 1,
+		orders: new Map([[proposal.orderUid.toLowerCase(), record]]),
+		prices: prices ?? defaultPrices,
+	});
+}
+
+afterEach(() => clearAuctionState());
 
 // ── Fake RPC node ────────────────────────────────────────────────────────────
 
@@ -205,21 +228,13 @@ function fakeNode(opts?: {
 
 // ── Validator factories ──────────────────────────────────────────────────────
 
-function fakeOrderbook(record: OrderRecord): FetchOrder {
-	return {
-		order: async () => record,
-		nativePrice: async () => ETHER, // 1:1 — surplus in atoms equals surplus in wei
-	};
-}
-
 /**
- * Creates a SimulationValidator with the given node and orderbook.
+ * Creates a SimulationValidator with the given node.
  * maxSlippageBps/maxSlippageNative default to effectively unlimited so
  * existing tests are unaffected by the gap check.
  */
 function validatorAt(
 	node: FakeNode,
-	orderbook: FetchOrder,
 	gasPrice = 0n,
 	minScore = 0n,
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
@@ -228,7 +243,6 @@ function validatorAt(
 ): SimulationValidator {
 	return new SimulationValidator(
 		node.client,
-		orderbook,
 		SETTLEMENT,
 		ESCROW,
 		TRAMPOLINE_FACTORY,
@@ -242,9 +256,10 @@ function validatorAt(
 	);
 }
 
-/** Convenience: validator for a fixed orderbook record with a given minScore. */
+/** Convenience: sets up auction state for `record` then returns a validator with a given minScore. */
 function validatorWith(record: OrderRecord, minScore: bigint): SimulationValidator {
-	return validatorAt(fakeNode(), fakeOrderbook(record), 0n, minScore);
+	setupAuctionState(record);
+	return validatorAt(fakeNode(), 0n, minScore);
 }
 
 // ── Profitability gate ───────────────────────────────────────────────────────
@@ -289,8 +304,9 @@ describe("SimulationValidator", () => {
 		const proposal = submittedProposal();
 		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n }));
 		const node = fakeNode();
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+		const verdict = await validatorAt(node).validate(proposal);
 		expect(verdict).toMatchObject({
 			kind: "accept",
 			simulation: {
@@ -357,8 +373,9 @@ describe("SimulationValidator", () => {
 		const delta = proposal.quoteBuyAmount + 5_000n; // delta > quote → effectiveBuyAmount = quote
 		const record = sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n }));
 		const node = fakeNode({ delta });
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+		const verdict = await validatorAt(node).validate(proposal);
 
 		expect(verdict).toMatchObject({
 			kind: "accept",
@@ -377,8 +394,9 @@ describe("SimulationValidator", () => {
 				logs: [], // no Executed event
 			}),
 		});
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+		const verdict = await validatorAt(node).validate(proposal);
 
 		expect(verdict).toEqual({ kind: "reject", reason: "SimulationMissingExecutedEvent" });
 	});
@@ -387,23 +405,25 @@ describe("SimulationValidator", () => {
 		// A buy order around the same proposal: exact buy amount (the envelope
 		// requirement), sell limit above the proposal's so the pair carries
 		// surplus — in the sell token. Only the sell token is priced: if the
-		// gate wrongly priced the buy token it would see NotFound and reject
-		// as Unprofitable.
+		// gate wrongly priced the buy token it would reject as NativePriceUnavailable.
 		const proposal = submittedProposal();
 		const order = sampleOrder({
 			kind: OrderKind.BUY,
 			buyAmount: proposal.quoteBuyAmount,
 			sellAmount: proposal.sellAmount + 100_000n,
 		});
-		const pricedOnly: FetchOrder = {
-			order: async () => sampleRecord(order),
-			nativePrice: async (token) => {
-				if (token.toLowerCase() === order.sellToken.toLowerCase()) return ETHER;
-				throw { kind: "notFound" };
-			},
-		};
+		// Only sell token is priced — buy token intentionally absent.
+		// Buy orders skip the slippage check so buy token price is never needed.
+		const prices = new Map([
+			[order.sellToken.toLowerCase(), ETHER],
+		]);
+		setAuctionState({
+			auctionId: 1,
+			orders: new Map([[proposal.orderUid.toLowerCase(), sampleRecord(order)]]),
+			prices,
+		});
 
-		const verdict = await validatorAt(fakeNode(), pricedOnly).validate(proposal);
+		const verdict = await validatorAt(fakeNode()).validate(proposal);
 		expect(verdict).toMatchObject({ kind: "accept" });
 	});
 
@@ -413,56 +433,53 @@ describe("SimulationValidator", () => {
 		const gasPrice = 1_000_000_000n;
 		const submitted = submittedProposal();
 		const record = sampleRecord(sampleOrder({ buyAmount: submitted.quoteBuyAmount - 10_000n }));
+		setupAuctionState(record);
 
 		// The gate would reject these inputs on a first (Submitted) pass…
-		const first = await validatorAt(fakeNode(), fakeOrderbook(record), gasPrice).validate(
-			submitted,
-		);
+		const first = await validatorAt(fakeNode(), gasPrice).validate(submitted);
 		expect(first).toEqual({ kind: "reject", reason: "Unprofitable" });
 
 		// …but re-validation of an Active proposal must not churn it: the
 		// simulation still runs (gas refresh), the gate is skipped.
 		const active = { ...submittedProposal(), status: "active" as const };
-		const revalidated = await validatorAt(fakeNode(), fakeOrderbook(record), gasPrice).validate(
-			active,
-		);
+		const revalidated = await validatorAt(fakeNode(), gasPrice).validate(active);
 		expect(revalidated).toMatchObject({ kind: "accept" });
 	});
 
-	it("native price outage defers first verdict", async () => {
+	it("missing native price rejects with NativePriceUnavailable", async () => {
+		// For sell orders the buy token price is needed for the slippage check.
+		// If it is absent the validator rejects — prices come from auction state
+		// and are expected to be present for all included tokens.
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
-		const outage: FetchOrder = {
-			order: async () => record,
-			nativePrice: async () => {
-				throw { kind: "transient", message: "price feed down" };
-			},
-		};
+		const sellToken = submittedProposal().sellToken.toLowerCase();
+		// buyToken intentionally absent from prices
+		setupAuctionState(record, new Map([[sellToken, ETHER]]));
 
-		const verdict = await validatorAt(fakeNode(), outage).validate(submittedProposal());
-		expect(verdict).toBeNull();
+		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
+		expect(verdict).toEqual({ kind: "reject", reason: "NativePriceUnavailable" });
 	});
 
 	it("unknown order rejects proposal", async () => {
-		const notFound: FetchOrder = {
-			order: async () => {
-				throw { kind: "notFound" };
-			},
-			nativePrice: async () => ETHER,
-		};
+		// Auction state exists but the order UID is not in it.
+		setAuctionState({
+			auctionId: 1,
+			orders: new Map(), // empty — no matching UID
+			prices: new Map([
+				[submittedProposal().sellToken.toLowerCase(), ETHER],
+				[submittedProposal().buyToken.toLowerCase(), ETHER],
+			]),
+		});
 
-		const verdict = await validatorAt(fakeNode(), notFound).validate(submittedProposal());
+		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
 		expect(verdict).toEqual({ kind: "reject", reason: "OrderNotFound" });
 	});
 
-	it("orderbook outage defers judgment", async () => {
-		const outage: FetchOrder = {
-			order: async () => {
-				throw { kind: "transient", message: "orderbook down" };
-			},
-			nativePrice: async () => ETHER,
-		};
+	it("no active auction defers judgment", async () => {
+		// When there is no auction state the validator defers so the proposal
+		// can be cleaned up by abandonAuctionProposals once the window closes.
+		clearAuctionState();
 
-		const verdict = await validatorAt(fakeNode(), outage).validate(submittedProposal());
+		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
 		expect(verdict).toBeNull();
 	});
 
@@ -471,10 +488,9 @@ describe("SimulationValidator", () => {
 			...sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount - 10_000n })),
 			erc20Balances: false,
 		};
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(fakeNode(), fakeOrderbook(record)).validate(
-			submittedProposal(),
-		);
+		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
 		expect(verdict).toEqual({ kind: "reject", reason: "UnsupportedOrder" });
 	});
 
@@ -485,8 +501,9 @@ describe("SimulationValidator", () => {
 			},
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
+		const verdict = await validatorAt(node).validate(submittedProposal());
 		expect(verdict).toBeNull();
 	});
 
@@ -495,8 +512,9 @@ describe("SimulationValidator", () => {
 			simulateV1: async () => simulateRevert(),
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
+		const verdict = await validatorAt(node).validate(submittedProposal());
 		expect(verdict).toMatchObject({ kind: "simFailed" });
 	});
 
@@ -507,8 +525,9 @@ describe("SimulationValidator", () => {
 			},
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
+		setupAuctionState(record);
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(submittedProposal());
+		const verdict = await validatorAt(node).validate(submittedProposal());
 		expect(verdict).toBeNull();
 	});
 
@@ -517,7 +536,8 @@ describe("SimulationValidator", () => {
 		const record = sampleRecord(
 			sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount - 10_000n }),
 		);
-		const validator = validatorAt(node, fakeOrderbook(record));
+		setupAuctionState(record);
+		const validator = validatorAt(node);
 		const proposal = { ...submittedProposal(), trampoline: null };
 
 		await validator.validate(proposal);
@@ -533,9 +553,10 @@ describe("SimulationValidator", () => {
 			},
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
+		setupAuctionState(record);
 		const proposal = { ...submittedProposal(), trampoline: null };
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+		const verdict = await validatorAt(node).validate(proposal);
 		expect(verdict).toBeNull();
 	});
 
@@ -546,9 +567,10 @@ describe("SimulationValidator", () => {
 			},
 		});
 		const record = sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount }));
+		setupAuctionState(record);
 		const proposal = { ...submittedProposal(), trampoline: null };
 
-		const verdict = await validatorAt(node, fakeOrderbook(record)).validate(proposal);
+		const verdict = await validatorAt(node).validate(proposal);
 		expect(verdict).toEqual({ kind: "simFailed" });
 	});
 });
@@ -572,10 +594,10 @@ describe("SimulationValidator gap check", () => {
 		const proposal = gappedProposal(980_000n, 990_000n);
 		const record = orderFor(proposal.quoteBuyAmount);
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+		setupAuctionState(record);
 
 		const verdict = await validatorAt(
 			node,
-			fakeOrderbook(record),
 			0n,
 			0n,
 			100n, // 1% cap
@@ -591,10 +613,10 @@ describe("SimulationValidator gap check", () => {
 		const proposal = gappedProposal(980_100n, 990_000n);
 		const record = orderFor(proposal.quoteBuyAmount);
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+		setupAuctionState(record);
 
 		const verdict = await validatorAt(
 			node,
-			fakeOrderbook(record),
 			0n,
 			0n,
 			100n, // 1% cap
@@ -610,10 +632,10 @@ describe("SimulationValidator gap check", () => {
 		const proposal = gappedProposal(980_000n, 990_000n);
 		const record = orderFor(proposal.quoteBuyAmount);
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+		setupAuctionState(record);
 
 		const verdict = await validatorAt(
 			node,
-			fakeOrderbook(record),
 			0n,
 			0n,
 			10_000n, // bps cap large enough to not trigger
@@ -628,10 +650,10 @@ describe("SimulationValidator gap check", () => {
 		const proposal = gappedProposal(990_000n, 990_000n);
 		const record = orderFor(proposal.quoteBuyAmount);
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+		setupAuctionState(record);
 
 		const verdict = await validatorAt(
 			node,
-			fakeOrderbook(record),
 			0n,
 			0n,
 			0n, // zero cap — would reject any positive gap
@@ -653,10 +675,15 @@ describe("SimulationValidator gap check", () => {
 		);
 		const proposal = submittedProposal(); // minBuyAmount == quoteBuyAmount == 990_000
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
+		// Only sell token is priced — buy orders don't need buy token price for slippage.
+		setAuctionState({
+			auctionId: 1,
+			orders: new Map([[proposal.orderUid.toLowerCase(), buyOrder]]),
+			prices: new Map([[buyOrder.order.sellToken.toLowerCase(), ETHER]]),
+		});
 
 		const verdict = await validatorAt(
 			node,
-			{ order: async () => buyOrder, nativePrice: async () => ETHER },
 			0n,
 			0n,
 			0n, // zero cap
@@ -679,6 +706,7 @@ function collateralValidator(
 		fetchInflight?: import("../validator.js").FetchInflightData;
 	} = {},
 ) {
+	setupAuctionState(sampleRecord(sampleOrder()));
 	const node = fakeNode({
 		simulateV1: async () =>
 			simulateSuccess(
@@ -694,7 +722,6 @@ function collateralValidator(
 	} as unknown as PublicClient;
 	return new SimulationValidator(
 		client,
-		fakeOrderbook(sampleRecord(sampleOrder())),
 		SETTLEMENT,
 		ESCROW,
 		TRAMPOLINE_FACTORY,
@@ -827,7 +854,8 @@ describe("concurrent simulation metadata reads", () => {
 				return AUTHENTICATOR;
 			},
 		});
-		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		setupAuctionState(sampleRecord(sampleOrder()));
+		const validator = validatorAt(node);
 		expect((await validator.validate({ ...activeProposal(), trampoline: null }))?.kind).toBe(
 			"accept",
 		);
@@ -838,7 +866,8 @@ describe("concurrent simulation metadata reads", () => {
 				throw new Error("RPC unavailable");
 			},
 		});
-		const validator = validatorAt(node, fakeOrderbook(sampleRecord(sampleOrder())));
+		setupAuctionState(sampleRecord(sampleOrder()));
+		const validator = validatorAt(node);
 		expect(await validator.validate(activeProposal())).toBeNull();
 	});
 });

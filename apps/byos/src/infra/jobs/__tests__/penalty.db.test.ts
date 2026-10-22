@@ -58,6 +58,7 @@ function sampleProposal(): store.ProposalInput {
 		auctionGasPrice: null,
 		clearingPrices: null,
 		simulationBuyAmount: null,
+		auctionId: null,
 	};
 }
 

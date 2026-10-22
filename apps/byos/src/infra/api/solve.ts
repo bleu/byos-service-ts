@@ -15,6 +15,11 @@ import {
 	surplusToken,
 } from "../../domain/scoring.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
+import {
+	auctionOrderToRecord,
+	clearAuctionState,
+	setAuctionState,
+} from "../auction-state.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import {
@@ -92,7 +97,22 @@ export function createSolveRoute(config: SolveConfig) {
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
 		if (orderUids.length === 0) {
+			clearAuctionState();
 			return c.json({ solutions: [] } satisfies SolveResponse);
+		}
+
+		// Populate in-memory auction state so the validator can read order data
+		// and native prices without calling the orderbook.
+		if (auctionId !== null) {
+			const orders = new Map(
+				auction.orders.map((o) => [o.uid.toLowerCase(), auctionOrderToRecord(o)]),
+			);
+			const prices = new Map(
+				Object.entries(auction.tokens)
+					.filter(([, t]) => t.referencePrice != null)
+					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice!)]),
+			);
+			setAuctionState({ auctionId, orders, prices });
 		}
 
 		// Keep the competition window open, then leave time to select and respond.
@@ -102,7 +122,9 @@ export function createSolveRoute(config: SolveConfig) {
 		if (waitMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-		const grouped = await store.activeByOrderUids(config.db, orderUids);
+		const grouped = auctionId !== null
+			? await store.activeByOrderUids(config.db, orderUids, auctionId)
+			: new Map();
 
 		const solutions: Solution[] = [];
 		let solutionId = 1;
@@ -233,6 +255,14 @@ export function createSolveRoute(config: SolveConfig) {
 			);
 			solutionId++;
 		}
+		// Close the auction window: reject all still-submitted proposals so they
+		// cannot bleed into the next auction. Awaited so state is consistent before
+		// the response reaches the driver.
+		if (auctionId !== null) {
+			await store.abandonAuctionProposals(config.db, auctionId);
+		}
+		clearAuctionState();
+
 		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);
 	});

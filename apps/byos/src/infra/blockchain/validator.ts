@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog } from "viem";
 import { availableCollateral, penaltyCap, perProposalCL } from "../../domain/collateral.js";
-import { checkEnvelope, checkProposalSlippage, type OrderRecord } from "../../domain/order.js";
+import { checkEnvelope, checkProposalSlippage } from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
 	type Candidate,
@@ -14,7 +14,7 @@ import {
 	surplusToken,
 } from "../../domain/scoring.js";
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
-import type { FetchOrder, OrderbookError } from "../orderbook.js";
+import { getAuctionState } from "../auction-state.js";
 import {
 	createBatchedEscrowBalanceReader,
 	type EscrowValidator,
@@ -166,7 +166,6 @@ export class SimulationValidator implements ValidateProposal {
 
 	constructor(
 		private readonly publicClient: PublicClient,
-		private readonly orderbook: FetchOrder,
 		private readonly settlementAddress: Address,
 		private readonly escrowAddress: Address,
 		private readonly trampolineFactory: Address,
@@ -213,23 +212,13 @@ export class SimulationValidator implements ValidateProposal {
 		return addr;
 	}
 
-	private async profitability(
+	private profitability(
 		proposal: Proposal,
-		record: OrderRecord,
+		record: import("../../domain/order.js").OrderRecord,
 		gas: bigint,
-	): Promise<"ok" | "unprofitable" | null> {
+		surplusPrice: bigint,
+	): "ok" | "unprofitable" {
 		const isSellOrder = record.order.kind === OrderKind.SELL;
-		const surplusTkn = surplusToken(isSellOrder, record.order.sellToken, record.order.buyToken);
-
-		let surplusPrice: bigint;
-		try {
-			surplusPrice = await this.orderbook.nativePrice(surplusTkn);
-		} catch (e) {
-			const err = e as OrderbookError;
-			if (err.kind === "notFound") return "unprofitable";
-			return null; // transient, defer
-		}
-
 		const gasCost = effectiveGas(gas) * this.gasPriceRef.value;
 
 		const candidate: Candidate = {
@@ -259,50 +248,38 @@ export class SimulationValidator implements ValidateProposal {
 			this.fetchInflightData(proposal.subSolver, proposal),
 			this.readEscrowBalance(proposal.subSolver),
 		]);
-		const orderbookStarted = performance.now();
-		// Order and native prices are read during immediate validation and every
-		// background revalidation. The sell price is required for all order kinds.
-		const [orderResult, priceResult, sellPriceResult] = await Promise.allSettled([
-			this.orderbook.order(proposal.orderUid),
-			this.orderbook.nativePrice(proposal.buyToken),
-			this.orderbook.nativePrice(proposal.sellToken),
-		]);
-		this.logger?.debug(
-			{ proposalId: proposal.id, elapsedMs: performance.now() - orderbookStarted },
-			"validation orderbook reads finished",
-		);
 
-		if (orderResult.status === "rejected") {
-			const err = orderResult.reason as OrderbookError;
-			if (err.kind === "notFound") return { kind: "reject", reason: "OrderNotFound" };
-			return null; // transient, defer
-		}
-		const record = orderResult.value;
+		// Order data and prices come from the in-memory auction state populated
+		// by /solve. If the state is absent the auction already closed and this
+		// proposal will be cleaned up by abandonAuctionProposals — defer.
+		const auctionState = getAuctionState();
+		if (!auctionState) return null;
 
-		let nativePrice: bigint;
-		if (priceResult.status === "rejected") {
-			const err = priceResult.reason as OrderbookError;
-			if (record.order.kind === OrderKind.SELL) {
-				// Sell orders need the price to evaluate the native-amount gap cap.
-				// Fail closed: if price is missing we cannot assess, so reject.
-				if (err.kind === "notFound") return { kind: "reject", reason: "NativePriceUnavailable" };
-				return null; // transient, defer
-			}
-			// Buy orders skip the gap check entirely — price is not needed.
-			nativePrice = 0n;
-		} else {
-			nativePrice = priceResult.value;
-		}
+		const record = auctionState.orders.get(proposal.orderUid.toLowerCase());
+		if (!record) return { kind: "reject", reason: "OrderNotFound" };
 
-		if (sellPriceResult.status === "rejected") {
-			const err = sellPriceResult.reason as OrderbookError;
-			if (err.kind === "notFound") return { kind: "reject", reason: "NativePriceUnavailable" };
-			return null; // transient, defer
-		}
-		if (sellPriceResult.value <= 0n) {
+		const sellTokenRefPrice = auctionState.prices.get(proposal.sellToken.toLowerCase());
+		if (!sellTokenRefPrice || sellTokenRefPrice <= 0n) {
 			return { kind: "reject", reason: "NativePriceUnavailable" };
 		}
-		const sellTokenRefPrice = sellPriceResult.value;
+
+		// Slippage gap check uses buy token price for sell orders. Buy orders skip
+		// the check entirely so 0n is a safe sentinel.
+		let nativePrice = 0n;
+		if (record.order.kind === OrderKind.SELL) {
+			const p = auctionState.prices.get(proposal.buyToken.toLowerCase());
+			if (!p) return { kind: "reject", reason: "NativePriceUnavailable" };
+			nativePrice = p;
+		}
+
+		// Surplus token price for profitability gate.
+		const surplusTkn = surplusToken(
+			record.order.kind === OrderKind.SELL,
+			record.order.sellToken,
+			record.order.buyToken,
+		);
+		const surplusPrice = auctionState.prices.get(surplusTkn.toLowerCase());
+		if (!surplusPrice) return { kind: "reject", reason: "NativePriceUnavailable" };
 
 		// Step 2: Check envelope validity
 		const envelopeReason = checkEnvelope(record, proposal);
@@ -514,12 +491,9 @@ export class SimulationValidator implements ValidateProposal {
 		// once it is set on the proposal — we attach it here temporarily.
 		const proposalWithSim: Proposal = { ...proposal, simulationBuyAmount };
 		if (proposal.status === "submitted") {
-			const profitResult = await this.profitability(proposalWithSim, record, gas);
+			const profitResult = this.profitability(proposalWithSim, record, gas, surplusPrice);
 			if (profitResult === "unprofitable") {
 				return { kind: "reject", reason: "Unprofitable" };
-			}
-			if (profitResult === null) {
-				return null; // defer
 			}
 		}
 

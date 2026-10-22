@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
-import { evmChainFor, orderbookUrlFor, settlementAddressFor } from "@byos/common";
-import type { SupportedChainId } from "@cowprotocol/cow-sdk";
+import { evmChainFor, settlementAddressFor } from "@byos/common";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import type { Redis } from "ioredis";
 import type { Logger } from "pino";
@@ -30,7 +29,6 @@ import {
 	type Queues,
 	setupJobSchedulers,
 } from "./infra/jobs/index.js";
-import { OrderbookClient } from "./infra/orderbook.js";
 import { createRedisRateLimiter } from "./infra/rate-limit.js";
 import * as store from "./infra/storage.js";
 
@@ -156,17 +154,9 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// Escrow validator
 	const escrowValidator = new EscrowValidator(publicClient, escrowAddress, minCollateralWei);
 
-	// Orderbook client. Resolve the base URL explicitly so that local chains
-	// (e.g. foundry/31337) get the LOCAL_ORDERBOOK_URL fallback from
-	// orderbookUrlFor rather than an undefined SDK base URL.
-	// ORDERBOOK_URL overrides it (barn/staging).
-	const orderbookUrl = config.ORDERBOOK_URL ?? orderbookUrlFor(config.CHAIN_ID);
-	const orderbook = new OrderbookClient(config.CHAIN_ID as SupportedChainId, orderbookUrl);
-
 	// Simulation validator
 	const simulationValidator = new SimulationValidator(
 		publicClient,
-		orderbook,
 		settlementAddress,
 		escrowAddress,
 		trampolineFactory,

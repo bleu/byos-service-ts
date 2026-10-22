@@ -17,6 +17,8 @@ const STATUS_MAP: Record<string, number> = {
 	[Kind.Internal]: 500,
 	[Kind.ServiceUnavailable]: 503,
 	[Kind.Eip1271NotAvailable]: 503,
+	[Kind.NoActiveAuction]: 400,
+	[Kind.UnknownOrder]: 400,
 };
 
 /** Default descriptions per kind, as served by the Rust error type. */
@@ -35,6 +37,8 @@ const DEFAULT_DESCRIPTIONS: Record<string, string> = {
 	[Kind.RateLimited]: "Rate limit exceeded",
 	[Kind.Internal]: "Internal error",
 	[Kind.ServiceUnavailable]: "Service temporarily unavailable",
+	[Kind.NoActiveAuction]: "No auction is currently active",
+	[Kind.UnknownOrder]: "Order is not in the current auction",
 };
 
 export class AppError extends Error {

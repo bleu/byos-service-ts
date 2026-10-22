@@ -301,6 +301,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		auctionGasPrice: row.auctionGasPrice ?? null,
 		clearingPrices: (row.clearingPrices as Record<string, string>) ?? null,
 		simulationBuyAmount: row.simulationBuyAmount != null ? BigInt(row.simulationBuyAmount) : null,
+		auctionId: row.auctionId ?? null,
 	};
 }
 
@@ -353,6 +354,7 @@ function proposalValues(proposal: ProposalInput) {
 		trampoline: proposal.trampoline?.toLowerCase() ?? null,
 		settlementTxHash: proposal.settlementTxHash?.toLowerCase() ?? null,
 		penaltyTxHash: proposal.penaltyTxHash?.toLowerCase() ?? null,
+		auctionId: proposal.auctionId ?? null,
 	};
 }
 
@@ -1153,6 +1155,22 @@ export async function rejectOutbidProposals(
 		);
 }
 
+/**
+ * Rejects all "submitted" proposals for an auction when the auction window
+ * closes. Called synchronously before /solve returns, so no proposal in the
+ * auction's submitted state survives to the next auction.
+ */
+export async function abandonAuctionProposals(db: Db, auctionId: number): Promise<void> {
+	await db
+		.update(proposals)
+		.set({
+			status: "rejected" as Status,
+			rejectionReason: "AuctionClosed" as RejectionReason,
+			statusChangedAt: sql`now()`,
+		})
+		.where(and(eq(proposals.auctionId, auctionId), eq(proposals.status, "submitted")));
+}
+
 /** Fetches the buy-token reference price stored at solution-build time for a proposal. */
 export async function buyTokenRefPriceForProposal(
 	db: Db,
@@ -1377,6 +1395,7 @@ export async function fetchInflightDataBySubSolver(
 export async function activeByOrderUids(
 	db: Db,
 	orderUids: string[],
+	auctionId: number,
 ): Promise<Map<string, Proposal[]>> {
 	if (orderUids.length === 0) return new Map();
 
@@ -1384,7 +1403,13 @@ export async function activeByOrderUids(
 	const rows = await db
 		.select()
 		.from(proposals)
-		.where(and(inArray(proposals.orderUid, lowerUids), eq(proposals.status, "active")))
+		.where(
+			and(
+				inArray(proposals.orderUid, lowerUids),
+				eq(proposals.status, "active"),
+				eq(proposals.auctionId, auctionId),
+			),
+		)
 		.orderBy(proposals.id);
 
 	const grouped = new Map<string, Proposal[]>();
@@ -1451,6 +1476,7 @@ export async function solutionProposals(
 			auctionGasPrice: proposals.auctionGasPrice,
 			clearingPrices: proposals.clearingPrices,
 			simulationBuyAmount: proposals.simulationBuyAmount,
+			auctionId: proposals.auctionId,
 			createdAt: proposals.createdAt,
 			statusChangedAt: proposals.statusChangedAt,
 		})

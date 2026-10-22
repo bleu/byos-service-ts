@@ -33,6 +33,7 @@ export const auctionOrderSchema = z.object({
 	validTo: z.number(),
 	kind: z.enum(["sell", "buy"]),
 	owner: z.string(),
+	receiver: addressString.nullish(),
 	partiallyFillable: z.boolean(),
 	preInteractions: z.array(wireInteractionSchema),
 	postInteractions: z.array(wireInteractionSchema),

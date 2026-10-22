@@ -17,6 +17,10 @@ export const Kind = {
 	RateLimited: "RateLimited",
 	ServiceUnavailable: "ServiceUnavailable",
 	Internal: "Internal",
+	/** No auction is active — /solve has not arrived yet or the window has already closed. */
+	NoActiveAuction: "NoActiveAuction",
+	/** The order UID is not present in the current auction. */
+	UnknownOrder: "UnknownOrder",
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];
