@@ -38,9 +38,17 @@ interface AutopilotDto {
 	prices?: Record<string, string>;
 }
 
+interface MinimalLogger {
+	debug(obj: object, msg: string): void;
+	info(obj: object, msg: string): void;
+	warn(obj: object, msg: string): void;
+	warn(msg: string): void;
+}
+
 export interface AwsOrderbookClientOptions {
 	bootstrapAuctionId?: number; // fallback anchor when no recent on-chain settlement
 	maxDiscoveryRequests?: number; // default DEFAULT_MAX_DISCOVERY_REQUESTS
+	logger?: MinimalLogger;
 }
 
 /** Discovers solvable orders from S3-hosted autopilot JSON files.
@@ -51,6 +59,7 @@ export class AwsOrderbookClient {
 	private readonly settlementAddress: Address;
 	private readonly bootstrapAuctionId: number | undefined;
 	private readonly maxDiscoveryRequests: number;
+	private readonly logger: MinimalLogger | undefined;
 
 	private latestPublishedId: number | undefined;
 	private lastPolledAt: number | undefined;
@@ -66,6 +75,7 @@ export class AwsOrderbookClient {
 		this.settlementAddress = settlementAddress;
 		this.bootstrapAuctionId = options.bootstrapAuctionId;
 		this.maxDiscoveryRequests = options.maxDiscoveryRequests ?? DEFAULT_MAX_DISCOVERY_REQUESTS;
+		this.logger = options.logger;
 	}
 
 	async solvableOrders(): Promise<OrderbookOrder[]> {
@@ -73,13 +83,25 @@ export class AwsOrderbookClient {
 		const best = await this.findLatestSnapshot(now);
 		this.lastPolledAt = now;
 
-		if (!best) return [];
+		if (!best) {
+			this.logger?.warn("no auction snapshot found");
+			return [];
+		}
 
 		const nowSecs = Math.floor(now / 1000);
 		const freshOrders = best.auction.orders.filter(
 			(o) =>
 				o.validTo <= nowSecs + FRESH_ORDER_WINDOW_SECS &&
 				o.created >= nowSecs - FRESH_ORDER_WINDOW_SECS,
+		);
+
+		this.logger?.debug(
+			{
+				auctionId: best.id,
+				total: best.auction.orders.length,
+				fresh: freshOrders.length,
+			},
+			"AWS auction snapshot fetched",
 		);
 
 		const auctionDto: AuctionDto = {
@@ -105,9 +127,20 @@ export class AwsOrderbookClient {
 		}
 
 		if (this.lastPolledAt !== undefined && now - this.lastPolledAt > RECOVERY_THRESHOLD_MS) {
+			const gapSecs = Math.round((now - this.lastPolledAt) / 1000);
+			this.logger?.info(
+				{ gapSecs, cursorId: this.latestPublishedId },
+				"gap since last poll exceeded threshold, running recovery search",
+			);
 			const result = await this.searchForward(this.latestPublishedId, this.maxDiscoveryRequests);
 			if (result !== null) {
+				this.logger?.info(
+					{ previousId: this.latestPublishedId, newId: result.id },
+					"recovery search complete",
+				);
 				this.latestPublishedId = result.id;
+			} else {
+				this.logger?.warn({ cursorId: this.latestPublishedId }, "recovery search found no newer auction");
 			}
 			return result;
 		}
@@ -117,11 +150,18 @@ export class AwsOrderbookClient {
 
 	private async bootstrap(): Promise<{ id: number; auction: AutopilotDto } | null> {
 		const anchorId = await this.getBootstrapAnchorId();
-		if (anchorId === null) return null;
+		if (anchorId === null) {
+			this.logger?.warn("bootstrap failed: could not determine anchor auction ID");
+			return null;
+		}
 
+		this.logger?.info({ anchorId }, "bootstrapping AWS cursor from on-chain settlement");
 		const result = await this.searchForward(anchorId, this.maxDiscoveryRequests);
 		if (result !== null) {
+			this.logger?.info({ anchorId, latestId: result.id }, "bootstrap complete");
 			this.latestPublishedId = result.id;
+		} else {
+			this.logger?.warn({ anchorId }, "bootstrap search found no auction at or after anchor");
 		}
 		return result;
 	}
@@ -145,6 +185,9 @@ export class AwsOrderbookClient {
 			ids.map((id) =>
 				this.fetchAuction(id).then((outcome): { id: number; auction: AutopilotDto } | null => {
 					if (outcome.type === "found") return { id, auction: outcome.data };
+					if (outcome.type === "error") {
+						this.logger?.warn({ id }, "error fetching auction snapshot");
+					}
 					return null;
 				}),
 			),
@@ -153,10 +196,14 @@ export class AwsOrderbookClient {
 		const best = results
 			.filter((r): r is { id: number; auction: AutopilotDto } => r !== null)
 			.at(-1);
-		if (!best) return null;
+		if (!best) {
+			this.logger?.debug({ cursor, window: POLLING_WINDOW }, "no new auction found in polling window");
+			return null;
+		}
 
 		const lastSlotPopulated = results[POLLING_WINDOW - 1] !== null;
 		if (lastSlotPopulated) {
+			this.logger?.info({ cursorId: best.id }, "polling window full, running forward search");
 			const wider = await this.searchForward(best.id, this.maxDiscoveryRequests);
 			if (wider !== null) {
 				this.latestPublishedId = wider.id;
