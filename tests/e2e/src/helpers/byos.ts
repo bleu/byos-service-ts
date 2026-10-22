@@ -28,6 +28,9 @@ export interface SubmitProposalParams {
 
 /**
  * Sign and submit a BYOS proposal. Returns the proposal ID.
+ *
+ * Retries on NoActiveAuction / UnknownOrder (transient 400s that occur while
+ * the autopilot has not yet included the order in an active auction cycle).
  */
 export async function signAndSubmitProposal(
 	params: SubmitProposalParams,
@@ -68,19 +71,36 @@ export async function signAndSubmitProposal(
 		signature,
 	};
 
-	const response = await fetch(`${CONFIG.byosPublicUrl}/proposals`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-	});
+	const RETRYABLE = new Set(["NoActiveAuction", "UnknownOrder"]);
+	const deadline = Date.now() + 60_000;
 
-	if (!response.ok) {
+	while (true) {
+		const response = await fetch(`${CONFIG.byosPublicUrl}/proposals`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+
+		if (response.ok) {
+			const { id } = (await response.json()) as { id: number };
+			return { id, response };
+		}
+
+		// Retry transient errors while the order isn't in an active auction yet.
 		const text = await response.text();
+		let kind: string | undefined;
+		try {
+			kind = (JSON.parse(text) as { kind?: string }).kind;
+		} catch {
+			// non-JSON body — fall through to throw
+		}
+		if (response.status === 400 && kind && RETRYABLE.has(kind) && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 1000));
+			continue;
+		}
+
 		throw new Error(`Proposal submission failed (${response.status}): ${text}`);
 	}
-
-	const { id } = (await response.json()) as { id: number };
-	return { id, response };
 }
 
 /**
