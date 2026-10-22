@@ -117,7 +117,7 @@ class BinanceProvider implements RouteProvider {
 /** Polls Binance and submits routes while keeping proposal state within the BYOS request budget. */
 export class BinanceSubsolver {
 	private live = new Map<string, Live>();
-	private hasSynchronized = false;
+	private hasSynchronized = true;
 	private nextSynchronizationAt = 0n;
 	private retryAtMs = 0;
 	private readonly provider: BinanceProvider;
