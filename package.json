@@ -19,7 +19,6 @@
 		"test:onchain": "vitest run --project onchain",
 		"test:e2e": "vitest run --project e2e --no-file-parallelism",
 		"test:watch": "vitest",
-		"test:aws-discovery": "tsx scripts/test-aws-orderbook.ts",
 		"e2e:up": "./scripts/e2e-stack.sh up -d --build --wait",
 		"e2e:seed": "tsx --env-file=.env.e2e scripts/seed-e2e.ts",
 		"e2e:down": "./scripts/e2e-stack.sh down -v",
