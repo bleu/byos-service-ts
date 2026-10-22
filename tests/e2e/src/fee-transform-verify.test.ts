@@ -1,3 +1,5 @@
+import { assertE2ePrerequisites } from "./helpers/prerequisites.js";
+import { createTimingLog } from "./helpers/timing.js";
 /**
  * Fee-transform verification (COW-1240).
  *
@@ -17,40 +19,23 @@
 import { GPv2SettlementAbi, TrampolineAbi } from "@byos/common";
 import { decodeFunctionData, type Hex, pad, parseAbi } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
-import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
-import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { submitProposalUntilTrade, waitForProposalStatus } from "./helpers/byos.js";
+import { publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
 import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
 import { buildSellInteractions } from "./helpers/interactions.js";
 import {
-	approveVaultRelayer,
-	depositToEscrow,
-	ensureTrampolineDeployed,
-	fundToken,
 	type GpvOrder,
 	getAmountsOut,
 	signAndSubmitOrder,
 	tokenBalance,
-	waitForOrderExecution,
 } from "./helpers/orderbook.js";
 
 // --- Setup ---
 
 beforeAll(async () => {
-	await depositToEscrow(
-		subSolverWallet,
-		publicClient,
-		ACCOUNTS.subSolver.address,
-		1_000_000_000_000_000_000n,
-	);
-	await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
-	await fundToken(
-		deployerWallet,
-		publicClient,
-		CONTRACTS.usdc,
-		ACCOUNTS.trader.address,
-		3_000_000_000n,
-	);
-	await approveVaultRelayer(traderWallet, publicClient, CONTRACTS.usdc);
+	const timing = createTimingLog("fee transform setup");
+	await assertE2ePrerequisites();
+	timing("seeded prerequisites verified");
 });
 
 // --- Test ---
@@ -59,6 +44,7 @@ describe("fee transform verification (COW-1240)", () => {
 	it("driver's fee application leaves Trampoline execute identical and only reduces buy amount", {
 		timeout: 180_000,
 	}, async () => {
+		const timing = createTimingLog("fee transform");
 		const sellToken = CONTRACTS.usdc;
 		const buyToken = CONTRACTS.weth;
 		const sellAmount = 1_000_000_000n; // 1000 USDC
@@ -66,6 +52,8 @@ describe("fee transform verification (COW-1240)", () => {
 		// 1. Get Uniswap V2 quote
 		const amounts = await getAmountsOut(publicClient, sellAmount, [sellToken, buyToken]);
 		const quoteBuyAmount = amounts[1];
+		if (quoteBuyAmount === undefined) throw new Error("missing quote");
+		timing("Uniswap quote fetched");
 		const minBuyAmount = (quoteBuyAmount * 95n) / 100n;
 
 		// 2. Place GPv2 order
@@ -85,25 +73,27 @@ describe("fee transform verification (COW-1240)", () => {
 			buyTokenBalance: "erc20",
 		};
 		const orderUid = await signAndSubmitOrder(traderWallet, order);
+		timing(`order accepted: ${orderUid}`);
 
 		// 3. Record trader's WETH balance before settlement (balance accumulates across runs)
 		const wethBefore = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
 
 		// 4. Submit BYOS proposal
 		const interactions = buildSellInteractions(sellToken, buyToken, sellAmount, minBuyAmount);
-		const { id: proposalId } = await signAndSubmitProposal({
-			walletClient: subSolverWallet,
-			orderUid,
-			sellToken,
-			buyToken,
-			sellAmount,
-			minBuyAmount,
-			quoteBuyAmount,
-			interactions,
-		});
-
-		// 4. Wait for settlement
-		await waitForOrderExecution(orderUid, publicClient);
+		const { id: proposalId } = await submitProposalUntilTrade(
+			{
+				walletClient: subSolverWallet,
+				orderUid,
+				sellToken,
+				buyToken,
+				sellAmount,
+				minBuyAmount,
+				quoteBuyAmount,
+				interactions,
+			},
+			90_000,
+			timing,
+		);
 
 		// 5. Get settlement tx hash from BYOS
 		const settled = await waitForProposalStatus(subSolverWallet, proposalId, [
@@ -176,6 +166,7 @@ describe("fee transform verification (COW-1240)", () => {
 
 		// --- INVARIANT 2: sell amount in the settled trade is unchanged ---
 		const trade = trades[0];
+		if (!trade) throw new Error("missing settled trade");
 		// For a SELL order, executedAmount is the sell token amount
 		const tradeSellAmount = trade.executedAmount;
 		expect(tradeSellAmount).toBe(sellAmount);
@@ -193,6 +184,8 @@ describe("fee transform verification (COW-1240)", () => {
 		console.log("Trade buyTokenIndex: ", trade.buyTokenIndex.toString());
 		const driverSellPrice = clearingPrices[Number(trade.sellTokenIndex)];
 		const driverBuyPrice = clearingPrices[Number(trade.buyTokenIndex)];
+		if (driverSellPrice === undefined || driverBuyPrice === undefined)
+			throw new Error("missing clearing price");
 		// GPv2 formula: amount received = executedSell * p_sell / p_buy
 		const creditedBuy = (sellAmount * driverSellPrice) / driverBuyPrice;
 		const protocolFee = quoteBuyAmount - creditedBuy;
@@ -230,6 +223,7 @@ describe("fee transform verification (COW-1240)", () => {
 			"✓ Invariant 3: credited buy reduced by exactly protocol fee; on-chain balance matches",
 		);
 
+		timing("settlement calldata and fee invariants checked");
 		console.log("\n=== Summary ===");
 		console.log(`Sell:         ${sellAmount} USDC atoms (1000 USDC)`);
 		console.log(`Quote buy:    ${quoteBuyAmount} WETH atoms`);

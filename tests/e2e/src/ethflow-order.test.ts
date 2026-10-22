@@ -1,3 +1,5 @@
+import { assertE2ePrerequisites } from "./helpers/prerequisites.js";
+import { createTimingLog } from "./helpers/timing.js";
 /**
  * E2e test for native ETH sell orders placed via CoWSwapEthFlow.
  *
@@ -14,12 +16,11 @@
 import type { Address } from "viem";
 import { encodeFunctionData, pad, parseEther } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
-import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
-import { mineBlock } from "./helpers/chain.js";
-import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { submitProposalUntilTrade, waitForProposalStatus } from "./helpers/byos.js";
+import { publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
 import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
 import { buildSellInteractions } from "./helpers/interactions.js";
-import { depositToEscrow, ensureTrampolineDeployed, getAmountsOut } from "./helpers/orderbook.js";
+import { getAmountsOut } from "./helpers/orderbook.js";
 
 // ------------------------------------------------------------------
 // EthFlow contract
@@ -121,7 +122,6 @@ async function waitForNewOrder(
 			const newOrder = orders.find((o) => !knownUids.has(o.uid));
 			if (newOrder) return newOrder;
 		}
-		await mineBlock(publicClient);
 		await new Promise((r) => setTimeout(r, 1000));
 	}
 	throw new Error(`No new order appeared for ${ownerAddress} within ${maxWaitMs}ms`);
@@ -142,13 +142,9 @@ async function snapshotOrderUids(ownerAddress: Address): Promise<Set<string>> {
 // ------------------------------------------------------------------
 
 beforeAll(async () => {
-	await depositToEscrow(
-		subSolverWallet,
-		publicClient,
-		ACCOUNTS.subSolver.address,
-		2_000_000_000_000_000_000n, // 2 ETH
-	);
-	await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
+	const timing = createTimingLog("EthFlow setup");
+	await assertE2ePrerequisites();
+	timing("seeded prerequisites verified");
 });
 
 // ------------------------------------------------------------------
@@ -159,6 +155,7 @@ describe("EthFlow native ETH sell order (COW-EthFlow)", () => {
 	it("accepts proposal with WETH sellToken for EthFlow order (no TokenMismatch)", {
 		timeout: 120_000,
 	}, async () => {
+		const timing = createTimingLog("EthFlow");
 		const sellAmount = parseEther("0.1"); // 0.1 ETH
 
 		// 1. Quote: how much USDC do we expect for 0.1 WETH via Uniswap
@@ -184,8 +181,11 @@ describe("EthFlow native ETH sell order (COW-EthFlow)", () => {
 			quoteId: -1n,
 		});
 
+		timing("EthFlow createOrder transaction confirmed");
+
 		// 4. Fetch the order from the CoW orderbook to inspect its sellToken
 		const ethflowOrder = await waitForNewOrder(ETHFLOW_ADDRESS, knownUids);
+		timing("EthFlow order indexed");
 
 		// ---------------------------------------------------------------
 		// DIAGNOSTIC: log the actual sellToken so we can see what CoW
@@ -206,27 +206,23 @@ describe("EthFlow native ETH sell order (COW-EthFlow)", () => {
 			minBuyAmount,
 		);
 
-		const { id: proposalId } = await signAndSubmitProposal({
-			walletClient: subSolverWallet,
-			orderUid: ethflowOrder.uid,
-			sellToken: CONTRACTS.weth,
-			buyToken: CONTRACTS.usdc,
-			sellAmount,
-			minBuyAmount,
-			quoteBuyAmount: expectedBuyAmount,
-			interactions,
-		});
-
-		// 6. Wait for BYOS to process the proposal to a non-pending terminal state.
-		// Valid statuses: active (validated), settled (full success), rejected,
-		// simFailed, settleFailed. We accept any terminal outcome so we can
-		// assert on the specific status rather than timing out.
-		const proposal = await waitForProposalStatus(
-			subSolverWallet,
-			proposalId,
-			["active", "settled", "rejected", "simFailed", "settleFailed"],
-			60_000,
+		const { id: proposalId } = await submitProposalUntilTrade(
+			{
+				walletClient: subSolverWallet,
+				orderUid: ethflowOrder.uid,
+				sellToken: CONTRACTS.weth,
+				buyToken: CONTRACTS.usdc,
+				sellAmount,
+				minBuyAmount,
+				quoteBuyAmount: expectedBuyAmount,
+				interactions,
+			},
+			90_000,
+			timing,
 		);
+
+		// Read the settled proposal to verify native-order token normalization.
+		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, ["settled"], 60_000);
 
 		console.log("[ethflow] proposal status:         ", proposal.status);
 		console.log("[ethflow] proposal rejectionReason:", proposal.rejectionReason);
@@ -234,7 +230,8 @@ describe("EthFlow native ETH sell order (COW-EthFlow)", () => {
 		// The bug was: proposal rejected with TokenMismatch because the SDK
 		// transformed sellToken to 0xEeeE... and validTo to userValidTo, causing
 		// a hash mismatch in EthFlow.isValidSignature. After the fix, the proposal
-		// should be active (validated) or settled (full end-to-end success).
-		expect(["active", "settled"]).toContain(proposal.status);
+		// should settle successfully with the normalized WETH sell token.
+		expect(proposal.status).toBe("settled");
+		timing("EthFlow settlement verified");
 	});
 });

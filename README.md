@@ -69,6 +69,7 @@ The service starts two HTTP listeners:
 | `pnpm lint:openapi` | Validate OpenAPI spec |
 | `pnpm dev` | Start Postgres + run byos in watch mode |
 | `pnpm e2e:up` | Start the full e2e stack (Anvil + CoW services + BYOS) |
+| `pnpm e2e:seed` | Restore seeded E2E balances, approvals, collateral, and Trampolines |
 | `pnpm e2e:down` | Tear down the e2e stack and remove volumes |
 | `pnpm test:e2e` | Run end-to-end tests (requires `e2e:up` first) |
 
@@ -91,6 +92,25 @@ To reset the stack (e.g. after contract changes):
 
 ```bash
 pnpm e2e:down && pnpm e2e:up
+```
+
+`e2e:up` automatically seeds the E2E fixtures through real contract calls:
+trader balances, VaultRelayer approvals, 2 ETH of collateral per sub-solver,
+and deployed Trampolines. The shared trader gets 20000 USDC and 3 WETH; scenario
+traders use separate accounts. A dedicated permit trader starts with zero
+allowance so the hook test proves the permit supplies it. The tests perform
+read-only setup checks. Rerun `pnpm e2e:seed` to top up consumed balances without
+restarting the stack; already sufficient balances are left alone.
+
+All full-stack test files emit `[e2e-timing]` milestones for setup, admission,
+settlement, and verification. `durationMs` is time since the previous milestone;
+`elapsedMs` is time since the scope started.
+
+The stress test retains 70 orders by default. BYOS currently bids single-order
+solutions, so these settle over multiple auctions. For a smaller local burst:
+
+```bash
+E2E_STRESS_ORDERS=6 pnpm vitest run --project e2e --no-file-parallelism happy-path-stress
 ```
 
 The e2e stack is defined in [`docker-compose.e2e.yml`](docker-compose.e2e.yml) (BYOS-specific services) layered on top of the [`offline-mode`](https://github.com/bleu/cow-offline-mode) submodule (Anvil chain, orderbook, autopilot, driver). Contract addresses are baked into the Anvil state via [`offline-mode/scripts/byos/deploy-byos-contracts.sh`](offline-mode/scripts/byos/deploy-byos-contracts.sh).

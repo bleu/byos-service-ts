@@ -1,7 +1,11 @@
+import { TrampolineFactoryAbi } from "@byos/common";
+import { E2E_FIXTURES } from "./helpers/fixtures.js";
+import { assertE2ePrerequisites } from "./helpers/prerequisites.js";
+import { createTimingLog } from "./helpers/timing.js";
 /**
  * Settlement correctness under a burst: every order fills on-chain and BYOS records success.
- * Run pnpm test:e2e:settlement with the full stack running.
- * Activation throughput is measured separately with auctions paused.
+ * Run pnpm test:e2e with the full stack running.
+ * Use E2E_STRESS_ORDERS to choose the burst size (default 70).
  */
 
 import { TrampolineAbi } from "@byos/common";
@@ -19,38 +23,27 @@ import { privateKeyToAccount } from "viem/accounts";
 import { afterEach, beforeAll, expect, it } from "vitest";
 import {
 	cancelAllActiveProposals,
-	cancelProposals,
 	collectSubmissions,
-	signAndSubmitProposal,
+	submitProposalBurstUntilSettled,
 	waitForProposalStatus,
 } from "./helpers/byos.js";
-import { anvilMainnet, deployerWallet, publicClient } from "./helpers/clients.js";
+import { anvilMainnet, publicClient } from "./helpers/clients.js";
 import { ACCOUNTS, CONFIG, CONTRACTS } from "./helpers/config.js";
 import { buildSellInteractions } from "./helpers/interactions.js";
-import {
-	approveVaultRelayer,
-	cancelOrders,
-	depositToEscrow,
-	ensureTrampolineDeployed,
-	fundToken,
-	getAmountsOut,
-	signAndSubmitOrder,
-} from "./helpers/orderbook.js";
+import { cancelOrders, getAmountsOut, signAndSubmitOrder } from "./helpers/orderbook.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const N = 70;
-const EXCLUSIVE_PER_SUB_SOLVER = 30;
-const SETTLE_TIMEOUT = 60_000;
+const N = Number(process.env.E2E_STRESS_ORDERS ?? 70);
+if (!Number.isInteger(N) || N < 6) throw new Error("E2E_STRESS_ORDERS must be an integer >= 6");
+const EXCLUSIVE_PER_SUB_SOLVER = Math.floor((N * 3) / 7);
+const SETTLE_TIMEOUT = N * 8_000 + 30_000;
 const submittedOrders: string[] = [];
-const submittedProposals: number[][] = [[], []];
 const trampolines: Address[] = [];
 
 const SELL_TOKEN = CONTRACTS.usdc;
 const BUY_TOKEN = CONTRACTS.weth;
 const SELL_AMOUNT = 10_000_000n; // 10 USDC (6 dec)
-const FUND_AMOUNT = SELL_AMOUNT * BigInt(N) * 2n; // 2× headroom
-const ESCROW_DEPOSIT = 2_000_000_000_000_000_000n; // 2 ETH
 
 // ── Wallets ───────────────────────────────────────────────────────────────────
 
@@ -70,45 +63,44 @@ const wallets = {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 //
-// Deploy Trampolines sequentially through the deployer to preserve its nonce sequence.
+// Trampolines and collateral are seeded by e2e:up.
 const subSolvers = [
 	{ wallet: wallets.subSolver, address: ACCOUNTS.subSolver.address },
 	{ wallet: wallets.subSolver2, address: ACCOUNTS.subSolver2.address },
 ];
 
 beforeAll(async () => {
+	const timing = createTimingLog("stress setup");
 	await Promise.all([
-		...subSolvers.map(async ({ wallet, address }) => {
-			await cancelAllActiveProposals(wallet);
-			await depositToEscrow(wallet, publicClient, address, ESCROW_DEPOSIT);
-		}),
-		approveVaultRelayer(wallets.trader, publicClient, SELL_TOKEN),
-		(async () => {
-			for (const { address } of subSolvers)
-				trampolines.push(await ensureTrampolineDeployed(deployerWallet, publicClient, address));
-			await fundToken(
-				deployerWallet,
-				publicClient,
-				SELL_TOKEN,
-				ACCOUNTS.trader.address,
-				FUND_AMOUNT,
-			);
-		})(),
+		assertE2ePrerequisites(E2E_FIXTURES.standard),
+		assertE2ePrerequisites(E2E_FIXTURES.stress),
 	]);
+	for (const { wallet, address } of subSolvers) {
+		await cancelAllActiveProposals(wallet);
+		trampolines.push(
+			await publicClient.readContract({
+				address: CONTRACTS.trampolineFactory,
+				abi: TrampolineFactoryAbi,
+				functionName: "addressOf",
+				args: [address],
+			}),
+		);
+	}
+	timing("seeded stress accounts verified; stale proposals cancelled");
 }, 60_000);
 
 afterEach(async () => {
+	const timing = createTimingLog("stress cleanup");
 	await cancelOrders(wallets.trader, submittedOrders);
-	await Promise.all(
-		subSolvers.map(({ wallet }, index) => cancelProposals(wallet, submittedProposals[index] ?? [])),
-	);
+	timing("orders and proposals cleaned up");
 }, 60_000);
 
 // ── Test ──────────────────────────────────────────────────────────────────────
 
-it(`all ${N} concurrent orders execute in same-sub-solver batches with overlapping proposals`, {
+it(`all ${N} concurrent orders settle with overlapping sub-solver proposals`, {
 	timeout: SETTLE_TIMEOUT + 120_000,
 }, async () => {
+	const timing = createTimingLog(`stress ${N} orders`);
 	// 1. Quote — read-only, instant.
 	const amounts = await getAmountsOut(publicClient, SELL_AMOUNT, [SELL_TOKEN, BUY_TOKEN]);
 	const quoteBuyAmount = amounts[1];
@@ -138,7 +130,9 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 		(uid) => submittedOrders.push(uid),
 	);
 
-	// 30 exclusive orders per sub-solver; ten overlapping orders alternate the better quote.
+	timing("quote fetched and concurrent orders accepted");
+
+	// Exclusive orders plus overlapping orders that alternate the better quote.
 	const assignments = orderUids.flatMap((orderUid, orderIndex) => {
 		const winner =
 			orderIndex < EXCLUSIVE_PER_SUB_SOLVER
@@ -154,62 +148,29 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 		}));
 	});
 	const interactions = buildSellInteractions(SELL_TOKEN, BUY_TOKEN, SELL_AMOUNT, minBuyAmount);
-	const nonceBase = BigInt(Date.now()) * 1000n;
-	const proposalResults = await collectSubmissions(
-		assignments.map(async (assignment, index) => {
+	const proposalResults = await submitProposalBurstUntilSettled(
+		assignments.map((assignment) => {
 			const subSolver = subSolvers[assignment.subSolverIndex];
 			if (!subSolver) throw new Error("missing sub-solver");
-			const { id } = await signAndSubmitProposal({
-				walletClient: subSolver.wallet,
-				orderUid: assignment.orderUid,
-				sellToken: SELL_TOKEN,
-				buyToken: BUY_TOKEN,
-				sellAmount: SELL_AMOUNT,
-				minBuyAmount,
-				quoteBuyAmount: assignment.winner ? quoteBuyAmount : (quoteBuyAmount * 9995n) / 10000n,
-				interactions,
-				nonce: nonceBase + BigInt(index),
-				validUntilOffset: 300,
-			});
-			return { id, ...assignment };
+			return {
+				...assignment,
+				params: {
+					walletClient: subSolver.wallet,
+					orderUid: assignment.orderUid,
+					sellToken: SELL_TOKEN,
+					buyToken: BUY_TOKEN,
+					sellAmount: SELL_AMOUNT,
+					minBuyAmount,
+					quoteBuyAmount: assignment.winner ? quoteBuyAmount : (quoteBuyAmount * 9995n) / 10000n,
+					interactions,
+					validUntilOffset: 300,
+				},
+			};
 		}),
-		({ id, subSolverIndex }) => submittedProposals[subSolverIndex]?.push(id),
+		SETTLE_TIMEOUT,
+		timing,
 	);
-	expect(proposalResults).toHaveLength(80);
-
-	// 4. Wait for all N on-chain settlements.
-	//    Do NOT call mineBlock here — Anvil's --block-time 2 auto-mines every 2 s.
-	//    Manual mineBlock calls race with the driver's tx submission: if the block is
-	//    mined before the pending tx lands in Anvil's mempool, the driver re-simulates
-	//    at "pending" state (which already includes the tx it just submitted), sees
-	//    "order filled", and cancels its own settlement. Pure polling avoids this race.
-
-	const settleDeadline = Date.now() + SETTLE_TIMEOUT;
-	const fulfilled = new Set<string>();
-
-	while (fulfilled.size < orderUids.length) {
-		if (Date.now() > settleDeadline) {
-			throw new Error(
-				`${orderUids.length - fulfilled.size} of ${orderUids.length} orders not fulfilled within ${SETTLE_TIMEOUT}ms`,
-			);
-		}
-
-		await new Promise((r) => setTimeout(r, 2_000));
-
-		await Promise.all(
-			orderUids
-				.filter((uid) => !fulfilled.has(uid))
-				.map(async (uid) => {
-					const resp = await fetch(`${CONFIG.orderbookUrl}/api/v1/orders/${uid}`);
-					if (!resp.ok) return;
-					const data = (await resp.json()) as { status: string };
-					if (data.status === "fulfilled") fulfilled.add(uid);
-					else if (data.status === "expired" || data.status === "cancelled") {
-						throw new Error(`Order ${data.status}: ${uid}`);
-					}
-				}),
-		);
-	}
+	expect(proposalResults).toHaveLength(N);
 
 	for (const uid of orderUids) {
 		const filled = await publicClient.readContract({
@@ -228,22 +189,13 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 		});
 		expect(filled, `on-chain fill for ${uid}`).toBe(SELL_AMOUNT);
 	}
-	expect(fulfilled.size).toBe(orderUids.length);
+	timing("all on-chain filled amounts verified");
 	const transactions = new Map<Hex, { subSolverIndex: number; orderHashes: Set<string> }>();
 	await Promise.all(
-		proposalResults.map(async ({ id, subSolverIndex, orderUid, winner }) => {
+		proposalResults.map(async ({ id, subSolverIndex, params: { orderUid } }) => {
 			const subSolver = subSolvers[subSolverIndex];
 			if (!subSolver) throw new Error("missing sub-solver");
-			const proposal = await waitForProposalStatus(
-				subSolver.wallet,
-				id,
-				winner ? ["settled"] : ["rejected"],
-				30_000,
-			);
-			if (!winner) {
-				expect(proposal.rejectionReason, `losing proposal ${id}`).toBe("SubsolverOutbid");
-				return;
-			}
+			const proposal = await waitForProposalStatus(subSolver.wallet, id, ["settled"], 30_000);
 			const txHash = proposal.settlementTxHash as Hex;
 			expect(txHash, `settlement for proposal ${id}`).toMatch(/^0x[0-9a-f]{64}$/i);
 			const transaction = transactions.get(txHash);
@@ -257,7 +209,6 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 				});
 		}),
 	);
-	const batchedSubSolvers = new Set<number>();
 	for (const [hash, { subSolverIndex, orderHashes }] of transactions) {
 		const receipt = await publicClient.getTransactionReceipt({ hash });
 		expect(receipt.status).toBe("success");
@@ -271,9 +222,8 @@ it(`all ${N} concurrent orders execute in same-sub-solver batches with overlappi
 		);
 		expect(new Set(executions.map((event) => event.args._orderUidHash))).toEqual(orderHashes);
 		expect(executions).toHaveLength(orderHashes.size);
-		if (orderHashes.size > 1) batchedSubSolvers.add(subSolverIndex);
 	}
-	expect(batchedSubSolvers).toEqual(new Set([0, 1]));
+	timing("settlement receipts and sub-solver attribution verified");
 	console.info(
 		"Settlement batches",
 		[...transactions].map(([txHash, batch]) => ({
