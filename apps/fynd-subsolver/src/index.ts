@@ -62,8 +62,8 @@ async function main() {
 	await waitForFyndStartup(fynd, logger);
 	const orderbook =
 		config.discoveryMethod === "aws"
-			? new AwsOrderbookClient(config.awsUrl, config.orderbookUrl)
-			: new OrderbookClient(config.orderbookUrl);
+			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement)
+			: new OrderbookClient(config.discoveryUrl);
 	const subsolver = new FyndSubsolver(
 		config,
 		orderbook,
