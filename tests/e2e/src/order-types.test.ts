@@ -8,53 +8,36 @@
  * Requires the full e2e stack running (pnpm e2e:up).
  */
 import { pad } from "viem";
-import { beforeAll, describe, expect, it } from "vitest";
-import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
-import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { submitProposalUntilTrade, waitForProposalStatus } from "./helpers/byos.js";
+import { publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
 import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
 import { buildBuyInteractions, buildSellInteractions } from "./helpers/interactions.js";
 import {
-	approveVaultRelayer,
-	depositToEscrow,
-	ensureTrampolineDeployed,
-	fundToken,
+	cancelOrders,
 	type GpvOrder,
 	getAmountsIn,
 	getAmountsOut,
 	signAndSubmitOrder,
 	tokenBalance,
-	waitForTrade,
 } from "./helpers/orderbook.js";
+
+import { assertE2ePrerequisites } from "./helpers/prerequisites.js";
+import { createTimingLog } from "./helpers/timing.js";
 
 // --- Test lifecycle ---
 
-beforeAll(async () => {
-	// Setup sub-solver: escrow deposit + trampoline
-	await depositToEscrow(
-		subSolverWallet,
-		publicClient,
-		ACCOUNTS.subSolver.address,
-		2_000_000_000_000_000_000n, // 2 ETH (covers gas costs for multiple settlements)
-	);
-	await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
+const submittedOrders: string[] = [];
+afterEach(async () => {
+	const timing = createTimingLog("order-types cleanup");
+	await cancelOrders(traderWallet, submittedOrders.splice(0));
+	timing("remaining partial orders cancelled");
+});
 
-	// Fund trader with USDC and WETH, approve VaultRelayer for both
-	await fundToken(
-		deployerWallet,
-		publicClient,
-		CONTRACTS.usdc,
-		ACCOUNTS.trader.address,
-		5_000_000_000n, // 5000 USDC
-	);
-	await fundToken(
-		deployerWallet,
-		publicClient,
-		CONTRACTS.weth,
-		ACCOUNTS.trader.address,
-		3_000_000_000_000_000_000n, // 3 WETH
-	);
-	await approveVaultRelayer(traderWallet, publicClient, CONTRACTS.usdc);
-	await approveVaultRelayer(traderWallet, publicClient, CONTRACTS.weth);
+beforeAll(async () => {
+	const timing = createTimingLog("order-types setup");
+	await assertE2ePrerequisites();
+	timing("seeded prerequisites verified; setup complete");
 });
 
 // No snapshot revert — chain state persists across test files so the
@@ -64,6 +47,7 @@ beforeAll(async () => {
 
 describe("order types", () => {
 	it("partial fill sell order: 50% fill of USDC → WETH", { timeout: 180_000 }, async () => {
+		const timing = createTimingLog("partial sell");
 		const sellToken = CONTRACTS.usdc;
 		const buyToken = CONTRACTS.weth;
 		const orderSellAmount = 2_000_000_000n; // 2000 USDC (full order)
@@ -71,7 +55,9 @@ describe("order types", () => {
 
 		// 1. Get Uniswap quote for the partial amount
 		const amounts = await getAmountsOut(publicClient, proposalSellAmount, [sellToken, buyToken]);
+		timing("Uniswap quote fetched");
 		const expectedBuyAmount = amounts[1];
+		if (expectedBuyAmount === undefined) throw new Error("missing sell quote");
 		const minBuyAmount = (expectedBuyAmount * 95n) / 100n;
 
 		// 2. Compute the order's limit buy amount (scaled to full order)
@@ -95,12 +81,16 @@ describe("order types", () => {
 		};
 
 		const orderUid = await signAndSubmitOrder(traderWallet, order);
+		submittedOrders.push(orderUid);
+		timing(`order signed and accepted: ${orderUid}`);
 		expect(orderUid).toBeDefined();
 
 		// 4. Record USDC balance before settlement
 		const usdcBefore = await tokenBalance(publicClient, sellToken, ACCOUNTS.trader.address);
+		const wethBefore = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
+		timing("pre-settlement balance read");
 
-		// 5. Build interactions for 50% fill and submit proposal
+		// 5. Build interactions for 50% fill and follow auctions until settlement
 		const interactions = buildSellInteractions(
 			sellToken,
 			buyToken,
@@ -108,33 +98,36 @@ describe("order types", () => {
 			minBuyAmount,
 		);
 
-		const { id: proposalId } = await signAndSubmitProposal({
-			walletClient: subSolverWallet,
-			orderUid,
-			sellToken,
-			buyToken,
-			sellAmount: proposalSellAmount,
-			minBuyAmount,
-			quoteBuyAmount: expectedBuyAmount,
-			interactions,
-		});
+		const { id: proposalId } = await submitProposalUntilTrade(
+			{
+				walletClient: subSolverWallet,
+				orderUid,
+				sellToken,
+				buyToken,
+				sellAmount: proposalSellAmount,
+				minBuyAmount,
+				quoteBuyAmount: expectedBuyAmount,
+				interactions,
+			},
+			90_000,
+			timing,
+		);
+		timing("settlement helper returned (including cleanup)");
 		expect(proposalId).toBeGreaterThan(0);
 
-		// 6. Wait for the trade — partially fillable orders are classified as "limit"
-		// by the orderbook, so the autopilot may take more auction cycles to settle them
-		await waitForTrade(orderUid, publicClient, 160_000);
-
-		// 7. Verify trader's USDC decreased by ~1000 (not 2000)
+		// 6. Verify trader's USDC decreased by ~1000 (not 2000)
 		const usdcAfter = await tokenBalance(publicClient, sellToken, ACCOUNTS.trader.address);
 		const spent = usdcBefore - usdcAfter;
 		expect(spent).toBeGreaterThan(0n);
 		expect(spent).toBeLessThanOrEqual(proposalSellAmount);
 
-		// 8. Verify trader received WETH
+		// 7. Verify trader received WETH
 		const wethBalance = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
-		expect(wethBalance).toBeGreaterThan(0n);
+		expect(wethBalance).toBeGreaterThan(wethBefore);
 
-		// 9. Verify proposal reached settled status
+		timing("post-settlement balance checks complete");
+
+		// 8. Verify proposal reached settled status
 		const proposal = await waitForProposalStatus(
 			subSolverWallet,
 			proposalId,
@@ -142,16 +135,20 @@ describe("order types", () => {
 			60_000,
 		);
 		expect(proposal.status).toBe("settled");
+		timing("final proposal status checked; test complete");
 	});
 
 	it("buy order: WETH → USDC settles end-to-end", async () => {
+		const timing = createTimingLog("buy");
 		const sellToken = CONTRACTS.weth;
 		const buyToken = CONTRACTS.usdc;
 		const desiredBuyAmount = 500_000_000n; // 500 USDC
 
 		// 1. Get Uniswap quote: how much WETH needed for 500 USDC
 		const amounts = await getAmountsIn(publicClient, desiredBuyAmount, [sellToken, buyToken]);
+		timing("Uniswap quote fetched");
 		const requiredSellAmount = amounts[0];
+		if (requiredSellAmount === undefined) throw new Error("missing buy quote");
 		// Allow 10% slippage on the sell side (trader's limit)
 		const maxSellAmount = (requiredSellAmount * 110n) / 100n;
 
@@ -173,6 +170,8 @@ describe("order types", () => {
 		};
 
 		const orderUid = await signAndSubmitOrder(traderWallet, order);
+		submittedOrders.push(orderUid);
+		timing(`order signed and accepted: ${orderUid}`);
 		expect(orderUid).toBeDefined();
 
 		// 3. Build buy-order interactions (swapTokensForExactTokens)
@@ -184,30 +183,35 @@ describe("order types", () => {
 		);
 
 		// 4. Submit proposal: for buy orders, minBuyAmount = quoteBuyAmount = order.buyAmount
-		const { id: proposalId } = await signAndSubmitProposal({
-			walletClient: subSolverWallet,
-			orderUid,
-			sellToken,
-			buyToken,
-			sellAmount: requiredSellAmount,
-			minBuyAmount: desiredBuyAmount,
-			quoteBuyAmount: desiredBuyAmount,
-			interactions,
-		});
+		const { id: proposalId } = await submitProposalUntilTrade(
+			{
+				walletClient: subSolverWallet,
+				orderUid,
+				sellToken,
+				buyToken,
+				sellAmount: requiredSellAmount,
+				minBuyAmount: desiredBuyAmount,
+				quoteBuyAmount: desiredBuyAmount,
+				interactions,
+			},
+			90_000,
+			timing,
+		);
+		timing("settlement helper returned (including cleanup)");
 		expect(proposalId).toBeGreaterThan(0);
 
-		// 5. Wait for settlement
-		await waitForTrade(orderUid, publicClient);
-
-		// 6. Verify trader received USDC
+		// 5. Verify trader received USDC
 		const usdcBalance = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
 		expect(usdcBalance).toBeGreaterThan(0n);
 
-		// 7. Verify proposal reached settled status
+		timing("post-settlement balance checks complete");
+
+		// 6. Verify proposal reached settled status
 		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
 			"settled",
 			"settleFailed",
 		]);
 		expect(proposal.status).toBe("settled");
+		timing("final proposal status checked; test complete");
 	});
 });

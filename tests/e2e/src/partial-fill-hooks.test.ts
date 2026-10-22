@@ -8,48 +8,41 @@
  *
  * Requires the full e2e stack running (pnpm e2e:up).
  */
-import { HooksTrampolineAbi } from "@byos/common";
-import { encodeFunctionData } from "viem";
-import { beforeAll, describe, expect, it } from "vitest";
-import { signAndSubmitProposal, waitForProposalStatus } from "./helpers/byos.js";
-import { deployerWallet, publicClient, subSolverWallet, traderWallet } from "./helpers/clients.js";
-import { ACCOUNTS, CONTRACTS } from "./helpers/config.js";
+import { erc20Abi, parseAbi } from "viem";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { submitProposalUntilTrade, waitForProposalStatus } from "./helpers/byos.js";
+import { publicClient, subSolverWallet } from "./helpers/clients.js";
+import { CONTRACTS } from "./helpers/config.js";
+import { E2E_FIXTURES, fixtureWallet, HOOK_TRADER } from "./helpers/fixtures.js";
 import { buildSellInteractions } from "./helpers/interactions.js";
 import {
 	appDataHash,
-	depositToEscrow,
-	ensureTrampolineDeployed,
-	fundToken,
+	cancelOrders,
 	type GpvOrder,
 	getAmountsOut,
 	registerAppData,
 	signAndSubmitOrder,
 	signEip2612Permit,
 	tokenBalance,
-	waitForTrade,
 } from "./helpers/orderbook.js";
+import { assertE2ePrerequisites } from "./helpers/prerequisites.js";
+import { createTimingLog } from "./helpers/timing.js";
+
+const traderWallet = fixtureWallet(HOOK_TRADER);
 
 // --- Test lifecycle ---
 
-beforeAll(async () => {
-	// Setup sub-solver
-	await depositToEscrow(
-		subSolverWallet,
-		publicClient,
-		ACCOUNTS.subSolver.address,
-		2_000_000_000_000_000_000n, // 2 ETH
-	);
-	await ensureTrampolineDeployed(deployerWallet, publicClient, ACCOUNTS.subSolver.address);
+const submittedOrders: string[] = [];
+afterEach(async () => {
+	const timing = createTimingLog("partial-fill-hooks cleanup");
+	await cancelOrders(traderWallet, submittedOrders.splice(0));
+	timing("remaining partial orders cancelled");
+});
 
-	// Fund trader with USDC — intentionally NO approveVaultRelayer call.
-	// The ERC-2612 permit in the pre-hook is the only allowance source.
-	await fundToken(
-		deployerWallet,
-		publicClient,
-		CONTRACTS.usdc,
-		ACCOUNTS.trader.address,
-		5_000_000_000n, // 5000 USDC
-	);
+beforeAll(async () => {
+	const timing = createTimingLog("permit hooks setup");
+	await assertE2ePrerequisites(E2E_FIXTURES.hooks);
+	timing("seeded prerequisites verified");
 });
 
 // No snapshot revert — chain state persists across test files so the
@@ -61,6 +54,7 @@ describe("partial fill with hooks", () => {
 	it("ERC-2612 permit pre-hook and post-hook settle on a partial fill", {
 		timeout: 220_000,
 	}, async () => {
+		const timing = createTimingLog("permit hooks");
 		const sellToken = CONTRACTS.usdc;
 		const buyToken = CONTRACTS.weth;
 		const orderSellAmount = 2_000_000_000n; // 2000 USDC (full order, partially fillable)
@@ -80,39 +74,15 @@ describe("partial fill with hooks", () => {
 			permitDeadline,
 		);
 
-		// 2. Build HooksTrampoline pre-hook: execute the permit via the trampoline.
-		//    The trampoline enforces msg.sender == settlement before running hooks.
-		const preHookCalldata = encodeFunctionData({
-			abi: HooksTrampolineAbi,
-			functionName: "execute",
-			args: [
-				[
-					{
-						target: sellToken,
-						callData: permitCalldata,
-						gasLimit: 100_000n,
-					},
-				],
-			],
+		// The orderbook wraps raw hooks in HooksTrampoline.execute itself.
+		// Wrapping here too would call execute from the trampoline rather than
+		// settlement, causing the permit hook to revert.
+		const permitNonceBefore = await publicClient.readContract({
+			address: sellToken,
+			abi: parseAbi(["function nonces(address) view returns (uint256)"]),
+			functionName: "nonces",
+			args: [HOOK_TRADER.address],
 		});
-
-		// 3. Build HooksTrampoline post-hook: benign WETH.symbol() call.
-		//    Exercises the post-interaction slot without side effects.
-		const postHookCalldata = encodeFunctionData({
-			abi: HooksTrampolineAbi,
-			functionName: "execute",
-			args: [
-				[
-					{
-						target: buyToken,
-						// symbol() selector: keccak256("symbol()")[0:4] = 0x95d89b41
-						callData: "0x95d89b41",
-						gasLimit: 50_000n,
-					},
-				],
-			],
-		});
-
 		// 4. Build and register the CoW appData JSON with hooks.
 		//    The pre-hook runs before sell token transfer (grants allowance).
 		//    The post-hook runs after settlement (benign read).
@@ -121,15 +91,15 @@ describe("partial fill with hooks", () => {
 				hooks: {
 					pre: [
 						{
-							target: CONTRACTS.hooksTrampoline,
-							callData: preHookCalldata,
+							target: sellToken,
+							callData: permitCalldata,
 							gasLimit: "200000",
 						},
 					],
 					post: [
 						{
-							target: CONTRACTS.hooksTrampoline,
-							callData: postHookCalldata,
+							target: buyToken,
+							callData: "0x95d89b41",
 							gasLimit: "100000",
 						},
 					],
@@ -144,6 +114,8 @@ describe("partial fill with hooks", () => {
 			sellToken,
 			buyToken,
 		]);
+		if (expectedBuyAmount === undefined) throw new Error("missing quote");
+		timing("permit signed, hooks registered, quote fetched");
 		const minBuyAmount = (expectedBuyAmount * 95n) / 100n;
 		// Scale the limit price from the fill amount to the full order amount
 		const orderBuyAmount = (minBuyAmount * orderSellAmount) / fillAmount;
@@ -154,7 +126,7 @@ describe("partial fill with hooks", () => {
 		const order: GpvOrder = {
 			sellToken,
 			buyToken,
-			receiver: ACCOUNTS.trader.address,
+			receiver: HOOK_TRADER.address,
 			sellAmount: orderSellAmount,
 			buyAmount: orderBuyAmount,
 			validTo,
@@ -166,39 +138,42 @@ describe("partial fill with hooks", () => {
 			buyTokenBalance: "erc20",
 		};
 		const orderUid = await signAndSubmitOrder(traderWallet, order);
+		submittedOrders.push(orderUid);
+		timing(`order accepted: ${orderUid}`);
 		expect(orderUid).toBeDefined();
 
-		const usdcBefore = await tokenBalance(publicClient, sellToken, ACCOUNTS.trader.address);
+		const usdcBefore = await tokenBalance(publicClient, sellToken, HOOK_TRADER.address);
+		const wethBefore = await tokenBalance(publicClient, buyToken, HOOK_TRADER.address);
 
 		// 7. Submit proposal for the partial fill.
 		//    The solve response will include the permit pre-hook in preInteractions
 		//    and the post-hook in postInteractions.
 		const interactions = buildSellInteractions(sellToken, buyToken, fillAmount, minBuyAmount);
-		const { id: proposalId } = await signAndSubmitProposal({
-			walletClient: subSolverWallet,
-			orderUid,
-			sellToken,
-			buyToken,
-			sellAmount: fillAmount,
-			minBuyAmount,
-			quoteBuyAmount: expectedBuyAmount,
-			interactions,
-		});
+		const { id: proposalId } = await submitProposalUntilTrade(
+			{
+				walletClient: subSolverWallet,
+				orderUid,
+				sellToken,
+				buyToken,
+				sellAmount: fillAmount,
+				minBuyAmount,
+				quoteBuyAmount: expectedBuyAmount,
+				interactions,
+			},
+			90_000,
+			timing,
+		);
 		expect(proposalId).toBeGreaterThan(0);
 
-		// Partially fillable orders are classified as "limit" by the autopilot
-		// and may take more auction cycles — use an extended timeout.
-		await waitForTrade(orderUid, publicClient, 160_000);
-
 		// 8. Verify partial fill: trader spent ≤ fillAmount USDC
-		const usdcAfter = await tokenBalance(publicClient, sellToken, ACCOUNTS.trader.address);
+		const usdcAfter = await tokenBalance(publicClient, sellToken, HOOK_TRADER.address);
 		const spent = usdcBefore - usdcAfter;
 		expect(spent).toBeGreaterThan(0n);
 		expect(spent).toBeLessThanOrEqual(fillAmount);
 
 		// 9. Verify trader received WETH
-		const wethBalance = await tokenBalance(publicClient, buyToken, ACCOUNTS.trader.address);
-		expect(wethBalance).toBeGreaterThan(0n);
+		const wethBalance = await tokenBalance(publicClient, buyToken, HOOK_TRADER.address);
+		expect(wethBalance).toBeGreaterThan(wethBefore);
 
 		// 10. Verify proposal reached settled status
 		const proposal = await waitForProposalStatus(subSolverWallet, proposalId, [
@@ -206,5 +181,20 @@ describe("partial fill with hooks", () => {
 			"settleFailed",
 		]);
 		expect(proposal.status).toBe("settled");
+		const nonceAfter = await publicClient.readContract({
+			address: sellToken,
+			abi: parseAbi(["function nonces(address) view returns (uint256)"]),
+			functionName: "nonces",
+			args: [HOOK_TRADER.address],
+		});
+		expect(nonceAfter).toBe(permitNonceBefore + 1n);
+		const allowanceAfter = await publicClient.readContract({
+			address: sellToken,
+			abi: erc20Abi,
+			functionName: "allowance",
+			args: [HOOK_TRADER.address, CONTRACTS.vaultRelayer],
+		});
+		expect(allowanceAfter).toBe(0n);
+		timing("partial fill and hook settlement verified");
 	});
 });

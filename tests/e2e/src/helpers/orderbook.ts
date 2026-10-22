@@ -10,6 +10,11 @@ import { encodeFunctionData, erc20Abi, keccak256, maxUint256 } from "viem";
 import { mineBlock } from "./chain.js";
 import { CONFIG, CONTRACTS, GPV2_DOMAIN, GPV2_ORDER_TYPES } from "./config.js";
 
+function requireAccount(wallet: WalletClient) {
+	if (!wallet.account) throw new Error("wallet client has no account");
+	return wallet.account;
+}
+
 export interface GpvOrder {
 	sellToken: Address;
 	buyToken: Address;
@@ -34,6 +39,7 @@ export async function signAndSubmitOrder(
 	order: GpvOrder,
 ): Promise<string> {
 	const signature = await walletClient.signTypedData({
+		account: requireAccount(walletClient),
 		domain: GPV2_DOMAIN,
 		types: GPV2_ORDER_TYPES,
 		primaryType: "Order",
@@ -115,6 +121,8 @@ export async function approveVaultRelayer(
 	token: Address,
 ): Promise<void> {
 	const hash = await walletClient.sendTransaction({
+		account: requireAccount(walletClient),
+		chain: walletClient.chain,
 		to: token,
 		data: encodeFunctionData({
 			abi: erc20Abi,
@@ -134,6 +142,8 @@ export async function fundToken(
 	amount: bigint,
 ): Promise<void> {
 	const hash = await fromWallet.sendTransaction({
+		account: requireAccount(fromWallet),
+		chain: fromWallet.chain,
 		to: token,
 		data: encodeFunctionData({
 			abi: erc20Abi,
@@ -165,6 +175,8 @@ export async function ensureTrampolineDeployed(
 	subSolver: Address,
 ): Promise<Address> {
 	const hash = await walletClient.sendTransaction({
+		account: requireAccount(walletClient),
+		chain: walletClient.chain,
 		to: CONTRACTS.trampolineFactory,
 		data: encodeFunctionData({
 			abi: [
@@ -207,6 +219,8 @@ export async function depositToEscrow(
 	amount: bigint,
 ): Promise<void> {
 	const hash = await walletClient.sendTransaction({
+		account: requireAccount(walletClient),
+		chain: walletClient.chain,
 		to: CONTRACTS.escrow,
 		data: encodeFunctionData({
 			abi: [
@@ -337,6 +351,7 @@ export async function signEip2612Permit(
 	});
 
 	const signature = await walletClient.signTypedData({
+		account: requireAccount(walletClient),
 		domain: {
 			name: tokenName,
 			version: tokenVersion,

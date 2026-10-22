@@ -122,13 +122,24 @@ if [ "${1:-}" = "up" ]; then
   # --wait treats any exited container (even exit 0) as a failure, so we
   # tolerate that specific case.
   compose "$@" "${E2E_SERVICES[@]}" || {
-    if docker inspect "${PROJECT_NAME}-db-migrations-1" --format='{{.State.ExitCode}}' 2>/dev/null | grep -q '^0$'; then
-      exit 0
+    if ! docker inspect "${PROJECT_NAME}-db-migrations-1" --format='{{.State.ExitCode}}' 2>/dev/null | grep -q '^0$'; then
+      exit 1
     fi
-    exit 1
+    # Continue to initialization only if every long-running service is ready.
+    # A completed migration must not hide another service's startup failure.
+    for service in "${E2E_SERVICES[@]}"; do
+      [ "$service" = "db-migrations" ] && continue
+      state=$(docker inspect "${PROJECT_NAME}-${service}-1" \
+        --format='{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}')
+      if [ "$state" != "running healthy" ]; then
+        echo "Error: $service is not ready ($state)"
+        exit 1
+      fi
+    done
   }
 
   init_ethflow_allowance
+  (cd "$REPO_ROOT" && pnpm e2e:seed)
 else
   compose "$@"
 fi

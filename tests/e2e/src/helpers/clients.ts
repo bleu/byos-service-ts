@@ -4,7 +4,15 @@
  * All test files talk to the same Anvil chain instance (--no-file-parallelism),
  * so a single set of clients is safe to share across imports.
  */
-import { createPublicClient, createWalletClient, defineChain, http } from "viem";
+import {
+	createPublicClient,
+	createWalletClient,
+	defineChain,
+	http,
+	type PublicClient,
+	type Transport,
+	type WalletClient,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ACCOUNTS, CONFIG } from "./config.js";
 
@@ -15,27 +23,34 @@ export const anvilMainnet = defineChain({
 	rpcUrls: { default: { http: [CONFIG.rpcUrl] } },
 });
 
-export const publicClient = createPublicClient({
+export const publicClient: PublicClient<Transport, typeof anvilMainnet> = createPublicClient({
+	pollingInterval: 100,
 	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
+type TestWallet = WalletClient<
+	Transport,
+	typeof anvilMainnet,
+	ReturnType<typeof privateKeyToAccount>
+>;
+
 /** Anvil account #5 — the trader submitting GPv2 orders. */
-export const traderWallet = createWalletClient({
+export const traderWallet: TestWallet = createWalletClient({
 	account: privateKeyToAccount(ACCOUNTS.trader.key),
 	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
 /** Anvil account #4 — the sub-solver submitting proposals. */
-export const subSolverWallet = createWalletClient({
+export const subSolverWallet: TestWallet = createWalletClient({
 	account: privateKeyToAccount(ACCOUNTS.subSolver.key),
 	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
 });
 
 /** Anvil account #0 — the deployer, pre-funded with token balances. */
-export const deployerWallet = createWalletClient({
+export const deployerWallet: TestWallet = createWalletClient({
 	account: privateKeyToAccount(ACCOUNTS.baselineSolver.key),
 	chain: anvilMainnet,
 	transport: http(CONFIG.rpcUrl),
