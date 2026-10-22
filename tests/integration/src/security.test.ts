@@ -1,3 +1,4 @@
+import { acceptAll } from "@byos/byos/src/domain/validator.js";
 import { createInternalApp } from "@byos/byos/src/infra/api/index.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb } from "@byos/byos/test/setup.js";
@@ -60,7 +61,7 @@ describe("bearer token enforcement", () => {
 				chainId: CHAIN_ID,
 				trampolineFactory: TRAMPOLINE_FACTORY,
 				maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
-				gasPriceRef: { value: 10_000_000_000n },
+				validator: acceptAll,
 				solveBearerToken: "test-secret",
 				onAuditEvent: (e: unknown) => auditEvents.push(e),
 			};
@@ -114,7 +115,7 @@ describe("bearer token enforcement", () => {
 				chainId: CHAIN_ID,
 				trampolineFactory: TRAMPOLINE_FACTORY,
 				maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
-				gasPriceRef: { value: 10_000_000_000n },
+				validator: acceptAll,
 				solveBearerToken: "driver-secret",
 				onAuditEvent: () => {},
 			});
@@ -159,7 +160,7 @@ describe("bearer token enforcement", () => {
 				chainId: CHAIN_ID,
 				trampolineFactory: TRAMPOLINE_FACTORY,
 				maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
-				gasPriceRef: { value: 10_000_000_000n },
+				validator: acceptAll,
 				solveBearerToken: "driver-secret",
 				onAuditEvent: () => {},
 			});

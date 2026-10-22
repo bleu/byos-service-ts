@@ -19,7 +19,9 @@ import { createRedisBalanceStore } from "./infra/balance-cache.js";
 import { createEscrowBalanceReader, EscrowValidator } from "./infra/blockchain/escrow.js";
 import { EscrowOperator } from "./infra/blockchain/operator.js";
 import { ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
+
 export type { ProposalValidator };
+
 import { enqueueAuditEvent } from "./infra/jobs/audit-worker.js";
 import type { BalanceRefreshConfig } from "./infra/jobs/balance-refresh.js";
 import {

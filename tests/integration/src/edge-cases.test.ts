@@ -110,7 +110,7 @@ describe("cancel edge cases", () => {
 			validUntil: now + 300n, // exactly at the 300s cap
 			nonce: 302n,
 		});
-		expect(response.status).toBe(202);
+		expect(response.status).toBe(200);
 	});
 });
 

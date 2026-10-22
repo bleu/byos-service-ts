@@ -2,7 +2,7 @@ import type { Auction, SolveResponse } from "@byos/byos/src/infra/api/types.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import type { Address } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, signAndSubmitProposal, type TestApp } from "./helpers.js";
+import { createTestApp, seedProposal, type TestApp } from "./helpers.js";
 
 let app: TestApp;
 
@@ -82,28 +82,20 @@ async function seedSimulatedProposal(
 	orderUid: `0x${string}`,
 	buyAmount = 2n * 10n ** 18n,
 ): Promise<number> {
-	const { response } = await signAndSubmitProposal(app.publicApp, {
+	return seedProposal(app.ctx.db, {
 		orderUid,
 		nonce,
 		sellAmount: 10n ** 18n,
 		minBuyAmount: buyAmount,
 		quoteBuyAmount: buyAmount,
+		sellToken: SELL_TOKEN as Address,
+		buyToken: BUY_TOKEN as Address,
+		gasUsed: 150_000n,
+		trampoline: "0x0000000000000000000000000000000000001234" as Address,
+		simulationBuyAmount: buyAmount,
+		status: "active",
+		auctionId: 1,
 	});
-	const { id } = await response.json();
-
-	await store.resolveVerdict(app.ctx.db, id, {
-		kind: "accept",
-		simulation: {
-			gasUsed: 150_000n,
-			trampoline: "0x0000000000000000000000000000000000001234" as Address,
-			sellToken: SELL_TOKEN as Address,
-			buyToken: BUY_TOKEN as Address,
-			simulationBuyAmount: buyAmount,
-			sellTokenRefPrice: 10n ** 18n,
-		},
-	});
-
-	return id;
 }
 
 describe("/solve", () => {
@@ -153,13 +145,13 @@ describe("/solve", () => {
 
 	it("publishes gas price from auction", async () => {
 		await postSolve(emptyAuction({ effectiveGasPrice: "42000000000" }));
-		expect(app.gasPriceRef.value).toBe(42_000_000_000n);
+		expect(await store.latestAuctionGasPrice(app.ctx.db, 0n)).toBe(42_000_000_000n);
 	});
 
 	it("a gas price that does not fit u64 leaves the previous one in place", async () => {
 		await postSolve(emptyAuction({ effectiveGasPrice: "42000000000" }));
 		await postSolve(emptyAuction({ effectiveGasPrice: (2n ** 64n).toString() }));
-		expect(app.gasPriceRef.value).toBe(42_000_000_000n);
+		expect(await store.latestAuctionGasPrice(app.ctx.db, 0n)).toBe(42_000_000_000n);
 	});
 
 	it("returns solution for active proposal with gasUsed", async () => {

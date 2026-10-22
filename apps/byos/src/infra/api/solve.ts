@@ -2,7 +2,6 @@ import { encodeTrampolineInteractions } from "@byos/common";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
-import type { ProposalValidator } from "../blockchain/validator.js";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import { perProposalCL } from "../../domain/collateral.js";
@@ -15,6 +14,7 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
+import type { ValidateProposal } from "../../domain/validator.js";
 import {
 	auctionOrderToRecord,
 	clearAuctionStateIfOwned,
@@ -35,7 +35,7 @@ export interface SolveConfig {
 	minCollateral?: bigint;
 	collateralRatioBps?: bigint;
 	db: Db;
-	validator: ProposalValidator;
+	validator: ValidateProposal;
 	onAuditEvent: (event: AuditEvent) => void;
 	selectorBufferMs?: number;
 	logger?: Logger;
@@ -112,7 +112,7 @@ export function createSolveRoute(config: SolveConfig) {
 			const prices = new Map(
 				Object.entries(auction.tokens)
 					.filter(([, t]) => t.referencePrice != null)
-					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice!)]),
+					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice ?? 0)]),
 			);
 			const gasPrice = publishGasPrice ? auctionGasPrice : 0n;
 			await setAuctionState({ auctionId, orders, prices, gasPrice });
@@ -120,9 +120,9 @@ export function createSolveRoute(config: SolveConfig) {
 			// Reset the escrow balance cache for the new auction, then prefetch
 			// balances for all known sub-solvers in one multicall so the competition
 			// window starts with a warm cache.
-			config.validator.beginAuction();
+			config.validator.beginAuction?.();
 			const subSolvers = await store.allSubSolvers(config.db);
-			void config.validator.prefetchBalances(subSolvers);
+			void config.validator.prefetchBalances?.(subSolvers);
 		}
 
 		// Keep the competition window open, then leave time to select and respond.

@@ -63,7 +63,7 @@ describe("per-signer rate limiting", () => {
 		app = await createTestApp({ rateLimiter: limiter });
 
 		const first = await signAndSubmitProposal(app.publicApp, { orderUid: uid(1), nonce: 1n });
-		expect(first.response.status).toBe(202);
+		expect(first.response.status).toBe(200);
 
 		const second = await signAndSubmitProposal(app.publicApp, { orderUid: uid(2), nonce: 2n });
 		expect(second.response.status).toBe(429);
@@ -112,7 +112,7 @@ describe("per-signer rate limiting", () => {
 
 		const { response } = await signAndSubmitProposal(app.publicApp, { orderUid: uid(5) });
 
-		expect(response.status).toBe(202);
+		expect(response.status).toBe(200);
 		expect(limiter.limitsFor("signer")).toEqual([120]);
 	});
 

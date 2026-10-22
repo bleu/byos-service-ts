@@ -95,7 +95,11 @@ function createSolveApp() {
 		"/",
 		createSolveRoute({
 			db: ctx.db,
-			validator: { validate: async () => null, beginAuction: () => {}, prefetchBalances: async () => {} } as any,
+			validator: {
+				validate: async () => null,
+				beginAuction: () => {},
+				prefetchBalances: async () => {},
+			} as any,
 			onAuditEvent: () => {},
 		}),
 	);

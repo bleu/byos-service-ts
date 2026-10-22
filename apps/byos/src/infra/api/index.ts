@@ -8,7 +8,7 @@ import type { BalanceCache } from "../../domain/balance-cache.js";
 import { unknownBalances } from "../../domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "../../domain/rate-limit.js";
 import { allowAll } from "../../domain/rate-limit.js";
-import type { ProposalValidator } from "../blockchain/validator.js";
+import type { ValidateProposal } from "../../domain/validator.js";
 import { errorHandler } from "./error.js";
 import { bearerAuth, ipRateLimit } from "./middleware.js";
 import { createNotifyRoute } from "./notify.js";
@@ -31,7 +31,7 @@ export interface AppContext {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	collateralRatioBps?: bigint;
-	validator: ProposalValidator;
+	validator: ValidateProposal;
 	solveBearerToken?: string;
 	selectorBufferMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;

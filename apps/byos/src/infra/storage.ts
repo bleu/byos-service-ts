@@ -1160,9 +1160,7 @@ export async function rejectOutbidProposals(
  * a proposal. Used to prefetch escrow balances at /solve arrival.
  */
 export async function allSubSolvers(db: Db): Promise<Address[]> {
-	const rows = await db
-		.selectDistinct({ subSolver: proposals.subSolver })
-		.from(proposals);
+	const rows = await db.selectDistinct({ subSolver: proposals.subSolver }).from(proposals);
 	return rows.map((r) => r.subSolver as Address);
 }
 

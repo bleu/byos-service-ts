@@ -184,6 +184,8 @@ describe("/solve economics", () => {
 			"a cut that breaches the signed buy amount must not be bid",
 		).toHaveLength(0);
 
+		// The proposal was abandoned at auction close; re-seed it for the second call.
+		await seedActive(u, 1_000_000_000n, 2_000_000_000n);
 		const fat = await postSolve(auctionJson(u, "sell", "1000000000", "1990000000", "1"));
 		expect(
 			fat.solutions,
@@ -210,6 +212,8 @@ describe("/solve economics", () => {
 
 		// Same two proposals, a limit with room for both cuts: the fat route
 		// wins on score, which is what makes the run above a fallback.
+		// The fat proposal was abandoned at auction close; re-seed it.
+		await seedActive(u, 1_000_000_000n, 2_000_000_000n, 500_000n);
 		const loose = await postSolve(auctionJson(u, "sell", "1000000000", "1990000000", "1"));
 		expect(loose.solutions[0]?.trades[0]?.fee).toBe("530000");
 	});
