@@ -91,7 +91,7 @@ services:
         start_period: 10s
 
     fynd:
-      image: ghcr.io/propeller-heads/fynd:0.109.1
+      image: ghcr.io/propeller-heads/fynd:0.114.4
       restart: unless-stopped
       command: ["serve", "--chain", "bsc", "--tycho-url", "tycho-fynd-bsc.propellerheads.xyz"]
       environment:
