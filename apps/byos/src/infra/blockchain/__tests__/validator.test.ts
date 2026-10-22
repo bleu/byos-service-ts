@@ -16,7 +16,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { OrderRecord } from "../../../domain/order.js";
 import type { Proposal } from "../../../domain/proposal.js";
-import { clearAuctionState, setAuctionState } from "../../auction-state.js";
+import { _clearLocalAuctionState, _setLocalAuctionState } from "../../auction-state.js";
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
 
@@ -154,23 +154,20 @@ function submittedProposal(): Proposal {
  * Populates the in-memory auction state used by SimulationValidator.
  * By default prices all tokens at 1:1 (ETHER). Pass `prices` to override.
  */
-function setupAuctionState(
-	record: OrderRecord,
-	prices?: Map<string, bigint>,
-): void {
+function setupAuctionState(record: OrderRecord, prices?: Map<string, bigint>): void {
 	const proposal = submittedProposal();
 	const defaultPrices = new Map([
 		[proposal.sellToken.toLowerCase(), ETHER],
 		[proposal.buyToken.toLowerCase(), ETHER],
 	]);
-	setAuctionState({
+	_setLocalAuctionState({
 		auctionId: 1,
 		orders: new Map([[proposal.orderUid.toLowerCase(), record]]),
 		prices: prices ?? defaultPrices,
 	});
 }
 
-afterEach(() => clearAuctionState());
+afterEach(() => _clearLocalAuctionState());
 
 // ── Fake RPC node ────────────────────────────────────────────────────────────
 
@@ -414,10 +411,8 @@ describe("SimulationValidator", () => {
 		});
 		// Only sell token is priced — buy token intentionally absent.
 		// Buy orders skip the slippage check so buy token price is never needed.
-		const prices = new Map([
-			[order.sellToken.toLowerCase(), ETHER],
-		]);
-		setAuctionState({
+		const prices = new Map([[order.sellToken.toLowerCase(), ETHER]]);
+		_setLocalAuctionState({
 			auctionId: 1,
 			orders: new Map([[proposal.orderUid.toLowerCase(), sampleRecord(order)]]),
 			prices,
@@ -461,7 +456,7 @@ describe("SimulationValidator", () => {
 
 	it("unknown order rejects proposal", async () => {
 		// Auction state exists but the order UID is not in it.
-		setAuctionState({
+		_setLocalAuctionState({
 			auctionId: 1,
 			orders: new Map(), // empty — no matching UID
 			prices: new Map([
@@ -477,7 +472,7 @@ describe("SimulationValidator", () => {
 	it("no active auction defers judgment", async () => {
 		// When there is no auction state the validator defers so the proposal
 		// can be cleaned up by abandonAuctionProposals once the window closes.
-		clearAuctionState();
+		_clearLocalAuctionState();
 
 		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
 		expect(verdict).toBeNull();
@@ -676,7 +671,7 @@ describe("SimulationValidator gap check", () => {
 		const proposal = submittedProposal(); // minBuyAmount == quoteBuyAmount == 990_000
 		const node = fakeNode({ delta: proposal.quoteBuyAmount });
 		// Only sell token is priced — buy orders don't need buy token price for slippage.
-		setAuctionState({
+		_setLocalAuctionState({
 			auctionId: 1,
 			orders: new Map([[proposal.orderUid.toLowerCase(), buyOrder]]),
 			prices: new Map([[buyOrder.order.sellToken.toLowerCase(), ETHER]]),

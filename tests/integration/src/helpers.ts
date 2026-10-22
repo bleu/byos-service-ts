@@ -1,15 +1,20 @@
 import { parseConfig, rateLimitsFromConfig } from "@byos/byos/src/config.js";
 import type { AuditEvent } from "@byos/byos/src/domain/audit.js";
 import type { BalanceCache } from "@byos/byos/src/domain/balance-cache.js";
+import type { OrderRecord } from "@byos/byos/src/domain/order.js";
 import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import type { RateLimiter } from "@byos/byos/src/domain/rate-limit.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
+import { _setLocalAuctionState } from "@byos/byos/src/infra/auction-state.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
 import type { ContractInteraction, Eip1271Verifier } from "@byos/common";
 import {
 	byosDomain,
 	computeInteractionsHash,
+	OrderKind,
+	OrderStatus,
+	SigningScheme,
 	signCancellation,
 	signProposal,
 	signReadAuth,
@@ -19,6 +24,45 @@ import type { Address, Hex } from "viem";
 import { createWalletClient, http, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+
+// --- Auction state stub ---
+
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
+
+/** Minimal OrderRecord: the route only checks whether the UID is present in the map. */
+const STUB_ORDER_RECORD: OrderRecord = {
+	order: {
+		sellToken: ZERO_ADDR,
+		buyToken: ZERO_ADDR,
+		receiver: ZERO_ADDR,
+		sellAmount: 0n,
+		buyAmount: 0n,
+		validTo: 4294967295,
+		appData: `0x${"00".repeat(32)}` as `0x${string}`,
+		feeAmount: 0n,
+		kind: OrderKind.SELL,
+		partiallyFillable: false,
+		signingScheme: SigningScheme.Eip712,
+		signature: "0x",
+	},
+	preInteractions: [],
+	postInteractions: [],
+	erc20Balances: true,
+	status: OrderStatus.OPEN,
+};
+
+/**
+ * Registers a single order UID in the module-level auction state so that
+ * POST /proposals passes the "order must be in the active auction" check.
+ * Uses auctionId=1 to match the test auction fixtures that all use id:"1".
+ */
+export function stubAuctionForOrder(orderUid: string, auctionId = 1): void {
+	_setLocalAuctionState({
+		auctionId,
+		orders: new Map([[orderUid.toLowerCase(), STUB_ORDER_RECORD]]),
+		prices: new Map(),
+	});
+}
 
 // --- Fixtures ---
 
@@ -183,6 +227,9 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 		signature,
 	};
 
+	// Ensure POST /proposals finds this order in the active auction.
+	stubAuctionForOrder(orderUid);
+
 	const response = await app.request("/proposals", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -228,6 +275,8 @@ export async function seedProposal(
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
+		simulationBuyAmount: null,
+		auctionId: 1,
 		...overrides,
 		orderUid,
 	} as Omit<Proposal, "id">;

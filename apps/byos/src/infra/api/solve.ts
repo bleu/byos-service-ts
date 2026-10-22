@@ -14,12 +14,8 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
+import { auctionOrderToRecord, clearAuctionState, setAuctionState } from "../auction-state.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
-import {
-	auctionOrderToRecord,
-	clearAuctionState,
-	setAuctionState,
-} from "../auction-state.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import {
@@ -97,12 +93,12 @@ export function createSolveRoute(config: SolveConfig) {
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
 		if (orderUids.length === 0) {
-			clearAuctionState();
+			await clearAuctionState();
 			return c.json({ solutions: [] } satisfies SolveResponse);
 		}
 
-		// Populate in-memory auction state so the validator can read order data
-		// and native prices without calling the orderbook.
+		// Publish auction state so all replicas can validate proposals and
+		// answer submissions with the correct order context.
 		if (auctionId !== null) {
 			const orders = new Map(
 				auction.orders.map((o) => [o.uid.toLowerCase(), auctionOrderToRecord(o)]),
@@ -112,7 +108,7 @@ export function createSolveRoute(config: SolveConfig) {
 					.filter(([, t]) => t.referencePrice != null)
 					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice!)]),
 			);
-			setAuctionState({ auctionId, orders, prices });
+			await setAuctionState({ auctionId, orders, prices });
 		}
 
 		// Keep the competition window open, then leave time to select and respond.
@@ -122,9 +118,7 @@ export function createSolveRoute(config: SolveConfig) {
 		if (waitMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-		const grouped = auctionId !== null
-			? await store.activeByOrderUids(config.db, orderUids, auctionId)
-			: new Map();
+		const grouped = await store.activeByOrderUids(config.db, orderUids, auctionId);
 
 		const solutions: Solution[] = [];
 		let solutionId = 1;
@@ -261,7 +255,7 @@ export function createSolveRoute(config: SolveConfig) {
 		if (auctionId !== null) {
 			await store.abandonAuctionProposals(config.db, auctionId);
 		}
-		clearAuctionState();
+		await clearAuctionState();
 
 		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);

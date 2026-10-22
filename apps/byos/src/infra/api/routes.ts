@@ -14,8 +14,8 @@ import type { Address } from "viem";
 import _openapiYaml from "../../../openapi.yml";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import * as store from "../storage.js";
 import { getAuctionState } from "../auction-state.js";
+import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
 	proposalToGetResponse,
@@ -181,7 +181,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		// Proposals are per-auction. Reject if no auction is active or if the
 		// order is not in the current auction.
-		const auctionState = getAuctionState();
+		const auctionState = await getAuctionState();
 		if (!auctionState) {
 			throw new AppError(Kind.NoActiveAuction);
 		}

@@ -8,11 +8,11 @@ import {
 } from "viem";
 import { afterEach, expect, it } from "vitest";
 import { createTestDb } from "../../../../test/setup.js";
-import { clearAuctionState, setAuctionState } from "../../auction-state.js";
+import { _clearLocalAuctionState, _setLocalAuctionState } from "../../auction-state.js";
 import * as store from "../../storage.js";
 import { SimulationValidator } from "../validator.js";
 
-afterEach(() => clearAuctionState());
+afterEach(() => _clearLocalAuctionState());
 
 const ADDRESS = "0x1111111111111111111111111111111111111111" as Address;
 const BUY = "0x2222222222222222222222222222222222222222" as Address;
@@ -98,8 +98,14 @@ it("admits pending siblings independently using persisted active exposure", asyn
 		} as unknown as PublicClient;
 		// Populate auction state so SimulationValidator can resolve order and prices.
 		// insert(1n) and insert(2n) produce these UIDs (nonce.toString(16).padStart(2,"0").repeat(56)).
-		const record = { order, preInteractions: [], postInteractions: [], erc20Balances: true, status: OrderStatus.OPEN };
-		setAuctionState({
+		const record = {
+			order,
+			preInteractions: [],
+			postInteractions: [],
+			erc20Balances: true,
+			status: OrderStatus.OPEN,
+		};
+		_setLocalAuctionState({
 			auctionId: 1,
 			orders: new Map([
 				[`0x${"01".repeat(56)}`, record],

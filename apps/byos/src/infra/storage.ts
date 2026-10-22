@@ -1395,7 +1395,8 @@ export async function fetchInflightDataBySubSolver(
 export async function activeByOrderUids(
 	db: Db,
 	orderUids: string[],
-	auctionId: number,
+	/** Filters by auction id. Pass null for quote auctions (no id) — returns any active proposal. */
+	auctionId: number | null,
 ): Promise<Map<string, Proposal[]>> {
 	if (orderUids.length === 0) return new Map();
 
@@ -1407,7 +1408,7 @@ export async function activeByOrderUids(
 			and(
 				inArray(proposals.orderUid, lowerUids),
 				eq(proposals.status, "active"),
-				eq(proposals.auctionId, auctionId),
+				auctionId !== null ? eq(proposals.auctionId, auctionId) : undefined,
 			),
 		)
 		.orderBy(proposals.id);

@@ -12,6 +12,10 @@ import type { AuditEvent } from "./domain/audit.js";
 import type { BalanceCache } from "./domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "./domain/rate-limit.js";
 import type { ValidateProposal } from "./domain/validator.js";
+import {
+	configureAuctionStateBackend,
+	createRedisAuctionStateBackend,
+} from "./infra/auction-state.js";
 import { createRedisBalanceStore } from "./infra/balance-cache.js";
 import {
 	createEscrowBalanceReader,
@@ -118,6 +122,10 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 			"MIN_COLLATERAL is 0 — escrow floor gate disabled and the balance refresh set is bounded by size alone",
 		);
 	}
+
+	// Auction state backend — shared across replicas via Redis so any replica
+	// can answer proposal submissions and run validation during the /solve window.
+	configureAuctionStateBackend(createRedisAuctionStateBackend(redis));
 
 	// Rate limiting. The limiter always runs — it needs Redis, which is
 	// already a hard dependency, not RPC.

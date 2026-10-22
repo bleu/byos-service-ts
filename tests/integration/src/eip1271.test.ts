@@ -2,7 +2,14 @@ import { computeInteractionsHash, hashProposalData, Kind } from "@byos/common";
 import type { Address, Hex } from "viem";
 import { keccak256 } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createTestApp, DOMAIN, SIGN_FN, SIGNER_ACCOUNT, type TestApp } from "./helpers.js";
+import {
+	createTestApp,
+	DOMAIN,
+	SIGN_FN,
+	SIGNER_ACCOUNT,
+	stubAuctionForOrder,
+	type TestApp,
+} from "./helpers.js";
 
 // A nonce counter isolated to this file so parallel test files don't collide.
 let nonce = 10_000n;
@@ -73,6 +80,7 @@ describe("EIP-1271 contract sub-solvers", () => {
 
 		beforeAll(async () => {
 			app = await createTestApp();
+			stubAuctionForOrder(ORDER_UID);
 		});
 
 		afterAll(async () => {
@@ -136,6 +144,7 @@ describe("EIP-1271 contract sub-solvers", () => {
 		beforeAll(async () => {
 			mockVerifier = vi.fn();
 			app = await createTestApp({ verifyEip1271: mockVerifier });
+			stubAuctionForOrder(ORDER_UID);
 		});
 
 		afterAll(async () => {

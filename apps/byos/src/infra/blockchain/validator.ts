@@ -252,7 +252,7 @@ export class SimulationValidator implements ValidateProposal {
 		// Order data and prices come from the in-memory auction state populated
 		// by /solve. If the state is absent the auction already closed and this
 		// proposal will be cleaned up by abandonAuctionProposals — defer.
-		const auctionState = getAuctionState();
+		const auctionState = await getAuctionState();
 		if (!auctionState) return null;
 
 		const record = auctionState.orders.get(proposal.orderUid.toLowerCase());
