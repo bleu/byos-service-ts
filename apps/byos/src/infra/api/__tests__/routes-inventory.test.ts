@@ -31,8 +31,8 @@ function publicRoutes(): string[] {
 		chainId: 1,
 		trampolineFactory: "0x00000000000000000000000000000000000fac70" as Address,
 		maxProposalLifetimeSecs: 300,
-		gasPriceRef: { value: 0n },
 		cL: 10n ** 16n,
+		validator: { validate: async () => null } as any,
 		onAuditEvent: () => {},
 		rateLimits: {
 			windowSecs: 60,
@@ -40,7 +40,6 @@ function publicRoutes(): string[] {
 			tier: { rateUnitWei: 10n ** 17n, ratePerUnit: 300, minRate: 120, maxRate: 3000 },
 			floorWei: 10n ** 16n,
 		},
-		enqueueValidation: async () => {},
 	};
 
 	const app = createPublicApp(ctx);

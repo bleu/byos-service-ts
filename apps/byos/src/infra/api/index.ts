@@ -8,7 +8,7 @@ import type { BalanceCache } from "../../domain/balance-cache.js";
 import { unknownBalances } from "../../domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "../../domain/rate-limit.js";
 import { allowAll } from "../../domain/rate-limit.js";
-import type { GasPriceRef } from "../blockchain/escrow.js";
+import type { ProposalValidator } from "../blockchain/validator.js";
 import { errorHandler } from "./error.js";
 import { bearerAuth, ipRateLimit } from "./middleware.js";
 import { createNotifyRoute } from "./notify.js";
@@ -31,7 +31,7 @@ export interface AppContext {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	collateralRatioBps?: bigint;
-	gasPriceRef: GasPriceRef;
+	validator: ProposalValidator;
 	solveBearerToken?: string;
 	selectorBufferMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;
@@ -54,7 +54,6 @@ export interface PublicAppContext extends AppContext {
 	 * `floorWei` inside a single PR. Build one with `rateLimitsFromConfig`.
 	 */
 	rateLimits: RateLimitSettings;
-	enqueueValidation: (proposalId: number) => Promise<void>;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
 	/**
@@ -93,7 +92,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		maxProposalLifetimeSecs: ctx.maxProposalLifetimeSecs,
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
-		enqueueValidation: ctx.enqueueValidation,
+		validator: ctx.validator,
 		subsolverWhitelist: ctx.subsolverWhitelist,
 		verifyEip1271: ctx.verifyEip1271,
 		logger: ctx.logger,
@@ -122,7 +121,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		minCollateral: ctx.cL,
 		collateralRatioBps: ctx.collateralRatioBps,
 		db: ctx.db,
-		gasPriceRef: ctx.gasPriceRef,
+		validator: ctx.validator,
 		onAuditEvent: ctx.onAuditEvent,
 		selectorBufferMs: ctx.selectorBufferMs,
 		logger: ctx.logger,

@@ -107,7 +107,6 @@ describe("buildContext", () => {
 			ORDERBOOK_URL: "http://127.0.0.1:1", // unused — no orderbook calls in buildContext
 			ESCROW_ADDRESS: FAKE_ESCROW,
 			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
-			DEFAULT_GAS_PRICE: "1000000000",
 			OPERATOR_PRIVATE_KEY: TEST_OPERATOR_KEY,
 		});
 
@@ -115,8 +114,7 @@ describe("buildContext", () => {
 	});
 
 	afterAll(async () => {
-		await ctx.queues.validation.close();
-		await ctx.queues.validateProposal.close();
+		await ctx.queues.staleExecuting.close();
 		await ctx.queues.retention.close();
 		await ctx.queues.penalty.close();
 		await ctx.queues.audit.close();
@@ -181,7 +179,6 @@ describe("buildContext — MIN_COLLATERAL override", () => {
 			ORDERBOOK_URL: "http://127.0.0.1:1",
 			ESCROW_ADDRESS: FAKE_ESCROW,
 			SETTLEMENT_ADDRESS: FAKE_SETTLEMENT,
-			DEFAULT_GAS_PRICE: "1000000000",
 			OPERATOR_PRIVATE_KEY: TEST_OPERATOR_KEY,
 			MIN_COLLATERAL: "999000000000000000", // 0.999 ETH — distinct from any chain default
 		});
@@ -190,8 +187,7 @@ describe("buildContext — MIN_COLLATERAL override", () => {
 	});
 
 	afterAll(async () => {
-		await ctx.queues.validation.close();
-		await ctx.queues.validateProposal.close();
+		await ctx.queues.staleExecuting.close();
 		await ctx.queues.retention.close();
 		await ctx.queues.penalty.close();
 		await ctx.queues.audit.close();

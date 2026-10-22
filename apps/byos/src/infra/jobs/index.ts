@@ -28,8 +28,7 @@ export function createRequestPathRedisConnection(url: string): Redis {
 const REQUEST_PATH_COMMAND_TIMEOUT_MS = 250;
 
 export interface Queues {
-	validation: Queue;
-	validateProposal: Queue;
+	staleExecuting: Queue;
 	retention: Queue;
 	penalty: Queue;
 	audit: Queue;
@@ -47,12 +46,7 @@ export const OPERATIONAL_JOB_RETENTION = {
 
 export function createQueues(connection: Redis, prefix = PREFIX): Queues {
 	return {
-		validation: new Queue("validation", {
-			connection,
-			prefix,
-			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
-		}),
-		validateProposal: new Queue("validate-proposal", {
+		staleExecuting: new Queue("stale-executing", {
 			connection,
 			prefix,
 			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
@@ -86,7 +80,7 @@ export function createQueues(connection: Redis, prefix = PREFIX): Queues {
 }
 
 export interface JobSchedulerConfig {
-	validationIntervalSecs: number;
+	staleExecutingIntervalSecs: number;
 	retentionSweepIntervalSecs: number;
 	penaltyIntervalSecs: number;
 	balanceRefreshIntervalSecs: number;
@@ -96,8 +90,8 @@ export async function setupJobSchedulers(
 	queues: Queues,
 	config: JobSchedulerConfig,
 ): Promise<void> {
-	await queues.validation.upsertJobScheduler("validation-tick", {
-		every: config.validationIntervalSecs * 1000,
+	await queues.staleExecuting.upsertJobScheduler("stale-executing-sweep", {
+		every: config.staleExecutingIntervalSecs * 1000,
 	});
 
 	await queues.retention.upsertJobScheduler("retention-sweep", {

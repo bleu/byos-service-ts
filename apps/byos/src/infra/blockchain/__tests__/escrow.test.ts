@@ -71,7 +71,7 @@ describe("EscrowValidator — floor gate (single proposal)", () => {
 		expect(verdict).toEqual({ kind: "reject", reason: "InsufficientEscrow" });
 	});
 
-	it("balance reads are cached within a tick and cleared by beginTick", async () => {
+	it("balance reads are cached within a tick and cleared by beginAuction", async () => {
 		const client = clientWithBalance(MIN_COLLATERAL);
 		const validator = validatorWith(client);
 
@@ -79,16 +79,16 @@ describe("EscrowValidator — floor gate (single proposal)", () => {
 		await validator.validate(submittedProposal());
 		expect(client.calls()).toBe(1);
 
-		validator.beginTick();
+		validator.beginAuction();
 		await validator.validate(submittedProposal());
 		expect(client.calls()).toBe(2);
 	});
 
-	it("beginTick on a fresh validator is a noop", async () => {
+	it("beginAuction on a fresh validator is a noop", async () => {
 		const client = clientWithBalance(MIN_COLLATERAL);
 		const validator = validatorWith(client);
 
-		validator.beginTick();
+		validator.beginAuction();
 
 		const verdict = await validator.validate(submittedProposal());
 		expect(verdict).toEqual({ kind: "accept", simulation: null });
@@ -116,7 +116,7 @@ describe("shared authoritative balance snapshot", () => {
 		]);
 		await validator.validate(submittedProposal());
 		expect(client.calls()).toBe(1);
-		validator.beginTick();
+		validator.beginAuction();
 		await validator.getBalance(submittedProposal().subSolver);
 		expect(client.calls()).toBe(2);
 	});

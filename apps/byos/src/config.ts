@@ -79,15 +79,13 @@ export const configSchema = z.object({
 	 * pairs on Ethereum, 1 bps on BNB). One value per deployment — set via
 	 * COLLATERAL_RATIO_BPS. Default: 4 bps. */
 	COLLATERAL_RATIO_BPS: z.coerce.number().int().min(0).default(4),
-	DEFAULT_GAS_PRICE: z.string(),
-
 	// Concurrency
-	/** Max concurrent queued proposal validations (BullMQ worker). Also
-	 * used as the DB connection pool size so the pool is never the bottleneck. */
+	/** DB connection pool size. */
 	VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(50),
 
 	// Timing
-	VALIDATION_INTERVAL_SECS: z.coerce.number().default(12),
+	STALE_EXECUTING_INTERVAL_SECS: z.coerce.number().default(300),
+	PENALTY_INTERVAL_SECS: z.coerce.number().default(12),
 	DROPPED_RETENTION_SECS: z.coerce.number().default(3600),
 	RETENTION_SWEEP_INTERVAL_SECS: z.coerce.number().default(300),
 	LOG_REDACTION_AFTER_SECS: z.coerce.number().default(604800), // 7 days

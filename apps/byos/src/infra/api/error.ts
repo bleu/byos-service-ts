@@ -19,6 +19,7 @@ const STATUS_MAP: Record<string, number> = {
 	[Kind.Eip1271NotAvailable]: 503,
 	[Kind.NoActiveAuction]: 400,
 	[Kind.UnknownOrder]: 400,
+	[Kind.ProposalRejected]: 400,
 };
 
 /** Default descriptions per kind, as served by the Rust error type. */
@@ -39,6 +40,7 @@ const DEFAULT_DESCRIPTIONS: Record<string, string> = {
 	[Kind.ServiceUnavailable]: "Service temporarily unavailable",
 	[Kind.NoActiveAuction]: "No auction is currently active",
 	[Kind.UnknownOrder]: "Order is not in the current auction",
+	[Kind.ProposalRejected]: "Proposal rejected by validator",
 };
 
 export class AppError extends Error {

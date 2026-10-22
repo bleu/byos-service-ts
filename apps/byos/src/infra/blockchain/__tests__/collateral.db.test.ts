@@ -8,7 +8,11 @@ import {
 } from "viem";
 import { afterEach, expect, it } from "vitest";
 import { createTestDb } from "../../../../test/setup.js";
-import { _clearLocalAuctionState, _setLocalAuctionState } from "../../auction-state.js";
+import {
+	_clearLocalAuctionState,
+	_patchLocalGasPrice,
+	_setLocalAuctionState,
+} from "../../auction-state.js";
 import * as store from "../../storage.js";
 import { SimulationValidator } from "../validator.js";
 
@@ -115,13 +119,15 @@ it("admits pending siblings independently using persisted active exposure", asyn
 				[ADDRESS.toLowerCase(), SCALE],
 				[BUY.toLowerCase(), SCALE],
 			]),
+			gasPrice: 0n,
 		});
+		// Gas price used for exposure calculation lives in auction state.
+		_patchLocalGasPrice(1n);
 		const validator = new SimulationValidator(
 			client,
 			ADDRESS,
 			ADDRESS,
 			ADDRESS,
-			{ value: 1n },
 			0n,
 			100n,
 			SCALE,

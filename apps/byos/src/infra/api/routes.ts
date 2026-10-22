@@ -14,6 +14,7 @@ import type { Address } from "viem";
 import _openapiYaml from "../../../openapi.yml";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import type { ValidateProposal } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
 import * as store from "../storage.js";
 import {
@@ -31,7 +32,7 @@ export interface RoutesConfig {
 	maxProposalLifetimeSecs: number;
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
-	enqueueValidation: (proposalId: number) => Promise<void>;
+	validator: ValidateProposal;
 	signerLimit: SignerLimitConfig;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
@@ -238,19 +239,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		config.onAuditEvent(inserted.auditEvent);
-		// Enqueue promptly; the tick retries dispatch if Redis is unavailable.
-		void (async () => {
-			log?.info({ id: inserted.id }, "validation dispatch started");
-			try {
-				await config.enqueueValidation(inserted.id);
-				log?.info({ id: inserted.id }, "validation queued");
-			} catch (err) {
-				log?.warn({ err, id: inserted.id }, "validation dispatch failed");
-			}
-		})();
+		const insertedProposal = inserted.proposal;
 		log?.info(
 			{
-				id: inserted.id,
+				id: insertedProposal.id,
 				subSolver,
 				orderUid: parsed.orderUid,
 				sellToken: parsed.sellToken,
@@ -258,7 +250,33 @@ export function createPublicRoutes(config: RoutesConfig) {
 			},
 			"proposal received",
 		);
-		return c.json({ id: inserted.id }, 202);
+
+		// Validate inline. A null verdict means no auction state is available —
+		// return 202 so the sub-solver can retry when an auction opens.
+		const verdict = await config.validator.validate(insertedProposal);
+		if (!verdict) {
+			return c.json({ id: insertedProposal.id }, 202);
+		}
+
+		const resolution = await store.resolveVerdict(config.db, insertedProposal.id, verdict);
+		if ("kind" in resolution) {
+			// Concurrent write won the race (cancellation, duplicate, etc.) — treat
+			// as accepted; the sub-solver can query GET /proposal/:id for the outcome.
+			log?.debug({ id: insertedProposal.id, error: resolution }, "verdict transition lost");
+			return c.json({ id: insertedProposal.id }, 202);
+		}
+
+		if (resolution.auditEvent) config.onAuditEvent(resolution.auditEvent);
+		for (const event of resolution.replacementAuditEvents) config.onAuditEvent(event);
+
+		if (resolution.status === "rejected" || resolution.status === "simFailed") {
+			const reason = verdict.kind === "reject" ? verdict.reason : "SimFailed";
+			log?.info({ id: insertedProposal.id, subSolver, reason }, "proposal rejected at validation");
+			throw new AppError(Kind.ProposalRejected, reason);
+		}
+
+		log?.info({ id: insertedProposal.id, subSolver, orderUid: parsed.orderUid }, "proposal active");
+		return c.json({ id: insertedProposal.id, status: resolution.status }, 200);
 	});
 
 	// GET /proposal/:id — Get single proposal (owner-scoped)

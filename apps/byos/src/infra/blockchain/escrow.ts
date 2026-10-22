@@ -4,13 +4,10 @@ import type { Address, PublicClient } from "viem";
 import type { Proposal } from "../../domain/proposal.js";
 import type { ValidateProposal, Verdict } from "../../domain/validator.js";
 
-export interface GasPriceRef {
-	value: bigint;
-}
-
 export class EscrowValidator implements ValidateProposal {
 	private cache = new Map<string, Promise<bigint>>();
 	private readonly readBalance: (subSolver: Address) => Promise<bigint>;
+	private readonly readBalanceBatch: (addresses: Address[]) => Promise<(bigint | null)[]>;
 
 	constructor(
 		publicClient: PublicClient,
@@ -18,13 +15,36 @@ export class EscrowValidator implements ValidateProposal {
 		private readonly minCollateral: bigint,
 	) {
 		this.readBalance = createBatchedEscrowBalanceReader(publicClient, escrowAddress);
+		this.readBalanceBatch = createEscrowBalanceReader(publicClient, escrowAddress);
 	}
 
-	beginTick(): void {
+	/** Clear the balance cache at the start of each auction window. */
+	beginAuction(): void {
 		this.cache.clear();
 	}
 
-	/** One authoritative read per address per tick, including concurrent callers. */
+	/**
+	 * Prefetch balances for all known sub-solvers in one multicall.
+	 * Called at /solve arrival to warm the cache before the competition window.
+	 * New sub-solvers not in this set fall through to a fresh single call.
+	 */
+	async prefetchBalances(addresses: Address[]): Promise<void> {
+		if (addresses.length === 0) return;
+		try {
+			const balances = await this.readBalanceBatch(addresses);
+			for (const [i, address] of addresses.entries()) {
+				const balance = balances[i];
+				if (balance != null) {
+					const key = address.toLowerCase();
+					this.cache.set(key, Promise.resolve(balance));
+				}
+			}
+		} catch {
+			// Best-effort: a failed prefetch just means cache misses on first proposal
+		}
+	}
+
+	/** One authoritative read per address per auction, including concurrent callers. */
 	async getBalance(subSolver: Address): Promise<bigint> {
 		const key = subSolver.toLowerCase();
 		const cached = this.cache.get(key);
@@ -50,7 +70,7 @@ export class EscrowValidator implements ValidateProposal {
 
 			return { kind: "accept", simulation: null };
 		} catch {
-			// All RPC errors → defer (retry next tick)
+			// All RPC errors → defer
 			return null;
 		}
 	}

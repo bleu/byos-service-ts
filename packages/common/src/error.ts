@@ -21,6 +21,8 @@ export const Kind = {
 	NoActiveAuction: "NoActiveAuction",
 	/** The order UID is not present in the current auction. */
 	UnknownOrder: "UnknownOrder",
+	/** Proposal failed validation (escrow floor, simulation, or profitability). */
+	ProposalRejected: "ProposalRejected",
 } as const;
 
 export type Kind = (typeof Kind)[keyof typeof Kind];

@@ -1,4 +1,4 @@
-export { EscrowValidator, type GasPriceRef } from "./escrow.js";
+export { EscrowValidator } from "./escrow.js";
 export { EscrowOperator } from "./operator.js";
 export {
 	buildSimulation,
