@@ -6,8 +6,8 @@ const SETTLEMENT_EVENT = parseAbiItem("event Settlement(address indexed solver)"
 
 const FRESH_ORDER_WINDOW_SECS = 4000;
 // How far back to search for the last Settlement event. BSC produces ~3s blocks,
-// so 5000 blocks ≈ 4 hours. Increase if your RPC provider supports wider ranges.
-const SETTLEMENT_LOOKBACK_BLOCKS = 5_000n;
+// so 1000 blocks ≈ 50 minutes.
+const SETTLEMENT_LOOKBACK_BLOCKS = 1_000n;
 
 interface AutopilotOrderDto {
 	uid: string;
