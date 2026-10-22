@@ -140,7 +140,10 @@ export class AwsOrderbookClient {
 				);
 				this.latestPublishedId = result.id;
 			} else {
-				this.logger?.warn({ cursorId: this.latestPublishedId }, "recovery search found no newer auction");
+				this.logger?.warn(
+					{ cursorId: this.latestPublishedId },
+					"recovery search found no newer auction",
+				);
 			}
 			return result;
 		}
@@ -197,7 +200,10 @@ export class AwsOrderbookClient {
 			.filter((r): r is { id: number; auction: AutopilotDto } => r !== null)
 			.at(-1);
 		if (!best) {
-			this.logger?.debug({ cursor, window: POLLING_WINDOW }, "no new auction found in polling window");
+			this.logger?.debug(
+				{ cursor, window: POLLING_WINDOW },
+				"no new auction found in polling window",
+			);
 			return null;
 		}
 
