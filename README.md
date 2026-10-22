@@ -60,6 +60,7 @@ The service starts two HTTP listeners:
 |---------|-------------|
 | `pnpm build` | Build all packages and apps |
 | `pnpm test` | Run unit tests |
+| `pnpm test:aws-discovery [env-path]` | Discover live AWS orders using `env/bnb-prod/.env.binance-subsolver` by default |
 | `pnpm test:db` | Run database-tier tests only |
 | `pnpm test:integration` | Run API integration tests (in-process, no Docker) |
 | `pnpm lint` | Check code with Biome |
@@ -72,6 +73,14 @@ The service starts two HTTP listeners:
 | `pnpm e2e:seed` | Restore seeded E2E balances, approvals, collateral, and Trampolines |
 | `pnpm e2e:down` | Tear down the e2e stack and remove volumes |
 | `pnpm test:e2e` | Run end-to-end tests (requires `e2e:up` first) |
+
+`pnpm test:aws-discovery` runs three polls through the source AWS discovery client,
+including on-chain bootstrap and cursor advancement. It needs RPC/S3 access and
+an environment file with `DISCOVERY_METHOD=aws`, `DISCOVERY_URL`, `RPC_URL`, and
+`GPV2_SETTLEMENT`. It requires no BYOS service and makes no Binance requests or
+proposal submissions. The command exits with an error if all three polls return
+zero orders. For AWS, `DISCOVERY_URL` must include the snapshot directory such as
+`/prod/bnb/autopilot`.
 
 ### End-to-end tests
 
