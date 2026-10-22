@@ -132,6 +132,8 @@ export const RejectionReason = {
 	NativePriceUnavailable: "NativePriceUnavailable",
 	/** @deprecated Historical response value; pending siblings no longer block validation. */
 	InflightPriceUnavailable: "InflightPriceUnavailable",
+	/** Proposal arrived after the auction window closed or with an order not in the current auction. */
+	AuctionClosed: "AuctionClosed",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -151,6 +153,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.SimulationMissingExecutedEvent,
 	RejectionReason.NativePriceUnavailable,
 	RejectionReason.InflightPriceUnavailable,
+	RejectionReason.AuctionClosed,
 ]);
 
 // --- Proposal Metadata ---

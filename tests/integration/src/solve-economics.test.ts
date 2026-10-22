@@ -91,6 +91,7 @@ async function seedActive(
 	sellAmount: bigint,
 	minBuyAmount: bigint,
 	gasUsed = 200_000n,
+	auctionId = 1,
 ): Promise<number> {
 	return seedProposal(app.ctx.db, {
 		orderUid,
@@ -99,6 +100,7 @@ async function seedActive(
 		quoteBuyAmount: minBuyAmount,
 		gasUsed,
 		trampoline: "0x0000000000000000000000000000000000000000" as Address,
+		auctionId,
 	});
 }
 
@@ -283,7 +285,7 @@ describe("/solve economics", () => {
 
 	it("records the winning solution for notify attribution", async () => {
 		const u = uid("ef");
-		await seedActive(u, 1_000n, 950n);
+		await seedActive(u, 1_000n, 950n, 200_000n, 77);
 
 		const auction = auctionJson(u, "sell", "1000", "900", "0");
 		auction.id = "77";

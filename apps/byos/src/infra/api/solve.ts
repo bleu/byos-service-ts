@@ -14,6 +14,11 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
+import {
+	auctionOrderToRecord,
+	clearAuctionStateIfOwned,
+	setAuctionState,
+} from "../auction-state.js";
 import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
@@ -92,7 +97,24 @@ export function createSolveRoute(config: SolveConfig) {
 		// Collect order UIDs from auction
 		const orderUids = auction.orders.map((o) => o.uid);
 		if (orderUids.length === 0) {
+			// No orders → return immediately. We haven't set any state for this
+			// auction, so there's nothing to clear. A real auction's state (if any)
+			// must not be wiped by an unrelated empty request.
 			return c.json({ solutions: [] } satisfies SolveResponse);
+		}
+
+		// Publish auction state so all replicas can validate proposals and
+		// answer submissions with the correct order context.
+		if (auctionId !== null) {
+			const orders = new Map(
+				auction.orders.map((o) => [o.uid.toLowerCase(), auctionOrderToRecord(o)]),
+			);
+			const prices = new Map(
+				Object.entries(auction.tokens)
+					.filter(([, t]) => t.referencePrice != null)
+					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice!)]),
+			);
+			await setAuctionState({ auctionId, orders, prices });
 		}
 
 		// Keep the competition window open, then leave time to select and respond.
@@ -102,7 +124,7 @@ export function createSolveRoute(config: SolveConfig) {
 		if (waitMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-		const grouped = await store.activeByOrderUids(config.db, orderUids);
+		const grouped = await store.activeByOrderUids(config.db, orderUids, auctionId);
 
 		const solutions: Solution[] = [];
 		let solutionId = 1;
@@ -233,6 +255,18 @@ export function createSolveRoute(config: SolveConfig) {
 			);
 			solutionId++;
 		}
+		// Close the auction window: reject all still-submitted proposals so they
+		// cannot bleed into the next auction. Awaited so state is consistent before
+		// the response reaches the driver.
+		if (auctionId !== null) {
+			await store.abandonAuctionProposals(config.db, auctionId);
+			// Only clear the shared state if it still belongs to this auction.
+			// An overlapping request for a newer auction may have already replaced
+			// it; clearing unconditionally would wipe that newer state.
+			// Quote requests (auctionId === null) never set state, so they never clear it.
+			await clearAuctionStateIfOwned(auctionId);
+		}
+
 		log?.info({ proposalCount: solutions.length }, "solution sent");
 		return c.json({ solutions } satisfies SolveResponse);
 	});

@@ -9,6 +9,7 @@ export type ProposalStatus = Status;
 export interface Proposal {
 	id: number;
 	subSolver: Address;
+	auctionId: number | null;
 	orderUid: string;
 	orderUidHash: Hex;
 	sellAmount: bigint;
