@@ -135,6 +135,7 @@ export function createSolveRoute(config: SolveConfig) {
 		const grouped = await store.activeByOrderUids(config.db, orderUids, auctionId);
 
 		const solutions: Solution[] = [];
+		const selectedProposalIds: number[] = [];
 		let solutionId = 1;
 
 		for (const order of auction.orders) {
@@ -251,6 +252,7 @@ export function createSolveRoute(config: SolveConfig) {
 			}
 
 			solutions.push(solution);
+			selectedProposalIds.push(bestProposal.id);
 			log?.info(
 				{
 					proposalId: bestProposal.id,
@@ -267,7 +269,7 @@ export function createSolveRoute(config: SolveConfig) {
 		// cannot bleed into the next auction. Awaited so state is consistent before
 		// the response reaches the driver.
 		if (auctionId !== null) {
-			await store.abandonAuctionProposals(config.db, auctionId);
+			await store.abandonAuctionProposals(config.db, auctionId, selectedProposalIds);
 			// Only clear the shared state if it still belongs to this auction.
 			// An overlapping request for a newer auction may have already replaced
 			// it; clearing unconditionally would wipe that newer state.

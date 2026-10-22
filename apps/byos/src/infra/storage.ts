@@ -1,5 +1,5 @@
 import type { RejectionReason, Status } from "@byos/common";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, not, or, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
 import {
@@ -1167,11 +1167,17 @@ export async function allSubSolvers(db: Db): Promise<Address[]> {
 }
 
 /**
- * Rejects all non-executing proposals for an auction when the auction window
- * closes. Covers both "submitted" (never validated) and "active" (validated
- * but not selected for a solution). Called synchronously before /solve returns.
+ * Rejects all non-executing, non-selected proposals for an auction when the
+ * auction window closes. Covers both "submitted" (never validated) and "active"
+ * (validated but not selected for a solution). Selected proposals (those whose
+ * IDs appear in `excludeIds`) are skipped so they remain reachable by
+ * settlement notifications. Called synchronously before /solve returns.
  */
-export async function abandonAuctionProposals(db: Db, auctionId: number): Promise<void> {
+export async function abandonAuctionProposals(
+	db: Db,
+	auctionId: number,
+	excludeIds: number[] = [],
+): Promise<void> {
 	await db
 		.update(proposals)
 		.set({
@@ -1183,6 +1189,7 @@ export async function abandonAuctionProposals(db: Db, auctionId: number): Promis
 			and(
 				eq(proposals.auctionId, auctionId),
 				inArray(proposals.status, ["submitted", "active"] as Status[]),
+				excludeIds.length > 0 ? not(inArray(proposals.id, excludeIds)) : undefined,
 			),
 		);
 }
