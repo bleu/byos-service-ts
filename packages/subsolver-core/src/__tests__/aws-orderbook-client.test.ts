@@ -27,7 +27,7 @@ function settleCalldata(auctionId: number): string {
  */
 function mockFetch(available: Record<number, AutopilotDto | "error">) {
 	const fetchFn = vi.fn().mockImplementation((url: string) => {
-		const match = /\/autopilot\/(\d+)\.json$/.exec(url);
+		const match = /\/(\d+)\.json$/.exec(url);
 		if (!match?.[1]) {
 			return Promise.resolve(new Response(null, { status: 404 }));
 		}
@@ -106,6 +106,22 @@ afterEach(() => vi.unstubAllGlobals());
 // --- Tests ---
 
 describe("AwsOrderbookClient", () => {
+	it.each([
+		"https://s3.example.com/prod/bnb/autopilot",
+		"https://s3.example.com/custom/snapshots///",
+	])("appends only the auction filename to %s", async (baseUrl) => {
+		const fetchFn = mockFetch({ 100: makeAuction(100) });
+		const client = new AwsOrderbookClient(
+			baseUrl,
+			mockPublicClient(100) as never,
+			SETTLEMENT_ADDRESS,
+		);
+
+		await client.solvableOrders();
+
+		expect(fetchFn.mock.calls[0]?.[0]).toBe(`${baseUrl.replace(/\/+$/, "")}/100.json`);
+	});
+
 	it("Bootstrap – finds latest when >6 IDs beyond anchor", async () => {
 		// Anchor from on-chain = 100. S3 has IDs 100–120.
 		const available: Record<number, AutopilotDto | "error"> = {};

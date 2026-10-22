@@ -40,7 +40,7 @@ async function main() {
 	);
 	const orderbook =
 		config.discoveryMethod === "aws"
-			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement)
+			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, { logger })
 			: new OrderbookClient(config.discoveryUrl);
 	const subsolver = new BinanceSubsolver(
 		config,
