@@ -12,7 +12,8 @@ const trampolineAddress = "0x0000000000000000000000000000000000000005" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
-	orderBookUrl: "http://orderbook",
+	discoveryMethod: "orderbook",
+	discoveryUrl: "http://orderbook",
 	byosUrl: "http://byos",
 	rpcUrl: "http://rpc",
 	privateKey: "0x01",
