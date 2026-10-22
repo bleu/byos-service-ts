@@ -35,4 +35,9 @@ export const GPv2SettlementAbi = [
 		outputs: [],
 		stateMutability: "nonpayable",
 	},
+	{
+		type: "event",
+		name: "Settlement",
+		inputs: [{ name: "solver", type: "address", indexed: true }],
+	},
 ] as const;

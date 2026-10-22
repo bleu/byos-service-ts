@@ -4,9 +4,8 @@ import { z } from "zod";
 const addressSchema = z.string().refine(isAddress, { message: "must be a valid address" });
 
 const envSchema = z.object({
-	ORDERBOOK_URL: z.string(),
+	DISCOVERY_URL: z.string(),
 	DISCOVERY_METHOD: z.enum(["orderbook", "aws"]),
-	AWS_URL: z.string().optional(),
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
@@ -27,7 +26,7 @@ const envSchema = z.object({
 });
 
 interface BaseConfig {
-	orderbookUrl: string;
+	discoveryUrl: string;
 	byosUrl: string;
 	rpcUrl: string;
 	privateKey: `0x${string}`;
@@ -49,7 +48,7 @@ interface BaseConfig {
 
 export type Config =
 	| (BaseConfig & { discoveryMethod: "orderbook" })
-	| (BaseConfig & { discoveryMethod: "aws"; awsUrl: string });
+	| (BaseConfig & { discoveryMethod: "aws" });
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
@@ -64,7 +63,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
 	const base = {
-		orderbookUrl: result.data.ORDERBOOK_URL,
+		discoveryUrl: result.data.DISCOVERY_URL,
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
@@ -86,8 +85,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
 	};
 	if (result.data.DISCOVERY_METHOD === "aws") {
-		if (!result.data.AWS_URL) throw new Error("AWS_URL is required when DISCOVERY_METHOD is aws");
-		return { ...base, discoveryMethod: "aws" as const, awsUrl: result.data.AWS_URL };
+		return { ...base, discoveryMethod: "aws" as const };
 	}
 	return { ...base, discoveryMethod: "orderbook" as const };
 }
