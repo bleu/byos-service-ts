@@ -320,7 +320,7 @@ export class AwsOrderbookClient {
 		const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
 		try {
-			const response = await fetch(`${this.awsUrl}/autopilot/${id}.json`, {
+			const response = await fetch(`${this.awsUrl}/${id}.json`, {
 				signal: controller.signal,
 			});
 
