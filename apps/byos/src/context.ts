@@ -11,19 +11,17 @@ import { createDb, type Db } from "./db/index.js";
 import type { AuditEvent } from "./domain/audit.js";
 import type { BalanceCache } from "./domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "./domain/rate-limit.js";
-import type { ValidateProposal } from "./domain/validator.js";
 import {
 	configureAuctionStateBackend,
 	createRedisAuctionStateBackend,
 } from "./infra/auction-state.js";
 import { createRedisBalanceStore } from "./infra/balance-cache.js";
-import {
-	createEscrowBalanceReader,
-	EscrowValidator,
-	type GasPriceRef,
-} from "./infra/blockchain/escrow.js";
+import { createEscrowBalanceReader, EscrowValidator } from "./infra/blockchain/escrow.js";
 import { EscrowOperator } from "./infra/blockchain/operator.js";
 import { ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
+
+export type { ProposalValidator };
+
 import { enqueueAuditEvent } from "./infra/jobs/audit-worker.js";
 import type { BalanceRefreshConfig } from "./infra/jobs/balance-refresh.js";
 import {
@@ -51,9 +49,7 @@ export interface AppContext {
 	trampolineFactory: Address;
 	queues: Queues;
 	config: Config;
-	gasPriceRef: GasPriceRef;
-	/** Used by the background validation tick (calls beginTick()). */
-	validator: ValidateProposal;
+	validator: ProposalValidator;
 	operator: EscrowOperator;
 	rateLimiter: RateLimiter;
 	balances: BalanceCache;
@@ -87,11 +83,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 
 	// Queues
 	const queues = createQueues(redis);
-
-	// Gas price
-	const gasPriceRef: GasPriceRef = {
-		value: config.DEFAULT_GAS_PRICE ? BigInt(config.DEFAULT_GAS_PRICE) : 0n,
-	};
 
 	// Audit event handler — enqueues to BullMQ for durable persistence
 	const onAuditEvent = (event: AuditEvent) => {
@@ -168,7 +159,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		settlementAddress,
 		escrowAddress,
 		trampolineFactory,
-		gasPriceRef,
 		BigInt(config.MIN_PROPOSAL_SCORE),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_BPS),
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
@@ -206,9 +196,9 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 
 	// Setup job schedulers
 	await setupJobSchedulers(queues, {
-		validationIntervalSecs: config.VALIDATION_INTERVAL_SECS,
+		staleExecutingIntervalSecs: config.STALE_EXECUTING_INTERVAL_SECS,
 		retentionSweepIntervalSecs: config.RETENTION_SWEEP_INTERVAL_SECS,
-		penaltyIntervalSecs: config.VALIDATION_INTERVAL_SECS, // same interval as validation
+		penaltyIntervalSecs: config.PENALTY_INTERVAL_SECS,
 		balanceRefreshIntervalSecs: config.BALANCE_REFRESH_INTERVAL_SECS,
 	});
 
@@ -221,7 +211,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		trampolineFactory,
 		queues,
 		config,
-		gasPriceRef,
 		validator,
 		operator,
 		rateLimiter,

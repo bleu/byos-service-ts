@@ -4,6 +4,7 @@ import type { BalanceCache } from "@byos/byos/src/domain/balance-cache.js";
 import type { OrderRecord } from "@byos/byos/src/domain/order.js";
 import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import type { RateLimiter } from "@byos/byos/src/domain/rate-limit.js";
+import { acceptAll, type ValidateProposal } from "@byos/byos/src/domain/validator.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
 import { _setLocalAuctionState } from "@byos/byos/src/infra/auction-state.js";
 import * as store from "@byos/byos/src/infra/storage.js";
@@ -61,6 +62,7 @@ export function stubAuctionForOrder(orderUid: string, auctionId = 1): void {
 		auctionId,
 		orders: new Map([[orderUid.toLowerCase(), STUB_ORDER_RECORD]]),
 		prices: new Map(),
+		gasPrice: 0n,
 	});
 }
 
@@ -97,7 +99,6 @@ export interface TestApp {
 	publicApp: Hono;
 	internalApp: Hono;
 	ctx: TestContext;
-	gasPriceRef: { value: bigint };
 	auditEvents: AuditEvent[];
 }
 
@@ -112,8 +113,8 @@ export interface TestAppOverrides {
 	ipLimit?: number;
 	/** Escrow floor for the synchronous gate. Defaults to 0.01 ETH. */
 	floorWei?: bigint;
-	/** Called when a proposal is accepted via POST /proposals. Defaults to a no-op. */
-	enqueueValidation?: (proposalId: number) => Promise<void>;
+	/** Inline validator. Defaults to acceptAll (accepts every proposal). */
+	validator?: ValidateProposal;
 	/** EIP-1271 verifier mock. Omit to simulate a deployment without EIP-1271 support. */
 	verifyEip1271?: Eip1271Verifier;
 }
@@ -127,7 +128,6 @@ function testRateLimits(overrides: TestAppOverrides) {
 		TRAMPOLINE_FACTORY,
 		RPC_URL: "http://localhost:8545",
 		ESCROW_ADDRESS: "0x0000000000000000000000000000000000000001",
-		DEFAULT_GAS_PRICE: "1000000000",
 		OPERATOR_PRIVATE_KEY: `0x${"11".repeat(32)}`,
 	});
 
@@ -137,7 +137,6 @@ function testRateLimits(overrides: TestAppOverrides) {
 
 export async function createTestApp(overrides: TestAppOverrides = {}): Promise<TestApp> {
 	const ctx = await createTestDb();
-	const gasPriceRef = { value: 10_000_000_000n }; // 10 gwei default
 	const auditEvents: AuditEvent[] = [];
 
 	const appCtx = {
@@ -146,9 +145,8 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		trampolineFactory: TRAMPOLINE_FACTORY,
 		maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
 		cL: 10_000_000_000_000_000n, // 0.01 ETH — mainnet c_L
-		gasPriceRef,
+		validator: overrides.validator ?? acceptAll,
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
-		enqueueValidation: overrides.enqueueValidation ?? (() => Promise.resolve()),
 		rateLimiter: overrides.rateLimiter,
 		balances: overrides.balances,
 		rateLimits: testRateLimits(overrides),
@@ -158,7 +156,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 	const publicApp = createPublicApp(appCtx);
 	const internalApp = createInternalApp(appCtx);
 
-	return { publicApp, internalApp, ctx, gasPriceRef, auditEvents };
+	return { publicApp, internalApp, ctx, auditEvents };
 }
 
 // --- Proposal Helpers ---

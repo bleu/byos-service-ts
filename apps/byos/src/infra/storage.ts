@@ -1,5 +1,5 @@
 import type { RejectionReason, Status } from "@byos/common";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, not, or, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
 import {
@@ -429,7 +429,7 @@ export async function insert(
 export async function insertIfUnused(
 	db: Db,
 	proposal: ProposalInput,
-): Promise<{ id: number; auditEvent: AuditEvent } | { existing: Proposal }> {
+): Promise<{ proposal: Proposal; auditEvent: AuditEvent } | { existing: Proposal }> {
 	const rows = await db
 		.insert(proposals)
 		.values(proposalValues(proposal))
@@ -450,7 +450,7 @@ export async function insertIfUnused(
 		simulationFailureParams: null,
 	};
 	return {
-		id: row.id,
+		proposal: fullProposal,
 		auditEvent: { occurredAt: new Date(), kind: { type: "received", proposal: fullProposal } },
 	};
 }
@@ -1156,11 +1156,26 @@ export async function rejectOutbidProposals(
 }
 
 /**
- * Rejects all "submitted" proposals for an auction when the auction window
- * closes. Called synchronously before /solve returns, so no proposal in the
- * auction's submitted state survives to the next auction.
+ * Returns the distinct set of all sub-solver addresses that have ever submitted
+ * a proposal. Used to prefetch escrow balances at /solve arrival.
  */
-export async function abandonAuctionProposals(db: Db, auctionId: number): Promise<void> {
+export async function allSubSolvers(db: Db): Promise<Address[]> {
+	const rows = await db.selectDistinct({ subSolver: proposals.subSolver }).from(proposals);
+	return rows.map((r) => r.subSolver as Address);
+}
+
+/**
+ * Rejects all non-executing, non-selected proposals for an auction when the
+ * auction window closes. Covers both "submitted" (never validated) and "active"
+ * (validated but not selected for a solution). Selected proposals (those whose
+ * IDs appear in `excludeIds`) are skipped so they remain reachable by
+ * settlement notifications. Called synchronously before /solve returns.
+ */
+export async function abandonAuctionProposals(
+	db: Db,
+	auctionId: number,
+	excludeIds: number[] = [],
+): Promise<void> {
 	await db
 		.update(proposals)
 		.set({
@@ -1168,7 +1183,13 @@ export async function abandonAuctionProposals(db: Db, auctionId: number): Promis
 			rejectionReason: "AuctionClosed" as RejectionReason,
 			statusChangedAt: sql`now()`,
 		})
-		.where(and(eq(proposals.auctionId, auctionId), eq(proposals.status, "submitted")));
+		.where(
+			and(
+				eq(proposals.auctionId, auctionId),
+				inArray(proposals.status, ["submitted", "active"] as Status[]),
+				excludeIds.length > 0 ? not(inArray(proposals.id, excludeIds)) : undefined,
+			),
+		);
 }
 
 /** Fetches the buy-token reference price stored at solution-build time for a proposal. */

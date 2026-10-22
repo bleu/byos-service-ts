@@ -16,7 +16,11 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { OrderRecord } from "../../../domain/order.js";
 import type { Proposal } from "../../../domain/proposal.js";
-import { _clearLocalAuctionState, _setLocalAuctionState } from "../../auction-state.js";
+import {
+	_clearLocalAuctionState,
+	_patchLocalGasPrice,
+	_setLocalAuctionState,
+} from "../../auction-state.js";
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
 
@@ -164,6 +168,7 @@ function setupAuctionState(record: OrderRecord, prices?: Map<string, bigint>): v
 		auctionId: 1,
 		orders: new Map([[proposal.orderUid.toLowerCase(), record]]),
 		prices: prices ?? defaultPrices,
+		gasPrice: 0n,
 	});
 }
 
@@ -238,12 +243,14 @@ function validatorAt(
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
 	_minCollateral = 10n ** 16n,
 ): SimulationValidator {
+	// Gas price lives in auction state. Patch the local state so tests that
+	// pass a non-zero gasPrice still exercise the profitability gate.
+	_patchLocalGasPrice(gasPrice);
 	return new SimulationValidator(
 		node.client,
 		SETTLEMENT,
 		ESCROW,
 		TRAMPOLINE_FACTORY,
-		{ value: gasPrice },
 		minScore,
 		maxSlippageBps,
 		maxSlippageNative,
@@ -416,6 +423,7 @@ describe("SimulationValidator", () => {
 			auctionId: 1,
 			orders: new Map([[proposal.orderUid.toLowerCase(), sampleRecord(order)]]),
 			prices,
+			gasPrice: 0n,
 		});
 
 		const verdict = await validatorAt(fakeNode()).validate(proposal);
@@ -463,6 +471,7 @@ describe("SimulationValidator", () => {
 				[submittedProposal().sellToken.toLowerCase(), ETHER],
 				[submittedProposal().buyToken.toLowerCase(), ETHER],
 			]),
+			gasPrice: 0n,
 		});
 
 		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
@@ -675,6 +684,7 @@ describe("SimulationValidator gap check", () => {
 			auctionId: 1,
 			orders: new Map([[proposal.orderUid.toLowerCase(), buyOrder]]),
 			prices: new Map([[buyOrder.order.sellToken.toLowerCase(), ETHER]]),
+			gasPrice: 0n,
 		});
 
 		const verdict = await validatorAt(
@@ -702,6 +712,8 @@ function collateralValidator(
 	} = {},
 ) {
 	setupAuctionState(sampleRecord(sampleOrder()));
+	// Gas price lives in auction state — patch it if a specific value is needed.
+	if (options.gasPrice !== undefined) _patchLocalGasPrice(options.gasPrice);
 	const node = fakeNode({
 		simulateV1: async () =>
 			simulateSuccess(
@@ -720,7 +732,6 @@ function collateralValidator(
 		SETTLEMENT,
 		ESCROW,
 		TRAMPOLINE_FACTORY,
-		{ value: options.gasPrice ?? 0n },
 		0n,
 		10_000n,
 		ETHER,

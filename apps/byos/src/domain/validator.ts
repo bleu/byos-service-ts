@@ -35,6 +35,12 @@ export type Verdict =
 /** Validates a single proposal. Returns null to skip (retry next tick). */
 export interface ValidateProposal {
 	validate(proposal: Proposal): Promise<Verdict | null>;
+	/** Called at the start of each new auction to clear stale per-auction state.
+	 * Optional: implementations that have no per-auction state may omit it. */
+	beginAuction?(): void;
+	/** Pre-warms the escrow balance cache for the given addresses. Best-effort.
+	 * Optional: implementations that have no balance cache may omit it. */
+	prefetchBalances?(addresses: Address[]): Promise<void>;
 }
 
 /** Stub validator that accepts everything. Used for local dev and tests. */

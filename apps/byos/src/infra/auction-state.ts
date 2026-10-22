@@ -15,6 +15,8 @@ export interface AuctionState {
 	orders: Map<string, OrderRecord>;
 	/** Keyed by lowercase token address. Value is native price scaled by 1e18. */
 	prices: Map<string, bigint>;
+	/** Effective gas price for this auction, in wei. Used by the escrow validator. */
+	gasPrice: bigint;
 }
 
 // ── Configurable backend ─────────────────────────────────────────────────────
@@ -92,6 +94,9 @@ export function _setLocalAuctionState(state: AuctionState): void {
 export function _clearLocalAuctionState(): void {
 	current = null;
 }
+export function _patchLocalGasPrice(gasPrice: bigint): void {
+	if (current) current = { ...current, gasPrice };
+}
 
 // ── Redis backend ─────────────────────────────────────────────────────────────
 
@@ -129,6 +134,7 @@ interface SerializedState {
 	auctionId: number;
 	orders: [string, SerializedOrderRecord][];
 	prices: [string, string][];
+	gasPrice: string;
 }
 
 function serializeInteraction(i: SettlementInteraction): SerializedInteraction {
@@ -194,6 +200,7 @@ function serializeState(state: AuctionState): string {
 		auctionId: state.auctionId,
 		orders: Array.from(state.orders.entries()).map(([k, v]) => [k, serializeRecord(v)]),
 		prices: Array.from(state.prices.entries()).map(([k, v]) => [k, v.toString()]),
+		gasPrice: state.gasPrice.toString(),
 	};
 	return JSON.stringify(s);
 }
@@ -204,6 +211,7 @@ function deserializeState(data: string): AuctionState {
 		auctionId: s.auctionId,
 		orders: new Map(s.orders.map(([k, v]) => [k, deserializeRecord(v)])),
 		prices: new Map(s.prices.map(([k, v]) => [k, BigInt(v)])),
+		gasPrice: BigInt(s.gasPrice ?? "0"),
 	};
 }
 

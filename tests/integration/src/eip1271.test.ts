@@ -127,7 +127,7 @@ describe("EIP-1271 contract sub-solvers", () => {
 					subSolverAddress: SIGNER_ACCOUNT.address,
 				}),
 			});
-			expect(resp.status).toBe(202);
+			expect(resp.status).toBe(200);
 			const body = await resp.json();
 			expect(typeof body.id).toBe("number");
 		});
@@ -159,7 +159,7 @@ describe("EIP-1271 contract sub-solvers", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 			});
-			expect(resp.status).toBe(202);
+			expect(resp.status).toBe(200);
 			expect(mockVerifier).toHaveBeenCalledWith(
 				CONTRACT_ADDRESS.toLowerCase(),
 				digestForBody(body),

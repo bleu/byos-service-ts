@@ -168,7 +168,7 @@ describe("owner-scoped reads", () => {
 			nonce: 604n,
 			interactions: route,
 		});
-		expect(response.status).toBe(202);
+		expect(response.status).toBe(200);
 		const { id } = await response.json();
 
 		const stored = await store.get(app.ctx.db, id);

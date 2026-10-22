@@ -93,7 +93,15 @@ function buildAuction(orderUid = ORDER_UID) {
 function createSolveApp() {
 	return new Hono().route(
 		"/",
-		createSolveRoute({ db: ctx.db, gasPriceRef: { value: 0n }, onAuditEvent: () => {} }),
+		createSolveRoute({
+			db: ctx.db,
+			validator: {
+				validate: async () => null,
+				beginAuction: () => {},
+				prefetchBalances: async () => {},
+			} as any,
+			onAuditEvent: () => {},
+		}),
 	);
 }
 

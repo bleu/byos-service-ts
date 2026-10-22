@@ -15,11 +15,7 @@ import {
 } from "../../domain/scoring.js";
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
-import {
-	createBatchedEscrowBalanceReader,
-	type EscrowValidator,
-	type GasPriceRef,
-} from "./escrow.js";
+import { createBatchedEscrowBalanceReader, type EscrowValidator } from "./escrow.js";
 import { buildSimulation } from "./simulation.js";
 
 /**
@@ -169,7 +165,6 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly settlementAddress: Address,
 		private readonly escrowAddress: Address,
 		private readonly trampolineFactory: Address,
-		private readonly gasPriceRef: GasPriceRef,
 		private readonly minScore: bigint,
 		private readonly maxSlippageBps: bigint,
 		private readonly maxSlippageNative: bigint,
@@ -217,9 +212,10 @@ export class SimulationValidator implements ValidateProposal {
 		record: import("../../domain/order.js").OrderRecord,
 		gas: bigint,
 		surplusPrice: bigint,
+		gasPrice: bigint,
 	): "ok" | "unprofitable" {
 		const isSellOrder = record.order.kind === OrderKind.SELL;
-		const gasCost = effectiveGas(gas) * this.gasPriceRef.value;
+		const gasCost = effectiveGas(gas) * gasPrice;
 
 		const candidate: Candidate = {
 			orderSell: record.order.sellAmount,
@@ -249,11 +245,12 @@ export class SimulationValidator implements ValidateProposal {
 			this.readEscrowBalance(proposal.subSolver),
 		]);
 
-		// Order data and prices come from the in-memory auction state populated
-		// by /solve. If the state is absent the auction already closed and this
-		// proposal will be cleaned up by abandonAuctionProposals — defer.
+		// Order data, prices, and gas price come from the auction state populated
+		// by /solve. If absent the auction already closed — defer.
 		const auctionState = await getAuctionState();
 		if (!auctionState) return null;
+
+		const gasPrice = auctionState.gasPrice;
 
 		const record = auctionState.orders.get(proposal.orderUid.toLowerCase());
 		if (!record) {
@@ -474,8 +471,8 @@ export class SimulationValidator implements ValidateProposal {
 			for (const p of inflightData.proposals) {
 				if (p.id === proposal.id) continue;
 				const cap = penaltyCap(p.sellAmountNative, this.collateralRatioBps, this.minCollateral);
-				const gas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
-				siblingExposure += cap + gas * this.gasPriceRef.value;
+				const siblingGas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
+				siblingExposure += cap + siblingGas * gasPrice;
 			}
 
 			// Current proposal's contribution.
@@ -486,7 +483,7 @@ export class SimulationValidator implements ValidateProposal {
 					this.collateralRatioBps,
 					this.minCollateral,
 				) +
-				gas * this.gasPriceRef.value;
+				gas * gasPrice;
 			const adjustedBalance = availableCollateral(escrowBalance, inflightData.bufferBalance);
 			if (siblingExposure + currentExposure > adjustedBalance) {
 				return { kind: "reject", reason: "ExposureCapExceeded" };
@@ -498,7 +495,7 @@ export class SimulationValidator implements ValidateProposal {
 		// once it is set on the proposal — we attach it here temporarily.
 		const proposalWithSim: Proposal = { ...proposal, simulationBuyAmount };
 		if (proposal.status === "submitted") {
-			const profitResult = this.profitability(proposalWithSim, record, gas, surplusPrice);
+			const profitResult = this.profitability(proposalWithSim, record, gas, surplusPrice, gasPrice);
 			if (profitResult === "unprofitable") {
 				return { kind: "reject", reason: "Unprofitable" };
 			}
@@ -525,9 +522,15 @@ export class ProposalValidator implements ValidateProposal {
 		private readonly simulation: SimulationValidator,
 	) {}
 
-	beginTick(): void {
-		this.escrow.beginTick();
+	/** Clear the escrow balance cache at the start of each auction window. */
+	beginAuction(): void {
+		this.escrow.beginAuction();
 		// Trampoline cache in simulation is persistent (no clearing)
+	}
+
+	/** Prefetch escrow balances for all known sub-solvers via multicall. */
+	async prefetchBalances(addresses: Address[]): Promise<void> {
+		await this.escrow.prefetchBalances(addresses);
 	}
 
 	async validate(proposal: Proposal): Promise<Verdict | null> {

@@ -14,12 +14,12 @@ import {
 	scoreProposal,
 	surplusToken,
 } from "../../domain/scoring.js";
+import type { ValidateProposal } from "../../domain/validator.js";
 import {
 	auctionOrderToRecord,
 	clearAuctionStateIfOwned,
 	setAuctionState,
 } from "../auction-state.js";
-import type { GasPriceRef } from "../blockchain/escrow.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import {
@@ -35,7 +35,7 @@ export interface SolveConfig {
 	minCollateral?: bigint;
 	collateralRatioBps?: bigint;
 	db: Db;
-	gasPriceRef: GasPriceRef;
+	validator: ValidateProposal;
 	onAuditEvent: (event: AuditEvent) => void;
 	selectorBufferMs?: number;
 	logger?: Logger;
@@ -61,20 +61,20 @@ export function createSolveRoute(config: SolveConfig) {
 		}
 		const auction = parsed.data;
 
-		// Publish the auction's gas price for the escrow validator. A price
-		// past u64::MAX is scored with but never published: the validator's
-		// threshold multiplies it unbounded, which would push every sub-solver
-		// under the escrow minimum and reject the live book — and Rejected is
-		// terminal.
-		let auctionGasPrice = config.gasPriceRef.value;
+		// Parse the auction's gas price for scoring and publishing to auction state.
+		// A price past u64::MAX is scored with but never published to the validator:
+		// multiplying it unbounded would push every sub-solver under the escrow
+		// minimum and reject the live book — Rejected is terminal.
+		let auctionGasPrice = 0n;
+		let publishGasPrice = false;
 		try {
 			auctionGasPrice = BigInt(auction.effectiveGasPrice);
 			if (auctionGasPrice <= U64_MAX) {
-				config.gasPriceRef.value = auctionGasPrice;
+				publishGasPrice = true;
 				await store.publishAuctionGasPrice(config.db, auctionGasPrice);
 			}
 		} catch {
-			// If it doesn't parse, leave previous value
+			// If it doesn't parse, use 0n (no scoring impact beyond this auction)
 		}
 
 		log?.info(
@@ -112,9 +112,17 @@ export function createSolveRoute(config: SolveConfig) {
 			const prices = new Map(
 				Object.entries(auction.tokens)
 					.filter(([, t]) => t.referencePrice != null)
-					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice!)]),
+					.map(([addr, t]) => [addr.toLowerCase(), BigInt(t.referencePrice ?? 0)]),
 			);
-			await setAuctionState({ auctionId, orders, prices });
+			const gasPrice = publishGasPrice ? auctionGasPrice : 0n;
+			await setAuctionState({ auctionId, orders, prices, gasPrice });
+
+			// Reset the escrow balance cache for the new auction, then prefetch
+			// balances for all known sub-solvers in one multicall so the competition
+			// window starts with a warm cache.
+			config.validator.beginAuction?.();
+			const subSolvers = await store.allSubSolvers(config.db);
+			void config.validator.prefetchBalances?.(subSolvers);
 		}
 
 		// Keep the competition window open, then leave time to select and respond.
@@ -127,6 +135,7 @@ export function createSolveRoute(config: SolveConfig) {
 		const grouped = await store.activeByOrderUids(config.db, orderUids, auctionId);
 
 		const solutions: Solution[] = [];
+		const selectedProposalIds: number[] = [];
 		let solutionId = 1;
 
 		for (const order of auction.orders) {
@@ -243,6 +252,7 @@ export function createSolveRoute(config: SolveConfig) {
 			}
 
 			solutions.push(solution);
+			selectedProposalIds.push(bestProposal.id);
 			log?.info(
 				{
 					proposalId: bestProposal.id,
@@ -259,7 +269,7 @@ export function createSolveRoute(config: SolveConfig) {
 		// cannot bleed into the next auction. Awaited so state is consistent before
 		// the response reaches the driver.
 		if (auctionId !== null) {
-			await store.abandonAuctionProposals(config.db, auctionId);
+			await store.abandonAuctionProposals(config.db, auctionId, selectedProposalIds);
 			// Only clear the shared state if it still belongs to this auction.
 			// An overlapping request for a newer auction may have already replaced
 			// it; clearing unconditionally would wipe that newer state.

@@ -22,13 +22,13 @@ it("bounds scheduled history, removes successful audit jobs and preserves failed
 	try {
 		await events.waitUntilReady();
 		await setupJobSchedulers(queues, {
-			validationIntervalSecs: 12,
+			staleExecutingIntervalSecs: 300,
 			retentionSweepIntervalSecs: 300,
 			penaltyIntervalSecs: 12,
 			balanceRefreshIntervalSecs: 60,
 		});
 		for (const queue of [
-			queues.validation,
+			queues.staleExecuting,
 			queues.retention,
 			queues.penalty,
 			queues.balanceRefresh,
@@ -82,12 +82,16 @@ it("caps completed operational jobs at 100 under sustained ticks", async () => {
 	});
 	const prefix = `byos:test:${randomUUID()}`;
 	const queues = createQueues(connection, prefix);
-	const events = new QueueEvents("validation", { connection, prefix });
-	const worker = new Worker("validation", async () => {}, { connection, prefix, autorun: false });
+	const events = new QueueEvents("stale-executing", { connection, prefix });
+	const worker = new Worker("stale-executing", async () => {}, {
+		connection,
+		prefix,
+		autorun: false,
+	});
 	let running: Promise<void> | undefined;
 	try {
 		await events.waitUntilReady();
-		const jobs = await queues.validation.addBulk(
+		const jobs = await queues.staleExecuting.addBulk(
 			Array.from({ length: 105 }, () => ({ name: "tick", data: {} })),
 		);
 		const last = jobs.at(-1);
@@ -95,8 +99,8 @@ it("caps completed operational jobs at 100 under sustained ticks", async () => {
 		const finished = last.waitUntilFinished(events, 5000);
 		running = worker.run();
 		await finished;
-		expect(await queues.validation.getCompletedCount()).toBe(100);
-		expect(await queues.validation.getJob(jobs[0]!.id!)).toBeUndefined();
+		expect(await queues.staleExecuting.getCompletedCount()).toBe(100);
+		expect(await queues.staleExecuting.getJob(jobs[0]!.id!)).toBeUndefined();
 	} finally {
 		await worker.close();
 		await running;

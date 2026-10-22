@@ -40,12 +40,13 @@ info:
 
     ## Proposal lifecycle
 
-    `POST /proposals` verifies the signature synchronously and answers `202
-    Accepted` — meaning "accepted for validation", not "accepted". The
-    proposal is stored as `submitted`; a background validator then runs the
-    escrow check and settlement simulation and flips it to `active`,
-    `rejected`, or `simFailed`. Sub-solvers poll `GET /proposal/{id}` for
-    the verdict.
+    `POST /proposals` validates synchronously on the request path. A `200`
+    response means the proposal passed escrow and simulation checks and is
+    `active` in the current auction. A `400` with kind `ProposalRejected`
+    means it failed validation; the `reason` field carries the typed
+    rejection reason. A `202` means the proposal was inserted but no active
+    auction is running — resubmit when the next auction opens. Use
+    `GET /proposal/{id}` to track subsequent state changes.
 
     When a proposal wins an auction and the driver starts submitting the
     settlement, it becomes `executing`: frozen — not offered to
@@ -108,14 +109,21 @@ paths:
       summary: Submit a signed settlement proposal.
       description: |
         Parses the request, recovers the sub-solver address from the EIP-712
-        `ProposalData` signature, and checks the expiry window: `validUntil`
-        must be in the future but no further out than the maximum proposal
-        lifetime (deployment-configurable, default 5 minutes). On
-        success the proposal is stored as `submitted` and validated in the
-        background; poll `GET /proposal/{id}` for the verdict.
+        `ProposalData` signature, checks the expiry window (`validUntil`
+        must be in the future, no further out than the maximum proposal
+        lifetime — default 5 minutes), then runs escrow and simulation
+        validation synchronously on the request path.
 
-        Token addresses are not part of the request: they come from the
-        orderbook order during background validation.
+        Returns `200` with `status: "active"` when validation passes.
+        Returns `400 ProposalRejected` with a typed `reason` when validation
+        fails. Returns `202` when no active auction is running (the proposal
+        is stored but not validated; resubmit when the next auction opens).
+        Returns `400 noActiveAuction` when no auction is running and the
+        proposal is rejected before storage.
+
+        Replaying identical signed content returns the existing id with `202`
+        — no re-validation. Reusing a nonce with different signed content
+        returns `409 NonceAlreadyUsed`.
 
         Proposals are immutable — there is no update operation. Replacement
         is a new `POST`, optionally preceded by a `DELETE` of the old one.
@@ -127,10 +135,18 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateProposalRequest"
       responses:
+        "200":
+          description: |
+            Proposal passed validation and is active in the current auction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateProposalResponse"
         "202":
           description: |
-            Accepted for validation. The returned id is the handle for
-            polling and cancellation.
+            Proposal stored but no active auction is running. Resubmit when
+            the next auction opens. Also returned when replaying identical
+            signed content (idempotent replay).
           content:
             application/json:
               schema:
@@ -139,15 +155,27 @@ paths:
           description: |
             Malformed request (`BadRequest`), invalid or unrecoverable
             signature (`InvalidSignature`, `SignatureRecoveryFailed`), a
-            proposal that is already expired (`ProposalExpired`), or a
+            proposal that is already expired (`ProposalExpired`), a
             `validUntil` beyond the maximum proposal lifetime
-            (`ProposalLifetimeExceeded`).
+            (`ProposalLifetimeExceeded`), no active auction
+            (`noActiveAuction`), the order UID not in the current auction
+            (`unknownOrder`), or validation failed (`ProposalRejected` —
+            check the `reason` field for the typed rejection reason).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
           $ref: "#/components/responses/EscrowFloor"
+        "409":
+          description: |
+            The nonce was already used for a different signed proposal
+            (`NonceAlreadyUsed`). Generate a new nonce; replaying the exact
+            same signed content is safe and returns `202`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -385,10 +413,9 @@ components:
     EscrowFloor:
       description: |
         The signer's cached escrow balance is known to be below the minimum
-        collateral (`InsufficientEscrow`). Read from cache, never RPC — an
-        address BYOS has not seen yet is admitted at the lowest rate tier
-        instead, and the authoritative escrow check stays in the background
-        validator.
+        collateral (`InsufficientEscrow`). Read from a prefetched cache,
+        never a blocking RPC call — an address BYOS has not seen yet is
+        admitted at the lowest rate tier instead.
 
         Applies to `POST /proposals` only. `effectiveBalance` reads as zero
         from the moment a sub-solver requests a withdrawal, so gating reads
@@ -650,6 +677,11 @@ components:
       properties:
         id:
           $ref: "#/components/schemas/ProposalId"
+        status:
+          type: string
+          description: |
+            Present only on `200` responses. Value is `"active"`.
+          example: active
     GetProposalResponse:
       type: object
       required:

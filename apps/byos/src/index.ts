@@ -11,11 +11,7 @@ import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
-import {
-	createProposalValidationWorker,
-	createValidationWorker,
-	enqueueProposalValidation,
-} from "./infra/jobs/validation.js";
+import { createStaleExecutingWorker } from "./infra/jobs/stale-executing.js";
 
 async function main() {
 	// 1. Parse config (fail-fast)
@@ -42,11 +38,9 @@ async function main() {
 		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
-		gasPriceRef: ctx.gasPriceRef,
+		validator: ctx.validator,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
-		enqueueValidation: (proposalId) =>
-			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
 		logger,
 		rateLimiter: ctx.rateLimiter,
 		balances: ctx.balances,
@@ -61,7 +55,7 @@ async function main() {
 		trampolineFactory: ctx.trampolineFactory,
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
-		gasPriceRef: ctx.gasPriceRef,
+		validator: ctx.validator,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		selectorBufferMs: config.SELECTOR_BUFFER_MS,
 		onAuditEvent: ctx.onAuditEvent,
@@ -105,27 +99,12 @@ async function main() {
 			: undefined,
 	);
 
-	const validationWorker = createValidationWorker(ctx.redis, {
+	const staleExecutingWorker = createStaleExecutingWorker(ctx.redis, {
 		db: ctx.db,
-		validator: ctx.validator,
-		gasPriceRef: ctx.gasPriceRef,
 		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
-		enqueueValidation: (proposalId) =>
-			enqueueProposalValidation(ctx.queues.validateProposal, proposalId),
 		onAuditEvent: ctx.onAuditEvent,
-		logger: logger.child({ worker: "validation" }),
+		logger: logger.child({ worker: "stale-executing" }),
 	});
-
-	const proposalValidationWorker = createProposalValidationWorker(
-		ctx.redis,
-		{
-			db: ctx.db,
-			validator: ctx.validator,
-			onAuditEvent: ctx.onAuditEvent,
-			logger: logger.child({ worker: "validate-proposal" }),
-		},
-		config.VALIDATION_CONCURRENCY,
-	);
 
 	const retentionWorker = createRetentionWorker(ctx.redis, {
 		db: ctx.db,
@@ -148,8 +127,7 @@ async function main() {
 
 	const workers = [
 		auditWorker,
-		validationWorker,
-		proposalValidationWorker,
+		staleExecutingWorker,
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
@@ -203,8 +181,7 @@ async function main() {
 
 		// Close queues
 		await Promise.all([
-			ctx.queues.validation.close(),
-			ctx.queues.validateProposal.close(),
+			ctx.queues.staleExecuting.close(),
 			ctx.queues.retention.close(),
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
