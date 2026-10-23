@@ -29,6 +29,8 @@ const config: Config = {
 	proposalRefreshIntervalSeconds: 15,
 	proposalTtlSeconds: 60,
 	pollIntervalSeconds: 2,
+	awsFreshOrderWindowSecs: 4000,
+	awsCloseToExecutionTopN: 20,
 };
 
 function order(index: number): OrderbookOrder {

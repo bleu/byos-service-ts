@@ -21,6 +21,8 @@ const envSchema = z.object({
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 	PROPOSAL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
 	POLL_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(2),
+	AWS_FRESH_ORDER_WINDOW_SECS: z.coerce.number().int().positive().default(4000),
+	AWS_CLOSE_TO_EXECUTION_TOP_N: z.coerce.number().int().positive().default(20),
 	JSON_LOGS: z.enum(["true", "false"]).optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
@@ -44,6 +46,8 @@ interface BaseConfig {
 	proposalRefreshIntervalSeconds: number;
 	proposalTtlSeconds: number;
 	pollIntervalSeconds: number;
+	awsFreshOrderWindowSecs: number;
+	awsCloseToExecutionTopN: number;
 }
 
 export type Config =
@@ -83,6 +87,8 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,
 		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
+		awsFreshOrderWindowSecs: result.data.AWS_FRESH_ORDER_WINDOW_SECS,
+		awsCloseToExecutionTopN: result.data.AWS_CLOSE_TO_EXECUTION_TOP_N,
 	};
 	if (result.data.DISCOVERY_METHOD === "aws") {
 		return { ...base, discoveryMethod: "aws" as const };
