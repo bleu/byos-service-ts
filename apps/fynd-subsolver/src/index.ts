@@ -63,10 +63,10 @@ async function main() {
 	const orderbook =
 		config.discoveryMethod === "aws"
 			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, {
-				logger,
-				freshOrderWindowSecs: config.awsFreshOrderWindowSecs,
-				closeToExecutionTopN: config.awsCloseToExecutionTopN,
-			})
+					logger,
+					freshOrderWindowSecs: config.awsFreshOrderWindowSecs,
+					closeToExecutionTopN: config.awsCloseToExecutionTopN,
+				})
 			: new OrderbookClient(config.discoveryUrl);
 	const subsolver = new FyndSubsolver(
 		config,
