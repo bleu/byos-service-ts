@@ -84,7 +84,6 @@ export class AwsOrderbookClient {
 		this.lastPolledAt = now;
 
 		if (!best) {
-			this.logger?.warn("no auction snapshot found");
 			return [];
 		}
 
