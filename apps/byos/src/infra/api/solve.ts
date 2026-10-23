@@ -48,7 +48,7 @@ export function createSolveRoute(config: SolveConfig) {
 	const log = config.logger?.child({ component: "solve" });
 
 	app.post("/solve", async (c) => {
-		log?.info("/solve received");
+		log?.debug("/solve received");
 		let raw: unknown;
 		try {
 			raw = await c.req.json();
@@ -77,7 +77,7 @@ export function createSolveRoute(config: SolveConfig) {
 			// If it doesn't parse, use 0n (no scoring impact beyond this auction)
 		}
 
-		log?.info(
+		log?.debug(
 			{ auctionId: auction.id ?? null, orderCount: auction.orders.length },
 			"/solve received",
 		);
@@ -277,7 +277,11 @@ export function createSolveRoute(config: SolveConfig) {
 			await clearAuctionStateIfOwned(auctionId);
 		}
 
-		log?.info({ proposalCount: solutions.length }, "solution sent");
+		if (solutions.length > 0) {
+			log?.info({ proposalCount: solutions.length }, "solution sent");
+		} else {
+			log?.debug({ proposalCount: 0 }, "solution sent");
+		}
 		return c.json({ solutions } satisfies SolveResponse);
 	});
 
