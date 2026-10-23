@@ -109,14 +109,20 @@ export class AwsOrderbookClient {
 				.map((o) => {
 					const buyPrice = prices[o.buyToken];
 					const sellPrice = prices[o.sellToken];
-					const surplus =
-						buyPrice && sellPrice
-							? (BigInt(o.buyAmount) * BigInt(buyPrice)) / SCALE -
-								(BigInt(o.sellAmount) * BigInt(sellPrice)) / SCALE
+					const sellValue =
+						buyPrice && sellPrice ? (BigInt(o.sellAmount) * BigInt(sellPrice)) / SCALE : 0n;
+					// Relative spread: nativeValue(buyAmount) * 1e18 / nativeValue(sellAmount)
+					// Scaled by 1e18 to preserve precision in integer arithmetic.
+					// Orders where sell value is zero (missing prices) are ranked last.
+					const relativeSpread =
+						sellValue > 0n
+							? (((BigInt(o.buyAmount) * BigInt(buyPrice ?? "0")) / SCALE) * SCALE) / sellValue
 							: 0n;
-					return { uid: o.uid, surplus };
+					return { uid: o.uid, relativeSpread };
 				})
-				.sort((a, b) => (a.surplus > b.surplus ? -1 : a.surplus < b.surplus ? 1 : 0))
+				.sort((a, b) =>
+					a.relativeSpread > b.relativeSpread ? -1 : a.relativeSpread < b.relativeSpread ? 1 : 0,
+				)
 				.slice(0, this.closeToExecutionTopN)
 				.map((x) => x.uid),
 		);
