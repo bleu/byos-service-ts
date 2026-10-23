@@ -2,7 +2,8 @@ import type { Address, PublicClient } from "viem";
 import { parseAbiItem } from "viem";
 import { type AuctionDto, type OrderbookOrder, toOrderbookOrders } from "./orderbook-client.js";
 
-const FRESH_ORDER_WINDOW_SECS = 4000;
+const DEFAULT_FRESH_ORDER_WINDOW_SECS = 4000;
+const DEFAULT_CLOSE_TO_EXECUTION_TOP_N = 20;
 // How far back to search for the last Settlement event. BSC produces ~3s blocks,
 // so 1000 blocks ≈ 50 minutes.
 const SETTLEMENT_LOOKBACK_BLOCKS = 1_000n;
@@ -48,6 +49,8 @@ interface MinimalLogger {
 export interface AwsOrderbookClientOptions {
 	bootstrapAuctionId?: number; // fallback anchor when no recent on-chain settlement
 	maxDiscoveryRequests?: number; // default DEFAULT_MAX_DISCOVERY_REQUESTS
+	freshOrderWindowSecs?: number; // default DEFAULT_FRESH_ORDER_WINDOW_SECS
+	closeToExecutionTopN?: number; // default DEFAULT_CLOSE_TO_EXECUTION_TOP_N
 	logger?: MinimalLogger;
 }
 
@@ -59,6 +62,8 @@ export class AwsOrderbookClient {
 	private readonly settlementAddress: Address;
 	private readonly bootstrapAuctionId: number | undefined;
 	private readonly maxDiscoveryRequests: number;
+	private readonly freshOrderWindowSecs: number;
+	private readonly closeToExecutionTopN: number;
 	private readonly logger: MinimalLogger | undefined;
 
 	private latestPublishedId: number | undefined;
@@ -75,6 +80,8 @@ export class AwsOrderbookClient {
 		this.settlementAddress = settlementAddress;
 		this.bootstrapAuctionId = options.bootstrapAuctionId;
 		this.maxDiscoveryRequests = options.maxDiscoveryRequests ?? DEFAULT_MAX_DISCOVERY_REQUESTS;
+		this.freshOrderWindowSecs = options.freshOrderWindowSecs ?? DEFAULT_FRESH_ORDER_WINDOW_SECS;
+		this.closeToExecutionTopN = options.closeToExecutionTopN ?? DEFAULT_CLOSE_TO_EXECUTION_TOP_N;
 		this.logger = options.logger;
 	}
 
@@ -89,23 +96,49 @@ export class AwsOrderbookClient {
 		}
 
 		const nowSecs = Math.floor(now / 1000);
-		const freshOrders = best.auction.orders.filter(
-			(o) =>
-				o.validTo <= nowSecs + FRESH_ORDER_WINDOW_SECS &&
-				o.created >= nowSecs - FRESH_ORDER_WINDOW_SECS,
+		const prices = best.auction.prices ?? {};
+		const SCALE = BigInt(1e18);
+
+		const freshUids = new Set(
+			best.auction.orders
+				.filter((o) => o.created >= nowSecs - this.freshOrderWindowSecs)
+				.map((o) => o.uid),
+		);
+
+		const closeToExecutionUids = new Set(
+			best.auction.orders
+				.map((o) => {
+					const buyPrice = prices[o.buyToken];
+					const sellPrice = prices[o.sellToken];
+					const surplus =
+						buyPrice && sellPrice
+							? (BigInt(o.buyAmount) * BigInt(buyPrice)) / SCALE -
+								(BigInt(o.sellAmount) * BigInt(sellPrice)) / SCALE
+							: 0n;
+					return { uid: o.uid, surplus };
+				})
+				.sort((a, b) => (a.surplus > b.surplus ? -1 : a.surplus < b.surplus ? 1 : 0))
+				.slice(0, this.closeToExecutionTopN)
+				.map((x) => x.uid),
+		);
+
+		const selected = best.auction.orders.filter(
+			(o) => freshUids.has(o.uid) || closeToExecutionUids.has(o.uid),
 		);
 
 		this.logger?.debug(
 			{
 				auctionId: best.id,
 				total: best.auction.orders.length,
-				fresh: freshOrders.length,
+				fresh: freshUids.size,
+				closeToExecution: closeToExecutionUids.size,
+				selected: selected.length,
 			},
 			"AWS auction snapshot fetched",
 		);
 
 		const auctionDto: AuctionDto = {
-			orders: freshOrders,
+			orders: selected,
 			tokens: best.auction.prices
 				? Object.fromEntries(
 						Object.entries(best.auction.prices).map(([addr, price]) => [
