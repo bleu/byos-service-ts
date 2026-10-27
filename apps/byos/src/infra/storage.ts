@@ -5,7 +5,6 @@ import type { Db } from "../db/index.js";
 import {
 	bufferEntries,
 	debitOperations,
-	penalties,
 	proposals,
 	proposalsLog,
 	serviceState,
@@ -182,7 +181,7 @@ export async function claimDebitOperation(
 		.where(
 			and(
 				eq(debitOperations.id, id),
-				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+				inArray(debitOperations.status, ["pending", "broadcasting"]),
 				or(
 					sql`${debitOperations.leaseExpiresAt} IS NULL`,
 					sql`${debitOperations.leaseExpiresAt} < now()`,
@@ -205,7 +204,7 @@ export async function recordDebitFailure(
 		.set({
 			attemptCount: sql`${debitOperations.attemptCount} + 1`,
 			lastError: error,
-			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'retrying' END`,
+			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'pending' END`,
 			nextRetryAt: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN NULL ELSE now() END`,
 			leaseOwner: null,
 			leaseExpiresAt: null,
@@ -228,7 +227,7 @@ export async function resumeDebitOperation(db: Db, id: number): Promise<boolean>
 	const [operation] = await db
 		.update(debitOperations)
 		.set({
-			status: "retrying",
+			status: "pending",
 			attemptCount: 0,
 			lastError: null,
 			nextRetryAt: sql`now()`,
@@ -249,7 +248,7 @@ export async function openDebitOperations(db: Db, sourceKind: string): Promise<D
 		.where(
 			and(
 				eq(debitOperations.sourceKind, sourceKind),
-				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+				inArray(debitOperations.status, ["pending", "broadcasting"]),
 			),
 		);
 	return rows.map(rowToDebitOperation);
@@ -331,7 +330,6 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 		callData: i.callData.toLowerCase(),
 	}));
 }
-
 
 /**
  * Canonical fingerprint of every field committed by the proposal signature.
@@ -510,15 +508,11 @@ export async function transition(
 	return { auditEvent };
 }
 
-
 export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
-): Promise<
-	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
-	| StoreError
-> {
+): Promise<{ auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[] } | StoreError> {
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
 			.select({
@@ -538,7 +532,6 @@ export async function applySettlementOutcome(
 		const from = locked.status as Status;
 		let toStatus: Status | null = null;
 		let txHash: Hex | null = null;
-		let insertPenalty = false;
 
 		// In the new design only `submitted` proposals are in the proposals table.
 		switch (outcome.kind) {
@@ -560,13 +553,12 @@ export async function applySettlementOutcome(
 			case "abandoned":
 				if (from === "submitted") {
 					toStatus = "lost";
-					insertPenalty = true;
 				}
 				break;
 		}
 
 		if (!toStatus) {
-			return { auditEvent: null, cancelledAuditEvents: [], insertedPenalty: false };
+			return { auditEvent: null, cancelledAuditEvents: [] };
 		}
 
 		await tx
@@ -577,18 +569,13 @@ export async function applySettlementOutcome(
 				...(outcome.kind === "reverted"
 					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
 					: {}),
+				// /notify abandoned → provisional lost, sub-reason UnknownOutput.
+				// The outcome worker may later correct it to SolverOutbid or, for
+				// late success/revert, to settled/settleFailed via proposals_log.
+				...(toStatus === "lost" ? { rejectionReason: "UnknownOutput" } : {}),
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
-
-		if (insertPenalty) {
-			await tx.insert(penalties).values({
-				proposalId: proposal.id,
-				penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
-				subSolver: proposal.subSolver.toLowerCase(),
-				orderUid: proposal.orderUid.toLowerCase(),
-			});
-		}
 
 		// On success, cancel any other submitted proposals for the same order.
 		const cancelled =
@@ -619,10 +606,11 @@ export async function applySettlementOutcome(
 				);
 		}
 
-		// Delete the row for lost proposals. Settled proposals stay until
-		// the buffer accounting worker processes them; settleFailed rows
-		// stay until the penalty worker charges the revert.
-		if (toStatus === "lost") {
+		// Delete terminal rows immediately so the proposals table holds only
+		// submitted proposals. The trigger has already mirrored the final state
+		// to proposals_log. Settled proposals stay until the buffer accounting
+		// worker processes them.
+		if (toStatus === "lost" || toStatus === "settleFailed") {
 			await tx.delete(proposals).where(eq(proposals.id, proposal.id));
 		}
 
@@ -655,7 +643,6 @@ export async function applySettlementOutcome(
 					settlementTxHash: null,
 				},
 			})),
-			insertedPenalty: insertPenalty,
 		};
 	});
 
@@ -667,23 +654,27 @@ export async function recordPenalty(
 	proposal: Proposal,
 	amount: bigint,
 	penaltyTxHash: Hex,
-	fromStatus: Status = "settleFailed",
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
+	// settleFailed live rows are deleted immediately; update proposals_log instead.
+	// Guard on penalty_tx_hash IS NULL for idempotency — a debit that landed but
+	// whose record call was retried must not overwrite the first hash.
 	const result = await db
-		.update(proposals)
-		.set({
-			status: "penalized" as Status,
-			penaltyTxHash: penaltyTxHash.toLowerCase(),
-			statusChangedAt: sql`now()`,
-		})
-		.where(and(eq(proposals.id, proposal.id), eq(proposals.status, fromStatus)))
-		.returning({ id: proposals.id });
+		.update(proposalsLog)
+		.set({ penaltyTxHash: penaltyTxHash.toLowerCase() })
+		.where(
+			and(
+				eq(proposalsLog.id, proposal.id),
+				eq(proposalsLog.status, "settleFailed"),
+				sql`${proposalsLog.penaltyTxHash} IS NULL`,
+			),
+		)
+		.returning({ id: proposalsLog.id });
 
 	if (result.length === 0) {
 		return {
 			kind: "staleTransition",
 			id: proposal.id,
-			expected: fromStatus,
+			expected: "settleFailed",
 			actual: null,
 		};
 	}
@@ -703,7 +694,6 @@ export async function recordPenalty(
 
 	return { auditEvent };
 }
-
 
 /**
  * Redacts bulk debug data from old `proposals_log` rows to keep the table lean.
@@ -747,9 +737,9 @@ export async function recordNonSettlementDebit(
 	penaltyTxHash: Hex,
 ): Promise<AuditEvent> {
 	await db
-		.update(penalties)
+		.update(proposalsLog)
 		.set({ penaltyTxHash: penaltyTxHash.toLowerCase() })
-		.where(eq(penalties.id, penalty.id));
+		.where(eq(proposalsLog.id, penalty.id));
 
 	return {
 		occurredAt: new Date(),
@@ -762,15 +752,6 @@ export async function recordNonSettlementDebit(
 			penaltyTxHash,
 		},
 	};
-}
-
-export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Promise<void> {
-	await db.insert(penalties).values({
-		proposalId: proposal.id,
-		penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
-		subSolver: proposal.subSolver.toLowerCase(),
-		orderUid: proposal.orderUid.toLowerCase(),
-	});
 }
 
 // --- Reads ---
@@ -862,12 +843,7 @@ export async function listBySubSolver(
 	const rows = await db
 		.select()
 		.from(proposals)
-		.where(
-			and(
-				eq(proposals.subSolver, subSolver.toLowerCase()),
-				eq(proposals.status, "submitted"),
-			),
-		)
+		.where(and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.status, "submitted")))
 		.orderBy(proposals.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
@@ -898,10 +874,7 @@ export async function fetchInflightDataBySubSolver(
 			})
 			.from(proposals)
 			.where(
-				and(
-					eq(proposals.subSolver, subSolver.toLowerCase()),
-					eq(proposals.status, "submitted"),
-				),
+				and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.status, "submitted")),
 			),
 		db
 			.select({ nativeTokenAmount: bufferEntries.nativeTokenAmount })
@@ -947,6 +920,161 @@ export async function getIncludingLog(db: Db, id: number): Promise<Proposal | nu
 
 	const [logRow] = await db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 	return logRow ? tryRowToProposal(logRow) : null;
+}
+
+/**
+ * Returns submitted proposals whose statusChangedAt is older than `windowMs`
+ * milliseconds. Used by the outcome worker to detect lost proposals.
+ */
+export async function fetchStaleSubmitted(
+	db: Db,
+	windowMs: number,
+): Promise<{ id: number; subSolver: Address; orderUid: string }[]> {
+	const rows = await db
+		.select({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		})
+		.from(proposals)
+		.where(
+			and(
+				eq(proposals.status, "submitted"),
+				sql`${proposals.statusChangedAt} < now() - (${windowMs} || ' milliseconds')::interval`,
+			),
+		)
+		.orderBy(proposals.id);
+
+	return rows.map((r) => ({
+		id: r.id,
+		subSolver: r.subSolver as Address,
+		orderUid: r.orderUid,
+	}));
+}
+
+/**
+ * Marks a submitted proposal as `lost` with the given rejection reason.
+ * Inserts a penalty entry and deletes the live row (the trigger fires first,
+ * preserving the final state in proposals_log).
+ *
+ * Called by the outcome worker. If the row is already gone or not in
+ * `submitted` state, returns a staleTransition or notFound indicator.
+ */
+export async function applyLostOutcome(
+	db: Db,
+	proposalId: number,
+	reason: RejectionReason,
+): Promise<
+	| { kind: "ok"; auditEvent: AuditEvent }
+	| { kind: "notFound"; id: number }
+	| { kind: "staleTransition"; id: number }
+> {
+	return db.transaction(async (tx) => {
+		const [locked] = await tx
+			.select()
+			.from(proposals)
+			.where(eq(proposals.id, proposalId))
+			.for("update");
+
+		if (!locked) return { kind: "notFound", id: proposalId };
+		if (locked.status !== "submitted") return { kind: "staleTransition", id: proposalId };
+
+		// Update first so the trigger captures the terminal state in proposals_log.
+		await tx
+			.update(proposals)
+			.set({
+				status: "lost" as Status,
+				rejectionReason: reason,
+				statusChangedAt: sql`now()`,
+			})
+			.where(eq(proposals.id, proposalId));
+
+		// Delete the live row — proposals_log already has the updated state.
+		await tx.delete(proposals).where(eq(proposals.id, proposalId));
+
+		const auditEvent: AuditEvent = {
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged",
+				proposalId,
+				subSolver: locked.subSolver as Address,
+				orderUid: locked.orderUid,
+				from: "submitted",
+				to: "lost",
+				rejectionReason: reason,
+				settlementTxHash: null,
+			},
+		};
+		return { kind: "ok", auditEvent };
+	});
+}
+
+/**
+ * Late correction: a `/notify` success or revert arrived after the outcome
+ * worker already marked the proposal `lost` and deleted the live row.
+ * Updates proposals_log in place; the penalty worker will pick up settleFailed
+ * rows with penalty_tx_hash IS NULL on its next tick.
+ */
+export async function applyLateLostCorrection(
+	db: Db,
+	proposalId: number,
+	outcome: { kind: "succeeded"; txHash: Hex } | { kind: "reverted"; txHash: Hex },
+): Promise<{ auditEvent: AuditEvent } | StoreError> {
+	const toStatus =
+		outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
+
+	return db.transaction(async (tx) => {
+		const result = await tx
+			.update(proposalsLog)
+			.set({
+				status: toStatus,
+				settlementTxHash: outcome.txHash.toLowerCase(),
+				statusChangedAt: sql`now()`,
+			})
+			.where(and(eq(proposalsLog.id, proposalId), eq(proposalsLog.status, "lost")))
+			.returning({ subSolver: proposalsLog.subSolver, orderUid: proposalsLog.orderUid });
+
+		if (result.length === 0) {
+			return {
+				kind: "staleTransition" as const,
+				id: proposalId,
+				expected: "lost",
+				actual: null,
+			};
+		}
+
+		// result.length === 0 is already handled above, so result[0] is always defined
+		const row = result[0] as NonNullable<(typeof result)[0]>;
+
+		const auditEvent: AuditEvent = {
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged",
+				proposalId,
+				subSolver: row.subSolver as Address,
+				orderUid: row.orderUid,
+				from: "lost",
+				to: toStatus,
+				rejectionReason: null,
+				settlementTxHash: outcome.txHash,
+			},
+		};
+		return { auditEvent };
+	});
+}
+
+/**
+ * Reads `settleFailed` proposals from proposals_log (the live row is deleted
+ * immediately on settlement failure). Used by the penalty worker.
+ */
+export async function snapshotSettleFailedFromLog(db: Db): Promise<Proposal[]> {
+	const rows = await db
+		.select()
+		.from(proposalsLog)
+		.where(and(eq(proposalsLog.status, "settleFailed"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
+		.orderBy(proposalsLog.id);
+
+	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
 }
 
 // --- Buffer Entries ---
@@ -1137,19 +1265,18 @@ export interface PendingPenaltyWithCap extends PendingPenalty {
 export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithCap[]> {
 	const rows = await db
 		.select({
-			id: penalties.id,
-			proposalId: penalties.proposalId,
-			subSolver: penalties.subSolver,
-			orderUid: penalties.orderUid,
-			penaltyCap: penalties.penaltyCap,
+			id: proposalsLog.id,
+			subSolver: proposalsLog.subSolver,
+			orderUid: proposalsLog.orderUid,
+			penaltyCap: proposalsLog.settlementPenaltyCap,
 		})
-		.from(penalties)
-		.where(sql`${penalties.penaltyTxHash} IS NULL`)
-		.orderBy(penalties.id);
+		.from(proposalsLog)
+		.where(and(eq(proposalsLog.status, "lost"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
+		.orderBy(proposalsLog.id);
 
 	return rows.map((r) => ({
 		id: r.id,
-		proposalId: r.proposalId,
+		proposalId: r.id,
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
 		penaltyCap: r.penaltyCap == null ? null : BigInt(r.penaltyCap),

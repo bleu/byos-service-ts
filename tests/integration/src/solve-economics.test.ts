@@ -7,7 +7,7 @@ import { encodeTrampolineInteractions } from "@byos/common";
 import type { Address, Hex } from "viem";
 import { keccak256 } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, seedProposal, type TestApp } from "./helpers.js";
+import { createTestApp, seedCandidate, seedProposal, type TestApp } from "./helpers.js";
 
 let app: TestApp;
 
@@ -93,7 +93,7 @@ async function seedActive(
 	gasUsed = 200_000n,
 	auctionId = 1,
 ): Promise<number> {
-	return seedProposal(app.ctx.db, {
+	return seedCandidate(app, {
 		orderUid,
 		sellAmount,
 		minBuyAmount,
@@ -289,19 +289,34 @@ describe("/solve economics", () => {
 
 	it("records the winning solution for notify attribution", async () => {
 		const u = uid("ef");
-		await seedActive(u, 1_000n, 950n, 200_000n, 77);
+		// Ensure proposal ids differ from a fresh auction counter.
+		await seedProposal(app.ctx.db, { orderUid: uid("fe"), auctionId: 76 });
+		const id = await seedActive(u, 1_000n, 950n, 200_000n, 77);
 
 		const auction = auctionJson(u, "sell", "1000", "900", "0");
 		auction.id = "77";
 		const { solutions } = await postSolve(auction);
 		expect(solutions).toHaveLength(1);
 
-		const attributed = await store.solutionProposals(app.ctx.db, 77, [1]);
-		expect(
-			attributed,
-			"a returned solution must be attributable via the solutions table",
-		).toHaveLength(1);
+		const attributed = [await store.get(app.ctx.db, id)];
+		expect(attributed, "a returned solution must be attributable via its proposal id").toHaveLength(
+			1,
+		);
 		expect(attributed[0]?.orderUid).toBe(u);
+		expect(solutions[0]?.id).toBe(id);
+		const transaction = `0x${"56".repeat(32)}`;
+		const notified = await app.internalApp.request("/notify", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				auctionId: "77",
+				solutionId: solutions[0]?.id,
+				kind: "success",
+				transaction,
+			}),
+		});
+		expect(notified.status).toBe(200);
+		expect((await store.get(app.ctx.db, id))?.settlementTxHash).toBe(transaction);
 	});
 
 	// An Executing proposal is frozen out of /solve — its balances are about
@@ -312,7 +327,7 @@ describe("/solve economics", () => {
 			orderUid: u,
 			gasUsed: 200_000n,
 			trampoline: "0x0000000000000000000000000000000000000000" as Address,
-			status: "executing",
+			status: "submitted",
 			sellAmount: 1_000n,
 			minBuyAmount: 950n,
 			quoteBuyAmount: 950n,
@@ -327,11 +342,11 @@ describe("/solve economics", () => {
 
 	// The driver keys its /notify attribution on solution ids (ADR-0013), so
 	// a duplicate would misattribute a settlement.
-	it("each order in an auction gets its own numbered solution", async () => {
+	it("each order in an auction gets its proposal id as the solution id", async () => {
 		const first = uid("f2");
 		const second = uid("f3");
-		await seedActive(first, 1_000n, 950n);
-		await seedProposal(app.ctx.db, {
+		const firstId = await seedActive(first, 1_000n, 950n);
+		const secondId = await seedCandidate(app, {
 			orderUid: second,
 			sellAmount: 2_000n,
 			minBuyAmount: 1_900n,
@@ -352,11 +367,12 @@ describe("/solve economics", () => {
 		auction.orders = [auction.orders[0], secondOrder];
 
 		const { solutions } = await postSolve(auction);
+		expect(new Set(solutions.map((s) => s.id)).size).toBe(2);
 		expect(solutions, "each order must be scored on its own").toHaveLength(2);
 		expect(
 			solutions.map((s) => s.id),
 			"ids must be distinct — the driver attributes notifications by them",
-		).toEqual([1, 2]);
+		).toEqual([firstId, secondId]);
 
 		// Each solution must carry the amounts of its own order, not the other's.
 		expect(solutions[0]?.trades[0]?.executedAmount).toBe("1000");
@@ -381,7 +397,7 @@ describe("/solve economics", () => {
 			},
 		];
 		const signature = `0x${"11".repeat(65)}` as Hex;
-		await seedProposal(app.ctx.db, {
+		await seedCandidate(app, {
 			orderUid: u,
 			sellToken: SELL_TOKEN,
 			buyToken: BUY_TOKEN,

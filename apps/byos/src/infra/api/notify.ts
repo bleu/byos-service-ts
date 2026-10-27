@@ -83,7 +83,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 		const notification = parsed.data;
 		// Strict integer parse, mirroring Rust's parse::<i64>().ok(): a
 		// malformed id means unattributable, not an error.
-		const auctionId =
+		const _auctionId =
 			notification.auctionId && /^\d+$/.test(notification.auctionId)
 				? Number(notification.auctionId)
 				: 0;
@@ -94,11 +94,9 @@ export function createNotifyRoute(config: NotifyConfig) {
 		// Look up in both proposals table and proposals_log (for already-deleted rows).
 		const proposals =
 			solutionIds.length > 0
-				? (
-						await Promise.all(
-							solutionIds.map((id) => store.getIncludingLog(config.db, id)),
-						)
-					).filter((p): p is Proposal => p !== null)
+				? (await Promise.all(solutionIds.map((id) => store.getIncludingLog(config.db, id)))).filter(
+						(p): p is Proposal => p !== null,
+					)
 				: [];
 
 		if (proposals.length === 0) {
@@ -131,6 +129,34 @@ export function createNotifyRoute(config: NotifyConfig) {
 		}
 
 		for (const proposal of proposals) {
+			// If the live row was deleted by the outcome worker (proposal.status ===
+			// "lost" means it came from proposals_log), a late success or revert
+			// must be written directly to the log rather than through the live table.
+			const isLogOnly = proposal.status === "lost";
+			const lateCorrection =
+				isLogOnly && (outcome.kind === "succeeded" || outcome.kind === "reverted")
+					? await store.applyLateLostCorrection(
+							config.db,
+							proposal.id,
+							outcome as
+								| { kind: "succeeded"; txHash: `0x${string}` }
+								| { kind: "reverted"; txHash: `0x${string}` },
+						)
+					: null;
+
+			if (lateCorrection !== null) {
+				if ("kind" in lateCorrection) {
+					log?.error({ id: proposal.id, kind }, "late lost correction not recorded");
+					continue;
+				}
+				config.onAuditEvent(lateCorrection.auditEvent);
+				log?.info(
+					{ id: proposal.id, subSolver: proposal.subSolver, outcome: outcome.kind },
+					"late settlement outcome corrected lost proposal in log",
+				);
+				continue;
+			}
+
 			const result = await store.applySettlementOutcome(config.db, proposal, outcome);
 			if ("kind" in result) {
 				// A write we could not perform on a money path: the debit that

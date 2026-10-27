@@ -79,11 +79,9 @@ export function eventType(kind: AuditKind): string {
 		case "statusChanged": {
 			const { to } = kind;
 			if (to === "rejected") return "rejected";
-			if (to === "expired") return "expired";
 			if (to === "simFailed") return "sim_failed";
 			if (to === "settled") return "settled";
 			if (to === "settleFailed") return "settle_failed";
-			if (to === "penalized") return "penalized";
 			if (to === "cancelled") return "cancelled";
 			if (to === "submitted") return "resubmitted";
 			if (to === "lost") return "lost";

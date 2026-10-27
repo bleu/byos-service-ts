@@ -7,7 +7,7 @@ import {
 	createTestApp,
 	readAuthHeader,
 	SIGNER_ACCOUNT,
-	seedProposal,
+	seedCandidate,
 	signAndSubmitProposal,
 	type TestApp,
 } from "./helpers.js";
@@ -130,7 +130,7 @@ describe("per-signer rate limiting", () => {
 		// called, so a floor gate on every verb would strand a winding-down
 		// sub-solver: unable to cancel its live proposals, and blind to them.
 		app = await createTestApp({ balances: balancesOf(1n) });
-		const id = await seedProposal(app.ctx.db, {
+		const id = await seedCandidate(app, {
 			orderUid: uid(8),
 			subSolver: SIGNER_ACCOUNT.address,
 		});

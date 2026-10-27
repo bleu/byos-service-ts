@@ -41,7 +41,7 @@ export const debitOperations = pgTable(
 		subSolver: text("sub_solver").notNull(),
 		amount: text().notNull(),
 		reason: text().notNull(),
-		status: text().notNull().default("ready"),
+		status: text().notNull().default("pending"),
 		leaseOwner: text("lease_owner"),
 		leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
 		attemptCount: bigint("attempt_count", { mode: "number" }).notNull().default(0),
@@ -202,20 +202,4 @@ export const bufferEntries = pgTable(
 		index("buffer_entries_sub_solver_cleared_idx").on(table.subSolver, table.cleared),
 		index("buffer_entries_proposal_id_idx").on(table.proposalId),
 	],
-);
-
-// --- penalties ---
-
-export const penalties = pgTable(
-	"penalties",
-	{
-		id: bigserial({ mode: "number" }).primaryKey(),
-		proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
-		subSolver: text("sub_solver").notNull(),
-		orderUid: text("order_uid").notNull(),
-		penaltyTxHash: text("penalty_tx_hash"),
-		penaltyCap: text("penalty_cap"),
-		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-	},
-	(table) => [index("penalties_pending_idx").on(table.id).where(sql`penalty_tx_hash IS NULL`)],
 );
