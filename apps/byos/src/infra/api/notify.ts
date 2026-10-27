@@ -83,7 +83,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 		const notification = parsed.data;
 		// Strict integer parse, mirroring Rust's parse::<i64>().ok(): a
 		// malformed id means unattributable, not an error.
-		const auctionId =
+		const _auctionId =
 			notification.auctionId && /^\d+$/.test(notification.auctionId)
 				? Number(notification.auctionId)
 				: 0;
@@ -94,11 +94,9 @@ export function createNotifyRoute(config: NotifyConfig) {
 		// Look up in both proposals table and proposals_log (for already-deleted rows).
 		const proposals =
 			solutionIds.length > 0
-				? (
-						await Promise.all(
-							solutionIds.map((id) => store.getIncludingLog(config.db, id)),
-						)
-					).filter((p): p is Proposal => p !== null)
+				? (await Promise.all(solutionIds.map((id) => store.getIncludingLog(config.db, id)))).filter(
+						(p): p is Proposal => p !== null,
+					)
 				: [];
 
 		if (proposals.length === 0) {
@@ -136,12 +134,13 @@ export function createNotifyRoute(config: NotifyConfig) {
 			// must be written directly to the log rather than through the live table.
 			const isLogOnly = proposal.status === "lost";
 			const lateCorrection =
-				isLogOnly &&
-				(outcome.kind === "succeeded" || outcome.kind === "reverted")
+				isLogOnly && (outcome.kind === "succeeded" || outcome.kind === "reverted")
 					? await store.applyLateLostCorrection(
 							config.db,
 							proposal.id,
-							outcome as { kind: "succeeded"; txHash: `0x${string}` } | { kind: "reverted"; txHash: `0x${string}` },
+							outcome as
+								| { kind: "succeeded"; txHash: `0x${string}` }
+								| { kind: "reverted"; txHash: `0x${string}` },
 						)
 					: null;
 

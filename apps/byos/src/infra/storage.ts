@@ -331,7 +331,6 @@ function interactionsToJson(interactions: Proposal["interactions"]) {
 	}));
 }
 
-
 /**
  * Canonical fingerprint of every field committed by the proposal signature.
  * It is deliberately derived rather than persisted so replay checks cannot
@@ -509,15 +508,11 @@ export async function transition(
 	return { auditEvent };
 }
 
-
 export async function applySettlementOutcome(
 	db: Db,
 	proposal: Proposal,
 	outcome: SettlementOutcome,
-): Promise<
-	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[] }
-	| StoreError
-> {
+): Promise<{ auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[] } | StoreError> {
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx
 			.select({
@@ -700,7 +695,6 @@ export async function recordPenalty(
 	return { auditEvent };
 }
 
-
 /**
  * Redacts bulk debug data from old `proposals_log` rows to keep the table lean.
  * Sets `interactions` to `[]` and `simulation_failure_params` to `null` for rows
@@ -849,12 +843,7 @@ export async function listBySubSolver(
 	const rows = await db
 		.select()
 		.from(proposals)
-		.where(
-			and(
-				eq(proposals.subSolver, subSolver.toLowerCase()),
-				eq(proposals.status, "submitted"),
-			),
-		)
+		.where(and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.status, "submitted")))
 		.orderBy(proposals.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
@@ -885,10 +874,7 @@ export async function fetchInflightDataBySubSolver(
 			})
 			.from(proposals)
 			.where(
-				and(
-					eq(proposals.subSolver, subSolver.toLowerCase()),
-					eq(proposals.status, "submitted"),
-				),
+				and(eq(proposals.subSolver, subSolver.toLowerCase()), eq(proposals.status, "submitted")),
 			),
 		db
 			.select({ nativeTokenAmount: bufferEntries.nativeTokenAmount })
@@ -1034,7 +1020,8 @@ export async function applyLateLostCorrection(
 	proposalId: number,
 	outcome: { kind: "succeeded"; txHash: Hex } | { kind: "reverted"; txHash: Hex },
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
-	const toStatus = outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
+	const toStatus =
+		outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
 
 	return db.transaction(async (tx) => {
 		const result = await tx
@@ -1044,12 +1031,7 @@ export async function applyLateLostCorrection(
 				settlementTxHash: outcome.txHash.toLowerCase(),
 				statusChangedAt: sql`now()`,
 			})
-			.where(
-				and(
-					eq(proposalsLog.id, proposalId),
-					eq(proposalsLog.status, "lost"),
-				),
-			)
+			.where(and(eq(proposalsLog.id, proposalId), eq(proposalsLog.status, "lost")))
 			.returning({ subSolver: proposalsLog.subSolver, orderUid: proposalsLog.orderUid });
 
 		if (result.length === 0) {
@@ -1061,7 +1043,8 @@ export async function applyLateLostCorrection(
 			};
 		}
 
-		const row = result[0]!;
+		// result.length === 0 is already handled above, so result[0] is always defined
+		const row = result[0] as NonNullable<(typeof result)[0]>;
 
 		const auditEvent: AuditEvent = {
 			occurredAt: new Date(),

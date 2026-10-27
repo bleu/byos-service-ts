@@ -6,13 +6,13 @@ import pino from "pino";
 import { parseConfig } from "./config.js";
 import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
+import { CandidateStore } from "./infra/candidate-store.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createOutcomeWorker } from "./infra/jobs/outcome-worker.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
-import { CandidateStore } from "./infra/candidate-store.js";
 
 async function main() {
 	// 1. Parse config (fail-fast)

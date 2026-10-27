@@ -4,11 +4,10 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import { perProposalCL } from "../../domain/collateral.js";
 import { gasCutSize } from "../../domain/gas-cut.js";
 import {
-	type Candidate as ScoringCandidate,
 	effectiveGas,
+	type Candidate as ScoringCandidate,
 	scaledToFill,
 	scoreProposal,
 	surplusToken,
@@ -19,8 +18,7 @@ import {
 	clearAuctionStateIfOwned,
 	setAuctionState,
 } from "../auction-state.js";
-import type { Candidate } from "../candidate-store.js";
-import type { CandidateStore } from "../candidate-store.js";
+import type { Candidate, CandidateStore } from "../candidate-store.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import {
@@ -201,10 +199,11 @@ export function createSolveRoute(config: SolveConfig) {
 
 				// Skip candidates whose fill exceeds the remaining auction amount
 				if (order.partiallyFillable) {
-					const effectiveBuy = candidate.simulationBuyAmount != null &&
+					const effectiveBuy =
+						candidate.simulationBuyAmount != null &&
 						candidate.simulationBuyAmount < candidate.quoteBuyAmount
-						? candidate.simulationBuyAmount
-						: candidate.quoteBuyAmount;
+							? candidate.simulationBuyAmount
+							: candidate.quoteBuyAmount;
 					const exceeds =
 						order.kind === "sell"
 							? candidate.sellAmount > BigInt(order.sellAmount)
@@ -260,17 +259,12 @@ export function createSolveRoute(config: SolveConfig) {
 			if (auctionId !== null) {
 				const buyTokenRefPrice = auction.tokens[order.buyToken]?.referencePrice ?? "0";
 				try {
-					await store.insertAsSubmitted(
-						config.db,
-						bestCandidate,
-						buyTokenRefPrice,
-						{
-							sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
-							surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
-							auctionGasPrice: auctionGasPrice.toString(),
-							clearingPrices: solution.prices,
-						},
-					);
+					await store.insertAsSubmitted(config.db, bestCandidate, buyTokenRefPrice, {
+						sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+						surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+						auctionGasPrice: auctionGasPrice.toString(),
+						clearingPrices: solution.prices,
+					});
 				} catch {
 					// If we can't record the attribution, don't bid — consistency first.
 					continue;
@@ -349,10 +343,7 @@ export function createSolveRoute(config: SolveConfig) {
 							null,
 						)
 						.catch(() => {
-							log?.warn(
-								{ candidateId: candidate.id },
-								"failed to write flushed candidate to log",
-							);
+							log?.warn({ candidateId: candidate.id }, "failed to write flushed candidate to log");
 						});
 				}),
 			);

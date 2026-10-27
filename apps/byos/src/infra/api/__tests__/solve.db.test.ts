@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestContext } from "../../../../test/setup.js";
-import { CandidateStore, type Candidate } from "../../candidate-store.js";
+import { type Candidate, CandidateStore } from "../../candidate-store.js";
 import { createSolveRoute } from "../solve.js";
 
 let ctx: TestContext;

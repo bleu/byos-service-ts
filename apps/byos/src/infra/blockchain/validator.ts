@@ -26,9 +26,7 @@ import { buildSimulation } from "./simulation.js";
  * `bufferBalance` is the sum of uncleared buffer_entries.nativeTokenAmount for
  * the subsolver, subtracted from effectiveBalance to get the adjusted balance.
  */
-export type FetchInflightData = (
-	subSolver: Address,
-) => Promise<{
+export type FetchInflightData = (subSolver: Address) => Promise<{
 	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
 	bufferBalance: bigint;
 }>;

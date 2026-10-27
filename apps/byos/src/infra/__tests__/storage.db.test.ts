@@ -142,10 +142,7 @@ describe("writeToLog", () => {
 
 		await store.writeToLog(ctx.db, id, input, "rejected", "InsufficientEscrow", null);
 
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row).not.toBeUndefined();
 		expect(row?.status).toBe("rejected");
 		expect(row?.rejectionReason).toBe("InsufficientEscrow");
@@ -157,10 +154,7 @@ describe("writeToLog", () => {
 
 		await store.writeToLog(ctx.db, id, input, "cancelled", null, null);
 
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row?.status).toBe("cancelled");
 		expect(row?.rejectionReason).toBeNull();
 	});
@@ -176,10 +170,7 @@ describe("writeToLog", () => {
 		).resolves.not.toThrow();
 
 		// First write wins due to onConflictDoNothing
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row?.status).toBe("cancelled");
 	});
 });

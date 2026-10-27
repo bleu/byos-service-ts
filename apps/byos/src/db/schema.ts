@@ -203,4 +203,3 @@ export const bufferEntries = pgTable(
 		index("buffer_entries_proposal_id_idx").on(table.proposalId),
 	],
 );
-

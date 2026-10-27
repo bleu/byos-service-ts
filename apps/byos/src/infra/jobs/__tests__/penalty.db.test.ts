@@ -1,10 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries, proposals, proposalsLog } from "../../../db/schema.js";
+import { bufferEntries, proposalsLog } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Candidate } from "../../candidate-store.js";
@@ -44,7 +44,7 @@ const BASE_SOLUTION_PRICES: store.SolutionPrices = {
 };
 
 function sampleCandidate(overrides?: Partial<Candidate>): Candidate {
-	const uid = (idCounter).toString(16).padStart(2, "0");
+	const uid = idCounter.toString(16).padStart(2, "0");
 	return {
 		id: idCounter++,
 		subSolver: SUB_SOLVER,

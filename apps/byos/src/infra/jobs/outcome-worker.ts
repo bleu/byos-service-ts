@@ -26,15 +26,11 @@ export interface OutcomeWorkerConfig {
 const STALENESS_WINDOW_MINS = 2;
 
 export function createOutcomeWorker(connection: Redis, config: OutcomeWorkerConfig): Worker {
-	return new Worker(
-		"outcome",
-		async () => runOutcomeCheck(config),
-		{
-			connection,
-			prefix: "byos",
-			concurrency: 1,
-		},
-	);
+	return new Worker("outcome", async () => runOutcomeCheck(config), {
+		connection,
+		prefix: "byos",
+		concurrency: 1,
+	});
 }
 
 /**
@@ -143,10 +139,7 @@ export async function runOutcomeCheck(config: OutcomeWorkerConfig): Promise<void
 				"outcome worker: proposal marked lost",
 			);
 		} catch (e) {
-			logger.error(
-				{ err: e, id: proposal.id },
-				"outcome worker: failed to mark proposal lost",
-			);
+			logger.error({ err: e, id: proposal.id }, "outcome worker: failed to mark proposal lost");
 		}
 	}
 }
