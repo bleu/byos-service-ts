@@ -577,6 +577,10 @@ export async function applySettlementOutcome(
 				...(outcome.kind === "reverted"
 					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
 					: {}),
+				// /notify abandoned → provisional lost, sub-reason UnknownOutput.
+				// The outcome worker may later correct it to SolverOutbid or, for
+				// late success/revert, to settled/settleFailed via proposals_log.
+				...(toStatus === "lost" ? { rejectionReason: "UnknownOutput" } : {}),
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
@@ -619,10 +623,11 @@ export async function applySettlementOutcome(
 				);
 		}
 
-		// Delete the row for lost proposals. Settled proposals stay until
-		// the buffer accounting worker processes them; settleFailed rows
-		// stay until the penalty worker charges the revert.
-		if (toStatus === "lost") {
+		// Delete terminal rows immediately so the proposals table holds only
+		// submitted proposals. The trigger has already mirrored the final state
+		// to proposals_log. Settled proposals stay until the buffer accounting
+		// worker processes them.
+		if (toStatus === "lost" || toStatus === "settleFailed") {
 			await tx.delete(proposals).where(eq(proposals.id, proposal.id));
 		}
 
@@ -667,23 +672,23 @@ export async function recordPenalty(
 	proposal: Proposal,
 	amount: bigint,
 	penaltyTxHash: Hex,
-	fromStatus: Status = "settleFailed",
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
+	// settleFailed live rows are deleted immediately; update proposals_log instead.
 	const result = await db
-		.update(proposals)
+		.update(proposalsLog)
 		.set({
 			status: "penalized" as Status,
 			penaltyTxHash: penaltyTxHash.toLowerCase(),
 			statusChangedAt: sql`now()`,
 		})
-		.where(and(eq(proposals.id, proposal.id), eq(proposals.status, fromStatus)))
-		.returning({ id: proposals.id });
+		.where(and(eq(proposalsLog.id, proposal.id), eq(proposalsLog.status, "settleFailed")))
+		.returning({ id: proposalsLog.id });
 
 	if (result.length === 0) {
 		return {
 			kind: "staleTransition",
 			id: proposal.id,
-			expected: fromStatus,
+			expected: "settleFailed",
 			actual: null,
 		};
 	}
@@ -947,6 +952,180 @@ export async function getIncludingLog(db: Db, id: number): Promise<Proposal | nu
 
 	const [logRow] = await db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 	return logRow ? tryRowToProposal(logRow) : null;
+}
+
+/**
+ * Returns submitted proposals whose statusChangedAt is older than `windowMs`
+ * milliseconds. Used by the outcome worker to detect lost proposals.
+ */
+export async function fetchStaleSubmitted(
+	db: Db,
+	windowMs: number,
+): Promise<{ id: number; subSolver: Address; orderUid: string }[]> {
+	const rows = await db
+		.select({
+			id: proposals.id,
+			subSolver: proposals.subSolver,
+			orderUid: proposals.orderUid,
+		})
+		.from(proposals)
+		.where(
+			and(
+				eq(proposals.status, "submitted"),
+				sql`${proposals.statusChangedAt} < now() - (${windowMs} || ' milliseconds')::interval`,
+			),
+		)
+		.orderBy(proposals.id);
+
+	return rows.map((r) => ({
+		id: r.id,
+		subSolver: r.subSolver as Address,
+		orderUid: r.orderUid,
+	}));
+}
+
+/**
+ * Marks a submitted proposal as `lost` with the given rejection reason.
+ * Inserts a penalty entry and deletes the live row (the trigger fires first,
+ * preserving the final state in proposals_log).
+ *
+ * Called by the outcome worker. If the row is already gone or not in
+ * `submitted` state, returns a staleTransition or notFound indicator.
+ */
+export async function applyLostOutcome(
+	db: Db,
+	proposalId: number,
+	reason: RejectionReason,
+): Promise<
+	| { kind: "ok"; auditEvent: AuditEvent }
+	| { kind: "notFound"; id: number }
+	| { kind: "staleTransition"; id: number }
+> {
+	return db.transaction(async (tx) => {
+		const [locked] = await tx
+			.select()
+			.from(proposals)
+			.where(eq(proposals.id, proposalId))
+			.for("update");
+
+		if (!locked) return { kind: "notFound", id: proposalId };
+		if (locked.status !== "submitted") return { kind: "staleTransition", id: proposalId };
+
+		// Update first so the trigger captures the terminal state in proposals_log.
+		await tx
+			.update(proposals)
+			.set({
+				status: "lost" as Status,
+				rejectionReason: reason,
+				statusChangedAt: sql`now()`,
+			})
+			.where(eq(proposals.id, proposalId));
+
+		await tx.insert(penalties).values({
+			proposalId,
+			penaltyCap: locked.settlementPenaltyCap ?? null,
+			subSolver: locked.subSolver.toLowerCase(),
+			orderUid: locked.orderUid.toLowerCase(),
+		});
+
+		// Delete the live row — proposals_log already has the updated state.
+		await tx.delete(proposals).where(eq(proposals.id, proposalId));
+
+		const auditEvent: AuditEvent = {
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged",
+				proposalId,
+				subSolver: locked.subSolver as Address,
+				orderUid: locked.orderUid,
+				from: "submitted",
+				to: "lost",
+				rejectionReason: reason,
+				settlementTxHash: null,
+			},
+		};
+		return { kind: "ok", auditEvent };
+	});
+}
+
+/**
+ * Late correction: a `/notify` success or revert arrived after the outcome
+ * worker already marked the proposal `lost` and deleted the live row.
+ * Updates proposals_log in place and, for reverts, inserts a penalty entry.
+ */
+export async function applyLateLostCorrection(
+	db: Db,
+	proposalId: number,
+	outcome: { kind: "succeeded"; txHash: Hex } | { kind: "reverted"; txHash: Hex },
+	penaltyCap: bigint | null,
+): Promise<{ auditEvent: AuditEvent } | StoreError> {
+	const toStatus = outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
+
+	return db.transaction(async (tx) => {
+		const result = await tx
+			.update(proposalsLog)
+			.set({
+				status: toStatus,
+				settlementTxHash: outcome.txHash.toLowerCase(),
+				statusChangedAt: sql`now()`,
+			})
+			.where(
+				and(
+					eq(proposalsLog.id, proposalId),
+					eq(proposalsLog.status, "lost"),
+				),
+			)
+			.returning({ subSolver: proposalsLog.subSolver, orderUid: proposalsLog.orderUid });
+
+		if (result.length === 0) {
+			return {
+				kind: "staleTransition" as const,
+				id: proposalId,
+				expected: "lost",
+				actual: null,
+			};
+		}
+
+		const row = result[0]!;
+
+		if (outcome.kind === "reverted") {
+			await tx.insert(penalties).values({
+				proposalId,
+				penaltyCap: penaltyCap?.toString() ?? null,
+				subSolver: row.subSolver.toLowerCase(),
+				orderUid: row.orderUid.toLowerCase(),
+			});
+		}
+
+		const auditEvent: AuditEvent = {
+			occurredAt: new Date(),
+			kind: {
+				type: "statusChanged",
+				proposalId,
+				subSolver: row.subSolver as Address,
+				orderUid: row.orderUid,
+				from: "lost",
+				to: toStatus,
+				rejectionReason: null,
+				settlementTxHash: outcome.txHash,
+			},
+		};
+		return { auditEvent };
+	});
+}
+
+/**
+ * Reads `settleFailed` proposals from proposals_log (the live row is deleted
+ * immediately on settlement failure). Used by the penalty worker.
+ */
+export async function snapshotSettleFailedFromLog(db: Db): Promise<Proposal[]> {
+	const rows = await db
+		.select()
+		.from(proposalsLog)
+		.where(eq(proposalsLog.status, "settleFailed"))
+		.orderBy(proposalsLog.id);
+
+	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
 }
 
 // --- Buffer Entries ---

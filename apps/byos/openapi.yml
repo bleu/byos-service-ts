@@ -40,25 +40,33 @@ info:
 
     ## Proposal lifecycle
 
-    `POST /proposals` validates synchronously on the request path. A `200`
-    response means the proposal passed escrow and simulation checks and is
-    `active` in the current auction. A `400` with kind `ProposalRejected`
-    means it failed validation; the `reason` field carries the typed
-    rejection reason. A `202` means the proposal was inserted but no active
-    auction is running — resubmit when the next auction opens. Use
-    `GET /proposal/{id}` to track subsequent state changes.
+    `POST /proposals` validates synchronously on the request path and runs
+    the full escrow + simulation check inline. A `200 OK` means the proposal
+    passed all checks and is now a **candidate** held in application memory,
+    ready for the next `/solve` auction. A `400` with kind `ProposalRejected`
+    means validation failed; the `reason` field carries the typed rejection
+    reason. Use `GET /proposal/{id}` to track subsequent state changes.
 
-    When a proposal wins an auction and the driver starts submitting the
-    settlement, it becomes `executing`: frozen — not offered to
-    further auctions, not re-simulated, not expired, not cancellable
-    (`DELETE` answers `409`). The driver's outcome resolves it: `settled`
-    (tx landed) or `settleFailed` (tx reverted), each recording
-    `settlementTxHash`; an abandoned submission returns it to `active`. A
-    `settleFailed` proposal later becomes `penalized` once the service
-    has debited the sub-solver's escrow for the reverted settlement.
+    Candidates are held in memory only — they are not written to the database
+    until `/solve` selects them. When `/solve` runs, the selected candidate is
+    inserted into the database as **`submitted`** (sent to the driver) and
+    non-selected candidates are written directly to the log as
+    `SubsolverOutbid` or `AuctionClosed`.
 
-    `rejected`, `simFailed`, `expired`, `cancelled`, `settled`, and
-    `penalized` are terminal — resubmission is a new `POST`.
+    The driver's outcome resolves a submitted proposal: `settled` (tx landed)
+    or `settleFailed` (tx reverted), each recording `settlementTxHash`. A
+    `settleFailed` proposal later becomes `penalized` once the service has
+    debited the sub-solver's escrow. If the outcome is not received within the
+    observation window, the outcome worker marks the proposal `lost` with a
+    sub-reason (`SolverOutbid` if an on-chain Trade event was found for the
+    order, `UnknownOutput` otherwise).
+
+    `rejected`, `simFailed`, `expired`, `cancelled`, `settled`, `penalized`,
+    and `lost` are terminal — resubmission is a new `POST`.
+
+    **Cancel**: `DELETE /proposal/{id}` is only valid while the proposal is
+    a candidate (status `candidate`). Submitted proposals cannot be cancelled
+    — the solution is already with the driver (`409 AlreadySubmitted`).
 
     The driver-facing `/solve` endpoint is not part of this spec: it is
     served on a separate internal listener and implements the CoW Protocol
@@ -114,16 +122,10 @@ paths:
         lifetime — default 5 minutes), then runs escrow and simulation
         validation synchronously on the request path.
 
-        Returns `200` with `status: "active"` when validation passes.
+        Returns `200` with `status: "candidate"` when validation passes and
+        the proposal is held in application memory for the next auction.
         Returns `400 ProposalRejected` with a typed `reason` when validation
-        fails. Returns `202` when no active auction is running (the proposal
-        is stored but not validated; resubmit when the next auction opens).
-        Returns `400 noActiveAuction` when no auction is running and the
-        proposal is rejected before storage.
-
-        Replaying identical signed content returns the existing id with `202`
-        — no re-validation. Reusing a nonce with different signed content
-        returns `409 NonceAlreadyUsed`.
+        fails. Returns `400 noActiveAuction` when no auction is running.
 
         Proposals are immutable — there is no update operation. Replacement
         is a new `POST`, optionally preceded by a `DELETE` of the old one.
@@ -137,16 +139,8 @@ paths:
       responses:
         "200":
           description: |
-            Proposal passed validation and is active in the current auction.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateProposalResponse"
-        "202":
-          description: |
-            Proposal stored but no active auction is running. Resubmit when
-            the next auction opens. Also returned when replaying identical
-            signed content (idempotent replay).
+            Proposal passed validation and is held in memory as a candidate
+            for the next auction.
           content:
             application/json:
               schema:
@@ -167,15 +161,6 @@ paths:
                 $ref: "#/components/schemas/Error"
         "403":
           $ref: "#/components/responses/EscrowFloor"
-        "409":
-          description: |
-            The nonce was already used for a different signed proposal
-            (`NonceAlreadyUsed`). Generate a new nonce; replaying the exact
-            same signed content is safe and returns `202`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -244,8 +229,8 @@ paths:
         Requires an EIP-712 `CancelProposal` signature over the proposal id
         in the `X-Signature` header. The recovered signer must be the
         proposal's sub-solver; a non-owner gets the same `404` as a genuine
-        miss. Only live proposals (`submitted` or `active`) can
-        be cancelled.
+        miss. Only in-memory candidates (status `candidate`) can be
+        cancelled.
       security:
         - cancelAuth: []
       responses:
@@ -267,8 +252,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            The proposal is not cancellable: `executing` (a settlement
-            built on it is in flight) or already terminal.
+            The proposal is not cancellable: it has already been submitted
+            to the driver (`AlreadySubmitted`) or it is in a terminal state.
           content:
             application/json:
               schema:
@@ -288,10 +273,10 @@ paths:
         entirely from the `X-Signature` header — there is no address
         parameter.
 
-        By default only in-flight proposals (`submitted`, `active`) are
-        returned. Pass `includeArchived=true` to fetch from the permanent
-        log instead, which includes all statuses and proposals that have
-        already been swept from the active store.
+        By default returns in-memory candidates (`candidate`) and in-flight
+        proposals (`submitted`). Pass `includeArchived=true` to fetch from
+        the permanent log instead, which includes all statuses including
+        terminal ones.
       security:
         - readAuth: []
       parameters:
@@ -358,10 +343,9 @@ paths:
         the given order. Competitors' proposals on the same order are
         invisible.
 
-        By default only active proposals are returned. Pass
-        `includeArchived=true` to fetch from the permanent log instead,
-        which includes all statuses and proposals that have already been
-        swept from the active store.
+        By default returns in-memory candidates (`candidate`) and in-flight
+        proposals (`submitted`). Pass `includeArchived=true` to fetch from
+        the permanent log instead, which includes all statuses.
       security:
         - readAuth: []
       parameters:
@@ -523,33 +507,39 @@ components:
       description: |
         Lifecycle state of a proposal:
 
-        - `submitted` — signature verified, awaiting background validation.
-        - `active` — passed gatekeeping; eligible for `/solve` selection.
-        - `rejected` — failed a gatekeeping rule; see `rejectionReason`.
-        - `expired` — `validUntil` passed.
-        - `executing` — won an auction; the settlement is being submitted.
-          Exits via the driver's outcome or a timeout back to `active`.
+        - `candidate` — passed all validation checks; held in application
+          memory awaiting the next `/solve` auction. Not yet in the database.
+          Cancellable via `DELETE`.
+        - `submitted` — selected by `/solve` and sent to the driver; now in
+          the database. Not cancellable — the solution is with the driver.
+        - `rejected` — failed a validation rule; see `rejectionReason`.
+        - `expired` — `validUntil` passed before selection.
         - `settled` — the settlement landed on-chain; see
           `settlementTxHash`.
         - `settleFailed` — the settlement reverted on-chain (see
           `settlementTxHash`); the escrow debit for it follows.
         - `penalized` — that debit landed; see `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
-        - `cancelled` — cancelled by a signed `DELETE`.
-        All states except `submitted`, `active`, `executing`, and
-        `settleFailed` are terminal.
+        - `cancelled` — cancelled by a signed `DELETE` while still a
+          candidate, or flushed from memory at auction close
+          (`SubsolverOutbid` / `AuctionClosed` in `rejectionReason`).
+        - `lost` — outcome not observed within the detection window; see
+          `rejectionReason` for `SolverOutbid` vs `UnknownOutput`. A late
+          `/notify` success or revert corrects it in `proposals_log`.
+
+        All states except `candidate` and `submitted` are terminal.
       type: string
       enum:
+        - candidate
         - submitted
-        - active
         - rejected
         - expired
-        - executing
         - settled
         - settleFailed
         - penalized
         - simFailed
         - cancelled
+        - lost
     RejectionReason:
       description: |
         Why the background validator rejected a proposal:
@@ -571,11 +561,10 @@ components:
           never win an auction. Fix: improve the price or
           resubmit when gas is cheaper.
         - `ExposureCapExceeded` — the sub-solver's cumulative in-flight
-          exposure (current proposal plus active and executing siblings,
-          excluding older active routes replaced on acceptance) would exceed
-          effectiveBalance minus positive outstanding buffer debt. The current
-          proposal uses fresh simulated gas. Equality passes. Submitted siblings
-          are excluded; concurrent validations may temporarily overcommit escrow.
+          exposure (sum of all `submitted` siblings plus the current candidate)
+          would exceed `effectiveBalance` minus positive outstanding buffer
+          debt. The current proposal uses fresh simulated gas. Equality passes.
+          Concurrent validations may temporarily overcommit escrow.
           Fix: deposit more collateral or wait for in-flight proposals to settle.
         - `TradeValueCapExceeded` — deprecated historical response value from
           the former trade-value guard; no longer emitted by validation.
@@ -594,7 +583,9 @@ components:
         - TradeValueCapExceeded
         - TokenMismatch
         - SubsolverOutbid
+        - AuctionClosed
         - SolverOutbid
+        - UnknownOutput
         - ProposedSlippageOutrange
         - SimulationMissingExecutedEvent
     Interaction:
@@ -680,8 +671,9 @@ components:
         status:
           type: string
           description: |
-            Present only on `200` responses. Value is `"active"`.
-          example: active
+            Always `"candidate"` — the proposal is held in application memory
+            awaiting the next auction.
+          example: candidate
     GetProposalResponse:
       type: object
       required:
@@ -749,19 +741,24 @@ components:
           format: date-time
           example: "2025-07-01T12:00:05.000Z"
         rejectionReason:
-          description: Only present when `status` is `rejected`.
+          description: |
+            Present when `status` is `rejected`, `cancelled`, or `lost`.
+            For `lost`: `SolverOutbid` (on-chain Trade event found for the
+            order) or `UnknownOutput` (no trade found in the observation
+            window). For `cancelled` at auction close: `SubsolverOutbid`
+            or `AuctionClosed`.
           allOf:
             - $ref: "#/components/schemas/RejectionReason"
         gasUsed:
           description: |
-            Gas estimate from the settlement simulation. Only present once
-            the proposal has been simulated (`active` or later).
+            Gas estimate from the settlement simulation. Present once the
+            proposal has been simulated (status `candidate` or later).
           allOf:
             - $ref: "#/components/schemas/U256"
         trampoline:
           description: |
-            The Trampoline contract address used in the simulation. Only
-            present once the proposal has been simulated.
+            The Trampoline contract address used in the simulation. Present
+            once the proposal has been simulated.
           allOf:
             - $ref: "#/components/schemas/Address"
         settlementTxHash:
@@ -780,12 +777,6 @@ components:
           type: string
           pattern: "^0x[0-9a-f]{64}$"
           example: "0x7b1f3a9c5d8e2f4a6b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a"
-        pendingCancellation:
-          description: |
-            Only present (and `true`) when a cancellation has been
-            requested while the proposal is `executing`. The proposal will
-            be cancelled once the executing state resolves.
-          type: boolean
         simulationFailureParams:
           description: |
             Debug parameters captured when the simulation reverted. Set only

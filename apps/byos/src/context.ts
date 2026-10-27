@@ -47,6 +47,10 @@ export interface AppContext {
 	/** Resolved TrampolineFactory address: the chain's default from
 	 * `trampolineFactoryFor`, or the TRAMPOLINE_FACTORY override. */
 	trampolineFactory: Address;
+	/** Settlement contract address for the current chain. */
+	settlementAddress: Address;
+	/** Shared viem public client for RPC reads. */
+	publicClient: PublicClient;
 	queues: Queues;
 	config: Config;
 	validator: ProposalValidator;
@@ -199,6 +203,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		retentionSweepIntervalSecs: config.RETENTION_SWEEP_INTERVAL_SECS,
 		penaltyIntervalSecs: config.PENALTY_INTERVAL_SECS,
 		balanceRefreshIntervalSecs: config.BALANCE_REFRESH_INTERVAL_SECS,
+		outcomeCheckIntervalSecs: config.OUTCOME_WORKER_INTERVAL_SECS,
 	});
 
 	return {
@@ -208,6 +213,8 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		requestRedis,
 		minCollateralWei,
 		trampolineFactory,
+		settlementAddress,
+		publicClient,
 		queues,
 		config,
 		validator,

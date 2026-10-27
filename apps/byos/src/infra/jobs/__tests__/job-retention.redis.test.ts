@@ -25,6 +25,7 @@ it("bounds scheduled history, removes successful audit jobs and preserves failed
 			retentionSweepIntervalSecs: 300,
 			penaltyIntervalSecs: 12,
 			balanceRefreshIntervalSecs: 60,
+			outcomeCheckIntervalSecs: 60,
 		});
 		for (const queue of [queues.retention, queues.penalty, queues.balanceRefresh]) {
 			const jobs = await queue.getJobs(["waiting", "delayed"]);

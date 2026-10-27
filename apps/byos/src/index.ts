@@ -8,6 +8,7 @@ import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
+import { createOutcomeWorker } from "./infra/jobs/outcome-worker.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
@@ -122,11 +123,21 @@ async function main() {
 		logger: logger.child({ worker: "penalty" }),
 	});
 
+	const outcomeWorker = createOutcomeWorker(ctx.redis, {
+		db: ctx.db,
+		publicClient: ctx.publicClient,
+		settlementAddress: ctx.settlementAddress,
+		blockDurationMs: config.BLOCK_DURATION_MS,
+		onAuditEvent: ctx.onAuditEvent,
+		logger: logger.child({ worker: "outcome" }),
+	});
+
 	const workers = [
 		auditWorker,
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
+		outcomeWorker,
 		slackWorker,
 	].filter(Boolean) as import("bullmq").Worker[];
 
@@ -182,6 +193,7 @@ async function main() {
 			ctx.queues.audit.close(),
 			ctx.queues.balanceRefresh.close(),
 			ctx.queues.slackNotification.close(),
+			ctx.queues.outcome.close(),
 		]);
 
 		// Close Redis
