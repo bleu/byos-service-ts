@@ -39,11 +39,3 @@ const ETHER = 10n ** 18n;
 export function bufferDebit(gap: bigint, refPrice: bigint): bigint {
 	return (gap * refPrice) / ETHER;
 }
-
-/** A queued penalty awaiting escrow debit. */
-export interface PendingPenalty {
-	id: number;
-	proposalId: number;
-	subSolver: Address;
-	orderUid: string;
-}

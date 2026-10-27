@@ -252,7 +252,7 @@ describe("applySettlementOutcome (submitted proposals)", () => {
 		expect(updated?.settlementTxHash).toBe(txHash);
 	});
 
-	it("transitions submitted → lost on abandoned, marks for penalty via proposals_log, deletes the row", async () => {
+	it("transitions submitted → lost on abandoned without authorizing a penalty", async () => {
 		const candidate = sampleCandidate();
 		await store.insertAsSubmitted(ctx.db, candidate, "1000000000000000000", SOLUTION_PRICES);
 		const proposal = (await store.get(ctx.db, candidate.id))!;
@@ -261,11 +261,11 @@ describe("applySettlementOutcome (submitted proposals)", () => {
 
 		// Lost rows are deleted immediately from the live table
 		expect(await store.get(ctx.db, candidate.id)).toBeNull();
-		// The penalty worker finds them via proposals_log (lost + penalty_tx_hash IS NULL)
+		// Operational loss alone cannot authorize collateral movement.
 		const queued = (await store.pendingPenalties(ctx.db)).filter(
 			(p) => p.proposalId === candidate.id,
 		);
-		expect(queued).toHaveLength(1);
+		expect(queued).toHaveLength(0);
 	});
 
 	it("started is a no-op for submitted proposals", async () => {

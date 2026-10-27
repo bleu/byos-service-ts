@@ -1,5 +1,5 @@
 import type { RejectionReason, Status } from "@byos/common";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, or, sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
 import {
@@ -8,12 +8,17 @@ import {
 	proposals,
 	proposalsLog,
 	serviceState,
+	settlementAttemptMembers,
+	settlementAttempts,
 } from "../db/schema.js";
 import type { AuditEvent } from "../domain/audit.js";
 import { nativeSellValue } from "../domain/collateral.js";
-import type { PendingPenalty } from "../domain/penalty.js";
 import type { Proposal, SettlementOutcome } from "../domain/proposal.js";
 import type { Candidate } from "./candidate-store.js";
+import {
+	eligibleNonSettlementPenalties,
+	RETRY_RECONCILIATION_REASON,
+} from "./settlement-attempts.js";
 
 // --- Store Error ---
 
@@ -224,20 +229,52 @@ export async function debitOperationStatus(db: Db, id: number): Promise<string |
 
 /** Returns a reconciliation-paused operation to the durable retry loop. */
 export async function resumeDebitOperation(db: Db, id: number): Promise<boolean> {
-	const [operation] = await db
-		.update(debitOperations)
-		.set({
-			status: "pending",
-			attemptCount: 0,
-			lastError: null,
-			nextRetryAt: sql`now()`,
-			leaseOwner: null,
-			leaseExpiresAt: null,
-			updatedAt: sql`now()`,
-		})
-		.where(and(eq(debitOperations.id, id), eq(debitOperations.status, "needs_reconciliation")))
-		.returning({ id: debitOperations.id });
-	return operation !== undefined;
+	return db.transaction(async (tx) => {
+		const [operation] = await tx.select().from(debitOperations).where(eq(debitOperations.id, id));
+		if (operation?.status !== "needs_reconciliation") return false;
+		let attemptId: number | null = null;
+		if (operation.sourceKind === "non-settlement") {
+			const match = /^attempt:([1-9]\d*)$/.exec(operation.sourceId);
+			if (!match?.[1]) return false; // Legacy charges require evidence review.
+			attemptId = Number(match[1]);
+			if (!Number.isSafeInteger(attemptId)) return false;
+			const [attempt] = await tx
+				.select()
+				.from(settlementAttempts)
+				.where(eq(settlementAttempts.id, attemptId))
+				.for("update");
+			if (
+				attempt?.status !== "needs_reconciliation" ||
+				attempt.reconciliationReason !== RETRY_RECONCILIATION_REASON ||
+				attempt.outcome !== null ||
+				!attempt.startedAt ||
+				!attempt.abandonedAt ||
+				attempt.amount !== operation.amount ||
+				attempt.subSolver !== operation.subSolver
+			)
+				return false;
+		}
+		const resumed = await tx
+			.update(debitOperations)
+			.set({
+				status: "pending",
+				attemptCount: 0,
+				lastError: null,
+				nextRetryAt: sql`now()`,
+				leaseOwner: null,
+				leaseExpiresAt: null,
+				updatedAt: sql`now()`,
+			})
+			.where(and(eq(debitOperations.id, id), eq(debitOperations.status, "needs_reconciliation")))
+			.returning({ id: debitOperations.id });
+		if (!resumed.length) return false;
+		if (attemptId !== null)
+			await tx
+				.update(settlementAttempts)
+				.set({ status: "eligible", reconciliationReason: null })
+				.where(eq(settlementAttempts.id, attemptId));
+		return true;
+	});
 }
 
 /** Operations needing automatic recovery; reconciliation-paused rows stay untouched. */
@@ -435,6 +472,7 @@ export async function insertAsSubmitted(
 	candidate: Candidate,
 	buyTokenRefPrice: string,
 	solutionPrices: SolutionPrices,
+	settlementPenaltyCap: bigint | null = null,
 ): Promise<void> {
 	await db.insert(proposals).values({
 		id: candidate.id,
@@ -463,6 +501,7 @@ export async function insertAsSubmitted(
 		sellTokenRefPrice: solutionPrices.sellTokenRefPrice,
 		validationSellTokenRefPrice: candidate.sellTokenRefPrice,
 		buyTokenRefPrice,
+		settlementPenaltyCap: settlementPenaltyCap?.toString() ?? null,
 		surplusTokenRefPrice: solutionPrices.surplusTokenRefPrice,
 		auctionGasPrice: solutionPrices.auctionGasPrice,
 		clearingPrices: solutionPrices.clearingPrices,
@@ -569,9 +608,8 @@ export async function applySettlementOutcome(
 				...(outcome.kind === "reverted"
 					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
 					: {}),
-				// /notify abandoned → provisional lost, sub-reason UnknownOutput.
-				// The outcome worker may later correct it to SolverOutbid or, for
-				// late success/revert, to settled/settleFailed via proposals_log.
+				// Abandonment is an operational loss. Financial eligibility lives in
+				// settlement_attempts and requires separate driver evidence.
 				...(toStatus === "lost" ? { rejectionReason: "UnknownOutput" } : {}),
 				statusChangedAt: sql`now()`,
 			})
@@ -728,30 +766,6 @@ export async function redactOldLogEntries(db: Db, olderThanSecs: number): Promis
 export async function allSubSolvers(db: Db): Promise<Address[]> {
 	const rows = await db.selectDistinct({ subSolver: proposals.subSolver }).from(proposals);
 	return rows.map((r) => r.subSolver as Address);
-}
-
-export async function recordNonSettlementDebit(
-	db: Db,
-	penalty: PendingPenalty,
-	amount: bigint,
-	penaltyTxHash: Hex,
-): Promise<AuditEvent> {
-	await db
-		.update(proposalsLog)
-		.set({ penaltyTxHash: penaltyTxHash.toLowerCase() })
-		.where(eq(proposalsLog.id, penalty.id));
-
-	return {
-		occurredAt: new Date(),
-		kind: {
-			type: "nonSettlementDebited",
-			proposalId: penalty.proposalId,
-			subSolver: penalty.subSolver as Address,
-			orderUid: penalty.orderUid,
-			amount,
-			penaltyTxHash,
-		},
-	};
 }
 
 // --- Reads ---
@@ -954,7 +968,7 @@ export async function fetchStaleSubmitted(
 
 /**
  * Marks a submitted proposal as `lost` with the given rejection reason.
- * Inserts a penalty entry and deletes the live row (the trigger fires first,
+ * Does not authorize a penalty. Deletes the live row (the trigger fires first,
  * preserving the final state in proposals_log).
  *
  * Called by the outcome worker. If the row is already gone or not in
@@ -1071,7 +1085,27 @@ export async function snapshotSettleFailedFromLog(db: Db): Promise<Proposal[]> {
 	const rows = await db
 		.select()
 		.from(proposalsLog)
-		.where(and(eq(proposalsLog.status, "settleFailed"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
+		.where(
+			and(
+				eq(proposalsLog.status, "settleFailed"),
+				sql`${proposalsLog.penaltyTxHash} IS NULL`,
+				notExists(
+					db
+						.select({ id: settlementAttempts.id })
+						.from(settlementAttemptMembers)
+						.innerJoin(
+							settlementAttempts,
+							eq(settlementAttempts.id, settlementAttemptMembers.attemptId),
+						)
+						.where(
+							and(
+								eq(settlementAttemptMembers.proposalId, proposalsLog.id),
+								eq(settlementAttempts.status, "needs_reconciliation"),
+							),
+						),
+				),
+			),
+		)
 		.orderBy(proposalsLog.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
@@ -1258,27 +1292,5 @@ export async function clearBufferEntries(
 	return result.length;
 }
 
-export interface PendingPenaltyWithCap extends PendingPenalty {
-	penaltyCap: bigint | null;
-}
-
-export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithCap[]> {
-	const rows = await db
-		.select({
-			id: proposalsLog.id,
-			subSolver: proposalsLog.subSolver,
-			orderUid: proposalsLog.orderUid,
-			penaltyCap: proposalsLog.settlementPenaltyCap,
-		})
-		.from(proposalsLog)
-		.where(and(eq(proposalsLog.status, "lost"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
-		.orderBy(proposalsLog.id);
-
-	return rows.map((r) => ({
-		id: r.id,
-		proposalId: r.id,
-		subSolver: r.subSolver as Address,
-		orderUid: r.orderUid,
-		penaltyCap: r.penaltyCap == null ? null : BigInt(r.penaltyCap),
-	}));
-}
+/** Explicit, evidence-backed liabilities; proposal loss is not eligibility. */
+export const pendingPenalties = eligibleNonSettlementPenalties;

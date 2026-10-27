@@ -10,7 +10,9 @@ async function main(): Promise<void> {
 	const { db, client } = createDb(config.DATABASE_URL);
 	try {
 		if (!(await resumeDebitOperation(db, id))) {
-			throw new Error(`Debit operation ${id} is not parked in needs_reconciliation`);
+			throw new Error(
+				`Debit operation ${id} is not eligible for automatic resume; review its operation and settlement evidence`,
+			);
 		}
 		console.info(`Debit operation ${id} resumed`);
 	} finally {

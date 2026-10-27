@@ -266,6 +266,7 @@ export async function seedProposal(
 		settlementTxHash?: string | null;
 		penaltyTxHash?: string | null;
 		auctionId?: number;
+		settlementPenaltyCap?: bigint | null;
 		simulationBuyAmount?: bigint | null;
 		sellTokenRefPrice?: string | null;
 	},
@@ -312,6 +313,8 @@ export async function seedProposal(
 					simulationFailureParams: null,
 					sellTokenRefPrice: overrides.sellTokenRefPrice ?? null,
 					auctionId,
+					settlementPenaltyCap: overrides.settlementPenaltyCap?.toString() ?? null,
+					clearingPrices: {},
 					simulationBuyAmount: overrides.simulationBuyAmount?.toString() ?? null,
 				})
 				.returning({ id: proposalsTable.id });

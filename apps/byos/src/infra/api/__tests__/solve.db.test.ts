@@ -3,6 +3,7 @@ import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestContext } from "../../../../test/setup.js";
 import { type Candidate, CandidateStore } from "../../candidate-store.js";
+import * as store from "../../storage.js";
 import { createSolveRoute } from "../solve.js";
 
 let ctx: TestContext;
@@ -123,6 +124,7 @@ describe("/solve clearing price uses effectiveBuyAmount", () => {
 		const json = await postSolve(createSolveApp(candidateStore), buildAuction());
 
 		expect(json.solutions).toHaveLength(1);
+		expect((await store.get(ctx.db, candidate.id))?.settlementPenaltyCap).toBe(400n);
 		const prices = json.solutions[0]!.prices;
 		// Clearing price for sellToken must use simulationBuyAmount (800_000),
 		// not quoteBuyAmount (1_000_000).

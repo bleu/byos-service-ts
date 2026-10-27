@@ -4,10 +4,11 @@ import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries, proposalsLog } from "../../../db/schema.js";
+import { bufferEntries, proposalsLog, settlementAttempts } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
 import type { Candidate } from "../../candidate-store.js";
+import { recordSettlementNotification } from "../../settlement-attempts.js";
 import * as store from "../../storage.js";
 import { runBufferDebits, runNonSettlementDebits, runRevertDebits } from "../penalty.js";
 
@@ -406,7 +407,17 @@ describe("revert debits", () => {
 describe("non-settlement debits", () => {
 	async function queuedPenalty(): Promise<number> {
 		const candidate = sampleCandidate();
-		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES, C_L);
+		await recordSettlementNotification(ctx.db, {
+			auctionId: "1",
+			solutionId: candidate.id,
+			kind: "settlementStarted",
+		});
+		await recordSettlementNotification(ctx.db, {
+			auctionId: "1",
+			solutionId: candidate.id,
+			kind: "fail",
+		});
 		await store.applyLostOutcome(ctx.db, candidate.id, "UnknownOutput");
 		return candidate.id;
 	}
@@ -441,7 +452,7 @@ describe("non-settlement debits", () => {
 	});
 
 	it("gives up on a permanently failing non-settlement debit after the cap", async () => {
-		await queuedPenalty();
+		const proposalId = await queuedPenalty();
 		let debitCalls = 0;
 		const dead: LegacyDebitEscrow = {
 			async settlementCost() {
@@ -462,7 +473,11 @@ describe("non-settlement debits", () => {
 		}
 
 		expect(debitCalls).toBe(10);
-		expect(await store.pendingPenalties(ctx.db)).not.toHaveLength(0);
+		const [attempt] = await ctx.db
+			.select()
+			.from(settlementAttempts)
+			.where(eq(settlementAttempts.proposalId, proposalId));
+		expect(attempt?.status).toBe("needs_reconciliation");
 	});
 });
 
@@ -832,7 +847,7 @@ describe("buffer debits", () => {
 });
 
 describe("pending penalty debit after loss", () => {
-	it("debits a queued penalty and clears it", async () => {
+	it("does not debit a timeout-only loss", async () => {
 		const isolated = await createTestDb();
 		try {
 			// Insert a candidate, drive it to lost — penalty_tx_hash starts NULL
@@ -855,6 +870,7 @@ describe("pending penalty debit after loss", () => {
 			};
 			const worker = { ...config(operator), db: isolated.db };
 			await runNonSettlementDebits(worker, new Map());
+			expect(landed).toBe(false);
 			expect(await store.pendingPenalties(isolated.db)).toHaveLength(0);
 		} finally {
 			await isolated.cleanup();

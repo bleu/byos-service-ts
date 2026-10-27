@@ -4,12 +4,8 @@ import type { Logger } from "pino";
 import { type Address, type Hex, keccak256 } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import {
-	bufferDebit,
-	type DebitEscrow,
-	nonSettlementDebit,
-	revertDebit,
-} from "../../domain/penalty.js";
+import { bufferDebit, type DebitEscrow, revertDebit } from "../../domain/penalty.js";
+import { executeNonSettlementPenalty } from "../settlement-attempts.js";
 import * as store from "../storage.js";
 
 const MAX_DEBIT_ATTEMPTS = 10;
@@ -247,9 +243,9 @@ export async function runRevertDebits(
 
 export async function runNonSettlementDebits(
 	config: PenaltyWorkerConfig,
-	attempts: Map<number, number>,
+	_attempts: Map<number, number>,
 ): Promise<void> {
-	const { db, minCollateral, onAuditEvent, logger } = config;
+	const { db, onAuditEvent, logger } = config;
 
 	let pending: Awaited<ReturnType<typeof store.pendingPenalties>>;
 	try {
@@ -260,42 +256,45 @@ export async function runNonSettlementDebits(
 	}
 
 	for (const penalty of pending) {
-		if ((attempts.get(penalty.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
-
-		const cL = penalty.penaltyCap ?? minCollateral;
-		const amount = nonSettlementDebit(cL);
-		const reason = nonSettlementReason(penalty.orderUid);
-		const landedDebit = await durableDebit(
-			config,
-			"non-settlement",
-			`penalty:${penalty.id}`,
-			penalty.subSolver,
-			amount,
-			reason,
-		);
-		if (!landedDebit) continue;
-		const penaltyTxHash = landedDebit.hash;
-
-		attempts.delete(penalty.id);
-
 		try {
-			const auditEvent = await store.recordNonSettlementDebit(db, penalty, amount, penaltyTxHash);
-			await store.completeDebitOperation(db, landedDebit.operationId, landedDebit.owner);
-			onAuditEvent(auditEvent);
+			const landed = await executeNonSettlementPenalty(db, penalty.id, async () => {
+				const value = await durableDebit(
+					config,
+					"non-settlement",
+					`attempt:${penalty.id}`,
+					penalty.subSolver,
+					penalty.amount,
+					nonSettlementReason(penalty.orderUid),
+				);
+				return value ? { hash: value.hash, value } : null;
+			});
+			if (!landed) continue;
+			onAuditEvent({
+				occurredAt: new Date(),
+				kind: {
+					type: "nonSettlementDebited",
+					proposalId: penalty.proposalId,
+					subSolver: penalty.subSolver,
+					orderUid: penalty.orderUid,
+					amount: penalty.amount,
+					penaltyTxHash: landed.hash,
+				},
+			});
 			logger.info(
 				{
 					penaltyId: penalty.id,
+					proposalId: penalty.proposalId,
 					subSolver: penalty.subSolver,
 					orderUid: penalty.orderUid,
-					amount: amount.toString(),
-					tx: penaltyTxHash,
+					amount: penalty.amount.toString(),
+					tx: landed.hash,
 				},
 				"non-settlement debit landed",
 			);
-		} catch (e) {
+		} catch (error) {
 			logger.error(
-				{ err: e, penaltyId: penalty.id },
-				"non-settlement debit landed but was not recorded; may re-charge next tick",
+				{ err: error, penaltyId: penalty.id },
+				"non-settlement debit deferred; durable operation retained",
 			);
 		}
 	}

@@ -126,3 +126,9 @@ export const bufferEntries = pgTable(
 		index("buffer_entries_proposal_id_idx").on(table.proposalId),
 	],
 );
+
+/** Financial queue, independent of operational proposal losses. */
+export const settlementAttempts = pgTable("settlement_attempts", {
+	id: bigserial({ mode: "number" }).primaryKey(),
+	status: text().notNull(),
+});
