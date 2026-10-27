@@ -20,49 +20,11 @@ afterAll(async () => {
 });
 
 describe("proposal lifecycle", () => {
-	it("submits a valid proposal → 200 active", async () => {
+	it("submits a valid proposal → 200 with id", async () => {
 		const { response } = await signAndSubmitProposal(app.publicApp);
 		expect(response.status).toBe(200);
 		const body = await response.json();
 		expect(body.id).toBeGreaterThan(0);
-		expect(body.status).toBe("active");
-	});
-
-	it("replays an identical signed proposal → original id with 202", async () => {
-		const { response: firstResponse, body } = await signAndSubmitProposal(app.publicApp, {
-			nonce: 99n,
-		});
-		expect(firstResponse.status, await firstResponse.clone().text()).toBe(200);
-		const first = await firstResponse.json();
-		const auditCountAfterFirst = app.auditEvents.length;
-
-		const replayResponse = await app.publicApp.request("/proposals", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-		});
-
-		expect(replayResponse.status).toBe(202);
-		expect(await replayResponse.json()).toEqual({ id: first.id });
-		// A replay returns the existing id immediately — no new audit events.
-		expect(app.auditEvents).toHaveLength(auditCountAfterFirst);
-	});
-
-	it("rejects a reused nonce with different signed content → 409", async () => {
-		const auditCount = app.auditEvents.length;
-		const first = await signAndSubmitProposal(app.publicApp, { nonce: 100n });
-		expect(first.response.status).toBe(200);
-
-		const conflicting = await signAndSubmitProposal(app.publicApp, {
-			nonce: 100n,
-			orderUid: `0x${"cd".repeat(56)}`,
-		});
-
-		expect(conflicting.response.status).toBe(409);
-		expect(await conflicting.response.json()).toMatchObject({ kind: "NonceAlreadyUsed" });
-		expect(app.auditEvents.slice(auditCount)).toContainEqual(
-			expect.objectContaining({ kind: expect.objectContaining({ type: "nonceConflict" }) }),
-		);
 	});
 
 	it("rejects expired proposal → 400", async () => {
@@ -96,7 +58,7 @@ describe("proposal lifecycle", () => {
 		expect(getResp.status).toBe(200);
 		const body = await getResp.json();
 		expect(body.id).toBe(id);
-		expect(body.status).toBe("active");
+		expect(body.status).toBe("candidate");
 	});
 
 	it("gets proposal by non-owner → 404", async () => {

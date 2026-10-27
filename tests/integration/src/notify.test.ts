@@ -1,4 +1,3 @@
-import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,7 +6,6 @@ import {
 	readAuthHeader,
 	SIGNER_ACCOUNT,
 	seedProposal,
-	signAndSubmitProposal,
 	type TestApp,
 } from "./helpers.js";
 
@@ -30,37 +28,19 @@ async function postNotify(body: unknown): Promise<{ status: number; body: unknow
 	return { status: resp.status, body: await resp.json() };
 }
 
-async function getProposal(id: number): Promise<Proposal> {
-	const proposal = await store.get(app.ctx.db, id);
-	if (!proposal) throw new Error(`proposal ${id} missing`);
-	return proposal;
-}
-
+/** Seeds a proposal directly in the DB as "submitted" so /notify can look it up. */
 async function seedActiveProposal(nonce: bigint): Promise<number> {
-	const { response } = await signAndSubmitProposal(app.publicApp, { nonce });
-	const { id } = await response.json();
-
-	// Transition to active
-	await store.resolveVerdict(app.ctx.db, id, {
-		kind: "accept",
-		simulation: {
-			gasUsed: 150_000n,
-			trampoline: "0x0000000000000000000000000000000000001234" as Address,
-			sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
-			buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
-			simulationBuyAmount: 2n * 10n ** 18n,
-			sellTokenRefPrice: 10n ** 18n,
-		},
+	return seedProposal(app.ctx.db, {
+		orderUid: `0x${nonce.toString(16).padStart(4, "0").repeat(56).slice(0, 112)}`,
+		status: "submitted",
 	});
-
-	return id;
 }
 
 describe("/notify", () => {
 	it("always returns 200 (fire-and-forget)", async () => {
 		const { status } = await postNotify({
 			auctionId: "999",
-			solutionId: 1,
+			solutionId: 999999,
 			kind: "success",
 			transaction: `0x${"aa".repeat(32)}`,
 		});
@@ -70,18 +50,11 @@ describe("/notify", () => {
 	it("success notification transitions to settled", async () => {
 		const id = await seedActiveProposal(300n);
 
-		// Record solution attribution
-		await store.recordSolution(app.ctx.db, 100, 1, id, "0");
-
-		// Move to executing
-		const proposal = await getProposal(id);
-		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
-
-		// Notify success
+		// In the new design, solutionId IS the proposalId.
 		const txHash = `0x${"bb".repeat(32)}`;
 		await postNotify({
 			auctionId: "100",
-			solutionId: 1,
+			solutionId: id,
 			kind: "success",
 			transaction: txHash,
 		});
@@ -90,59 +63,40 @@ describe("/notify", () => {
 		expect(updated?.status).toBe("settled");
 	});
 
-	it("success notification recovers a proposal rejected by a concurrent filled-order validation", async () => {
-		const id = await seedActiveProposal(399n);
-		await store.recordSolution(app.ctx.db, 199, 1, id, "0");
-		await store.resolveVerdict(app.ctx.db, id, {
-			kind: "simFailed",
-			revertReason: "GPv2: order filled",
-		});
-		const txHash = `0x${"99".repeat(32)}`;
-		const notification = { auctionId: "199", solutionId: 1, kind: "success", transaction: txHash };
-		expect((await postNotify(notification)).status).toBe(200);
-		expect(await getProposal(id)).toMatchObject({
-			status: "settled",
-			settlementTxHash: txHash,
-			rejectionReason: null,
-		});
-		expect((await postNotify(notification)).status).toBe(200);
-		expect(await getProposal(id)).toMatchObject({ status: "settled", settlementTxHash: txHash });
-	});
-
 	it("success notification cancels the sub-solver's other live proposals for the order", async () => {
-		const id = await seedActiveProposal(304n);
-		const original = (await store.get(app.ctx.db, id))!;
-		const { id: _id, ...sibling } = original;
-		const { id: siblingId } = await store.insert(app.ctx.db, {
-			...sibling,
-			nonce: 305n,
+		const orderUid = `0x${"f0".repeat(56)}`;
+		const id = await seedProposal(app.ctx.db, {
+			orderUid,
 			status: "submitted",
-			pendingCancellation: false,
+			subSolver: SIGNER_ACCOUNT.address,
 		});
-		const { id: activeSiblingId } = await store.insert(app.ctx.db, {
-			...sibling,
-			nonce: 306n,
-			status: "active",
-			pendingCancellation: false,
+		// Seed siblings with the same orderUid and subSolver — they should get cancelled.
+		const siblingId = await seedProposal(app.ctx.db, {
+			orderUid,
+			status: "submitted",
+			subSolver: SIGNER_ACCOUNT.address,
 		});
-		await store.recordSolution(app.ctx.db, 104, 1, id, "0");
+		const anotherSiblingId = await seedProposal(app.ctx.db, {
+			orderUid,
+			status: "submitted",
+			subSolver: SIGNER_ACCOUNT.address,
+		});
 
-		await store.applySettlementOutcome(app.ctx.db, original, { kind: "started" });
 		await postNotify({
 			auctionId: "104",
-			solutionId: 1,
+			solutionId: id,
 			kind: "success",
 			transaction: `0x${"dd".repeat(32)}`,
 		});
 
 		expect((await store.get(app.ctx.db, id))?.status).toBe("settled");
 		expect((await store.get(app.ctx.db, siblingId))?.status).toBe("cancelled");
-		expect((await store.get(app.ctx.db, activeSiblingId))?.status).toBe("cancelled");
+		expect((await store.get(app.ctx.db, anotherSiblingId))?.status).toBe("cancelled");
 		expect(
 			app.auditEvents.filter(
 				(event) =>
 					event.kind.type === "statusChanged" &&
-					(event.kind.proposalId === siblingId || event.kind.proposalId === activeSiblingId) &&
+					(event.kind.proposalId === siblingId || event.kind.proposalId === anotherSiblingId) &&
 					event.kind.to === "cancelled",
 			),
 		).toHaveLength(2);
@@ -150,37 +104,33 @@ describe("/notify", () => {
 
 	it("revert notification transitions to settleFailed", async () => {
 		const id = await seedActiveProposal(301n);
-		await store.recordSolution(app.ctx.db, 101, 1, id, "0");
-
-		const proposal = await getProposal(id);
-		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
 		const txHash = `0x${"cc".repeat(32)}`;
 		await postNotify({
 			auctionId: "101",
-			solutionId: 1,
+			solutionId: id,
 			kind: "revert",
 			transaction: txHash,
 		});
 
-		const updated = await store.get(app.ctx.db, id);
+		// settleFailed proposals are deleted from proposals table; check via log.
+		const updated = await store.getIncludingLog(app.ctx.db, id);
 		expect(updated?.status).toBe("settleFailed");
 	});
 
 	it("attributable non-outcome kind changes nothing, kept as audit evidence", async () => {
 		const id = await seedActiveProposal(302n);
-		await store.recordSolution(app.ctx.db, 102, 1, id, "0");
 
 		const { status } = await postNotify({
 			auctionId: "102",
-			solutionId: 1,
+			solutionId: id,
 			kind: "emptySolution",
 		});
 		expect(status).toBe(200);
 
 		// Pre-submission kinds carry no transition (ADR-0013)
 		const updated = await store.get(app.ctx.db, id);
-		expect(updated?.status).toBe("active");
+		expect(updated?.status).toBe("submitted");
 
 		// ...but the notification is kept as driverNotified evidence (ADR-0010)
 		const evidence = app.auditEvents.filter(
@@ -227,20 +177,21 @@ describe("/notify", () => {
 
 	it("malformed transaction hash is rejected and nothing is persisted", async () => {
 		const id = await seedActiveProposal(303n);
-		await store.recordSolution(app.ctx.db, 103, 1, id, "0");
-		const proposal = await getProposal(id);
+		const proposal = await store.get(app.ctx.db, id);
+		if (!proposal) throw new Error(`proposal ${id} missing`);
 		await store.applySettlementOutcome(app.ctx.db, proposal, { kind: "started" });
 
 		const { status } = await postNotify({
 			auctionId: "103",
-			solutionId: 1,
+			solutionId: id,
 			kind: "success",
 			transaction: "0xzz",
 		});
 		expect(status).toBe(400);
 
 		const updated = await store.get(app.ctx.db, id);
-		expect(updated?.status).toBe("executing");
+		// settlementStarted is a no-op in the new state machine; proposal stays submitted.
+		expect(updated?.status).toBe("submitted");
 		expect(updated?.settlementTxHash).toBeNull();
 	});
 
@@ -255,44 +206,41 @@ describe("/notify", () => {
 // distinct auction id and order UID, and penalty assertions filter by
 // proposal id instead of counting globally.
 describe("/notify settlement outcomes", () => {
-	/** Rust's bid_proposal: a proposal in `status`, recorded as solution 1
-	 * of `auctionId` — the state /notify finds after a won /solve round. */
+	/** Seeds a "submitted" proposal in the DB (equivalent to a won /solve round). */
 	async function bidProposal(
-		status: "active" | "executing",
-		auctionId: number,
+		_oldStatus: "active" | "executing",
+		_auctionId: number,
 		uidByte: string,
 		subSolver?: Address,
 	): Promise<number> {
-		const id = await seedProposal(app.ctx.db, {
+		return seedProposal(app.ctx.db, {
 			orderUid: `0x${uidByte.repeat(56)}`,
-			status,
+			status: "submitted",
 			...(subSolver ? { subSolver } : {}),
 		});
-		await store.recordSolution(app.ctx.db, auctionId, 1, id, "0");
-		return id;
 	}
 
 	async function penaltiesFor(id: number) {
 		return (await store.pendingPenalties(app.ctx.db)).filter((p) => p.proposalId === id);
 	}
 
-	it("settlementStarted moves the won proposal to executing", async () => {
+	it("settlementStarted is a no-op — proposal stays submitted", async () => {
 		const id = await bidProposal("active", 110, "c1");
 
 		const { status } = await postNotify({
 			auctionId: "110",
-			solutionId: 1,
+			solutionId: id,
 			kind: "settlementStarted",
 		});
 		expect(status).toBe(200);
 
 		const updated = await store.get(app.ctx.db, id);
-		expect(updated?.status).toBe("executing");
+		expect(updated?.status).toBe("submitted");
 	});
 
-	// cancelled/expired/fail mean no tx landed — the proposal returns to
-	// Active and re-enters competition.
-	it("abandoned submission returns the proposal to active", async () => {
+	// cancelled/expired/fail mean no tx landed — in the new state machine the
+	// proposal transitions to "lost" (deleted from proposals, kept in proposals_log).
+	it("abandoned submission marks the proposal lost", async () => {
 		const cases = [
 			{ kind: "cancelled", auctionId: 111, uidByte: "c2" },
 			{ kind: "expired", auctionId: 112, uidByte: "c3" },
@@ -301,13 +249,18 @@ describe("/notify settlement outcomes", () => {
 		for (const { kind, auctionId, uidByte } of cases) {
 			const id = await bidProposal("executing", auctionId, uidByte);
 
-			const { status } = await postNotify({ auctionId: auctionId.toString(), solutionId: 1, kind });
+			const { status } = await postNotify({
+				auctionId: auctionId.toString(),
+				solutionId: id,
+				kind,
+			});
 			expect(status).toBe(200);
 
-			const updated = await store.get(app.ctx.db, id);
-			expect(updated?.status, `${kind} must release the proposal back into competition`).toBe(
-				"active",
-			);
+			// Proposal is deleted from proposals table and moved to proposals_log as "lost".
+			const live = await store.get(app.ctx.db, id);
+			expect(live, `${kind}: row must be removed from proposals`).toBeNull();
+			const log = await store.getIncludingLog(app.ctx.db, id);
+			expect(log?.status, `${kind} must mark the proposal lost`).toBe("lost");
 		}
 	});
 
@@ -323,7 +276,7 @@ describe("/notify settlement outcomes", () => {
 		for (const { kind, auctionId, uidByte } of cases) {
 			const id = await bidProposal("executing", auctionId, uidByte);
 
-			await postNotify({ auctionId: auctionId.toString(), solutionId: 1, kind });
+			await postNotify({ auctionId: auctionId.toString(), solutionId: id, kind });
 
 			const pending = await penaltiesFor(id);
 			expect(pending, `${kind} must queue exactly one non-settlement penalty`).toHaveLength(1);
@@ -333,14 +286,14 @@ describe("/notify settlement outcomes", () => {
 		}
 	});
 
-	// A duplicate abandonment finds the proposal already Active — the
+	// A duplicate abandonment finds the proposal already Lost — the
 	// stale-outcome guard drops it, so the sub-solver is not charged twice.
 	it("duplicate abandonment does not queue a second penalty", async () => {
 		const id = await bidProposal("executing", 117, "c8");
 
-		const first = await postNotify({ auctionId: "117", solutionId: 1, kind: "fail" });
+		const first = await postNotify({ auctionId: "117", solutionId: id, kind: "fail" });
 		expect(first.status).toBe(200);
-		const second = await postNotify({ auctionId: "117", solutionId: 1, kind: "fail" });
+		const second = await postNotify({ auctionId: "117", solutionId: id, kind: "fail" });
 		expect(second.status).toBe(200);
 
 		expect(await penaltiesFor(id), "one lost settlement, one charge").toHaveLength(1);
@@ -352,11 +305,11 @@ describe("/notify settlement outcomes", () => {
 		const id = await bidProposal("active", 118, "c9", SIGNER_ACCOUNT.address);
 
 		expect(
-			(await postNotify({ auctionId: "118", solutionId: 1, kind: "settlementStarted" })).status,
+			(await postNotify({ auctionId: "118", solutionId: id, kind: "settlementStarted" })).status,
 		).toBe(200);
 		const tx = `0x${"11".repeat(32)}` as Hex;
 		expect(
-			(await postNotify({ auctionId: "118", solutionId: 1, kind: "success", transaction: tx }))
+			(await postNotify({ auctionId: "118", solutionId: id, kind: "success", transaction: tx }))
 				.status,
 		).toBe(200);
 

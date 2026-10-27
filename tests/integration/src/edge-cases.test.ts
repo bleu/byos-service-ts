@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	cancelSignatureHeader,
 	createTestApp,
+	SIGNER_ACCOUNT,
+	seedProposal,
 	signAndSubmitProposal,
 	type TestApp,
 } from "./helpers.js";
@@ -25,7 +27,7 @@ async function getProposal(id: number): Promise<Proposal> {
 }
 
 describe("cancel edge cases", () => {
-	it("double cancel returns 409 with terminal status description", async () => {
+	it("double cancel returns 404 after the candidate is removed", async () => {
 		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 301n });
 		const { id } = await response.json();
 
@@ -42,57 +44,37 @@ describe("cancel edge cases", () => {
 			method: "DELETE",
 			headers: { "X-Signature": sig },
 		});
-		expect(resp2.status).toBe(409);
+		expect(resp2.status).toBe(404);
 		const body = await resp2.json();
-		expect(body.kind).toBe("ProposalNotCancellable");
-		expect(body.description).toContain("cancelled");
+		expect(body.kind).toBe("ProposalNotFound");
 	});
 
-	it("cancel of executing proposal returns 202 with deferred status", async () => {
-		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 303n });
-		const { id } = await response.json();
-
-		// Drive proposal to executing: submitted → active → executing
-		const submitted = await getProposal(id);
-		await store.transition(app.ctx.db, submitted, "active");
-		const active = await getProposal(id);
-		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
-
-		const sig = await cancelSignatureHeader(id);
+	it("submitted bids cannot be cancelled, even before settlement starts", async () => {
+		const id = await seedProposal(app.ctx.db, {
+			orderUid: `0x${"b1".repeat(56)}`,
+			subSolver: SIGNER_ACCOUNT.address,
+		});
 		const resp = await app.publicApp.request(`/proposal/${id}`, {
 			method: "DELETE",
-			headers: { "X-Signature": sig },
+			headers: { "X-Signature": await cancelSignatureHeader(id) },
 		});
-		expect(resp.status).toBe(202);
-		const body = await resp.json();
-		expect(body.status).toBe("pending");
-		expect(body.description).toContain("settlement");
+		expect(resp.status).toBe(409);
+		expect((await resp.json()).kind).toBe("ProposalNotCancellable");
+		expect((await getProposal(id)).status).toBe("submitted");
 	});
-
-	it("deferred cancel transitions to cancelled when settlement is abandoned", async () => {
-		const { response } = await signAndSubmitProposal(app.publicApp, { nonce: 304n });
-		const { id } = await response.json();
-
-		// Drive to executing
-		const submitted = await getProposal(id);
-		await store.transition(app.ctx.db, submitted, "active");
-		const active = await getProposal(id);
-		await store.applySettlementOutcome(app.ctx.db, active, { kind: "started" });
-
-		// Cancel while executing (deferred)
-		const sig = await cancelSignatureHeader(id);
-		const cancelResp = await app.publicApp.request(`/proposal/${id}`, {
-			method: "DELETE",
-			headers: { "X-Signature": sig },
+	it("abandoned bids are logged as lost and cannot be cancelled", async () => {
+		const id = await seedProposal(app.ctx.db, {
+			orderUid: `0x${"b2".repeat(56)}`,
+			subSolver: SIGNER_ACCOUNT.address,
 		});
-		expect(cancelResp.status).toBe(202);
-
-		// Settlement abandoned → should transition to cancelled, not active
-		const executing = await getProposal(id);
-		await store.applySettlementOutcome(app.ctx.db, executing, { kind: "abandoned" });
-
-		const final = await store.get(app.ctx.db, id);
-		expect(final?.status).toBe("cancelled");
+		await store.applySettlementOutcome(app.ctx.db, await getProposal(id), { kind: "abandoned" });
+		expect(await store.get(app.ctx.db, id)).toBeNull();
+		expect((await store.getIncludingLog(app.ctx.db, id))?.status).toBe("lost");
+		const resp = await app.publicApp.request(`/proposal/${id}`, {
+			method: "DELETE",
+			headers: { "X-Signature": await cancelSignatureHeader(id) },
+		});
+		expect(resp.status).toBe(404);
 	});
 
 	it("cancel unknown id returns 404", async () => {

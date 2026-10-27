@@ -10,7 +10,6 @@
  */
 
 import type { Auction } from "@byos/byos/src/infra/api/types.js";
-import * as store from "@byos/byos/src/infra/storage.js";
 import { RejectionReason, signProposal } from "@byos/common";
 import type { Address } from "viem";
 import { type Hex, keccak256 } from "viem";
@@ -76,7 +75,8 @@ function solvableAuction(orderUid: string, overrides?: Partial<Auction>): Auctio
 	};
 }
 
-/** Submits a proposal from the default signer with simulated gasUsed. */
+/** Submits a proposal from the default signer. After inline validation it is
+ * stored as a candidate in the CandidateStore — ready for /solve. */
 async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Promise<number> {
 	const { response } = await signAndSubmitProposal(app.publicApp, {
 		orderUid,
@@ -86,19 +86,6 @@ async function seedSimulatedProposal(nonce: bigint, orderUid: `0x${string}`): Pr
 		quoteBuyAmount: 2n * 10n ** 18n,
 	});
 	const { id } = await response.json();
-
-	await store.resolveVerdict(app.ctx.db, id, {
-		kind: "accept",
-		simulation: {
-			gasUsed: 150_000n,
-			trampoline: "0x0000000000000000000000000000000000001234" as Address,
-			sellToken: SELL_TOKEN as Address,
-			buyToken: BUY_TOKEN as Address,
-			simulationBuyAmount: 2n * 10n ** 18n,
-			sellTokenRefPrice: 10n ** 18n,
-		},
-	});
-
 	return id;
 }
 
@@ -159,19 +146,6 @@ async function seedSimulatedProposalOther(nonce: bigint, orderUid: `0x${string}`
 		body: JSON.stringify(body),
 	});
 	const { id } = await response.json();
-
-	await store.resolveVerdict(app.ctx.db, id, {
-		kind: "accept",
-		simulation: {
-			gasUsed: 150_000n,
-			trampoline: "0x0000000000000000000000000000000000001234" as Address,
-			sellToken: SELL_TOKEN as Address,
-			buyToken: BUY_TOKEN as Address,
-			simulationBuyAmount: 3n * 10n ** 18n,
-			sellTokenRefPrice: 10n ** 18n,
-		},
-	});
-
 	return id;
 }
 
@@ -252,56 +226,77 @@ describe("SubsolverOutbid", () => {
 });
 
 // ── SolverOutbid ──────────────────────────────────────────────────────────────
+//
+// In the new architecture, simulation happens inline at POST /proposals time.
+// A validator returning simFailed with "GPv2: order filled" causes the route
+// to immediately write "rejected: SolverOutbid" to proposals_log.
 
 describe("SolverOutbid", () => {
-	it("resolveVerdict with simFailed + revertReason 'GPv2: order filled' → rejected: SolverOutbid", async () => {
+	it("simFailed + revertReason 'GPv2: order filled' → rejected: SolverOutbid", async () => {
 		const orderUid = `0x${"f1".repeat(56)}` as const;
-		const { response } = await signAndSubmitProposal(app.publicApp, {
-			orderUid,
-			nonce: 2000n,
+		// Use a custom app whose validator always returns simFailed with the filled reason.
+		const filledApp = await createTestApp({
+			validator: {
+				validate: async () => ({
+					kind: "simFailed" as const,
+					revertReason: "GPv2: order filled",
+				}),
+			},
 		});
-		const { id } = await response.json();
-
-		// Simulate validator returning simFailed with "GPv2: order filled"
-		await store.resolveVerdict(app.ctx.db, id, {
-			kind: "simFailed",
-			revertReason: "GPv2: order filled",
-		});
-
-		const proposal = await getProposal(id);
-		expect(proposal.status).toBe("rejected");
-		expect(proposal.rejectionReason).toBe(RejectionReason.SolverOutbid);
+		try {
+			const { response } = await signAndSubmitProposal(filledApp.publicApp, {
+				orderUid,
+				nonce: 2000n,
+			});
+			// The route maps simFailed+filled → ProposalRejected (SolverOutbid) → 400
+			expect(response.status).toBe(400);
+			const body = await response.json();
+			expect(body.description).toBe("SolverOutbid");
+		} finally {
+			await filledApp.ctx.cleanup();
+		}
 	});
 
-	it("resolveVerdict with simFailed + other revert reason → stays simFailed", async () => {
+	it("simFailed + other revert reason → 400 SimFailed (not SolverOutbid)", async () => {
 		const orderUid = `0x${"f2".repeat(56)}` as const;
-		const { response } = await signAndSubmitProposal(app.publicApp, {
-			orderUid,
-			nonce: 2001n,
+		const simFailApp = await createTestApp({
+			validator: {
+				validate: async () => ({
+					kind: "simFailed" as const,
+					revertReason: "ERC20: insufficient allowance",
+				}),
+			},
 		});
-		const { id } = await response.json();
-
-		await store.resolveVerdict(app.ctx.db, id, {
-			kind: "simFailed",
-			revertReason: "ERC20: insufficient allowance",
-		});
-
-		const proposal = await getProposal(id);
-		expect(proposal.status).toBe("simFailed");
-		expect(proposal.rejectionReason).not.toBe(RejectionReason.SolverOutbid);
+		try {
+			const { response } = await signAndSubmitProposal(simFailApp.publicApp, {
+				orderUid,
+				nonce: 2001n,
+			});
+			expect(response.status).toBe(400);
+			const body = await response.json();
+			expect(body.description).toBe("SimFailed");
+		} finally {
+			await simFailApp.ctx.cleanup();
+		}
 	});
 
-	it("resolveVerdict with simFailed and no revert reason → stays simFailed", async () => {
+	it("simFailed with no revert reason → 400 SimFailed", async () => {
 		const orderUid = `0x${"f3".repeat(56)}` as const;
-		const { response } = await signAndSubmitProposal(app.publicApp, {
-			orderUid,
-			nonce: 2002n,
+		const simFailApp = await createTestApp({
+			validator: {
+				validate: async () => ({ kind: "simFailed" as const }),
+			},
 		});
-		const { id } = await response.json();
-
-		await store.resolveVerdict(app.ctx.db, id, { kind: "simFailed" });
-
-		const proposal = await getProposal(id);
-		expect(proposal.status).toBe("simFailed");
+		try {
+			const { response } = await signAndSubmitProposal(simFailApp.publicApp, {
+				orderUid,
+				nonce: 2002n,
+			});
+			expect(response.status).toBe(400);
+			const body = await response.json();
+			expect(body.description).toBe("SimFailed");
+		} finally {
+			await simFailApp.ctx.cleanup();
+		}
 	});
 });

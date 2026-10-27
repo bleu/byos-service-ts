@@ -165,11 +165,12 @@ describe("bearer token enforcement", () => {
 				onAuditEvent: () => {},
 			});
 			const id = await seedProposal(ctx.db, { orderUid: `0x${"aa".repeat(56)}` });
-			await store.recordSolution(ctx.db, 77, 1, id, "0");
+
 			const notification = JSON.stringify({
 				auctionId: "77",
-				solutionId: 1,
-				kind: "settlementStarted",
+				solutionId: id,
+				kind: "success",
+				transaction: `0x${"12".repeat(32)}`,
 			});
 			const notify = (headers: Record<string, string>) =>
 				authedApp.request("/notify", {
@@ -183,11 +184,12 @@ describe("bearer token enforcement", () => {
 			expect(
 				(await store.get(ctx.db, id))?.status,
 				"an unauthorized notification must not move the proposal",
-			).toBe("active");
+			).toBe("submitted");
 
 			// With it: accepted, and the transition lands.
 			expect((await notify({ Authorization: "Bearer driver-secret" })).status).toBe(200);
-			expect((await store.get(ctx.db, id))?.status).toBe("executing");
+			expect((await store.get(ctx.db, id))?.status).toBe("settled");
+			expect((await store.getIncludingLog(ctx.db, id))?.status).toBe("settled");
 		} finally {
 			await ctx.cleanup();
 		}

@@ -165,7 +165,6 @@ export function createSolveRoute(config: SolveConfig) {
 		const solutions: Solution[] = [];
 		const selectedCandidateIds: number[] = [];
 		const selectedOrderUids = new Set<string>();
-		let solutionId = 1;
 
 		for (const order of auction.orders) {
 			const candidates =
@@ -246,7 +245,7 @@ export function createSolveRoute(config: SolveConfig) {
 			if (!bestCandidate || !bestCut) continue;
 
 			const solution = buildSolution(
-				solutionId,
+				bestCandidate.id,
 				order,
 				bestCandidate,
 				bestCandidate.gasUsed,
@@ -284,7 +283,6 @@ export function createSolveRoute(config: SolveConfig) {
 				},
 				"solution included",
 			);
-			solutionId++;
 		}
 
 		// Flush snapshot candidates for real auctions:
