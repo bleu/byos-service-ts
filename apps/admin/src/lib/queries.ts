@@ -1,6 +1,6 @@
-import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { auditEvents, bufferEntries, penalties, proposalsLog } from "./schema";
+import { auditEvents, bufferEntries, proposalsLog } from "./schema";
 
 export interface DateRange {
 	from: Date;
@@ -135,19 +135,20 @@ export async function getSubsolverStats(db: Db, range: DateRange): Promise<Subso
 		.from(auditEvents)
 		.groupBy(auditEvents.subSolver);
 
-	// Lifetime penalty totals per subsolver.
+	// Lifetime penalty totals per subsolver (proposals_log rows that have been debited).
 	const penaltyRows = await db
 		.select({
-			subSolver: penalties.subSolver,
+			subSolver: proposalsLog.subSolver,
 			penaltyCount: sql<number>`COUNT(*)`,
 			penalizedAmountWei: sql<string>`COALESCE(SUM((${auditEvents.payload}->>'amount')::numeric), 0)::text`,
 		})
-		.from(penalties)
+		.from(proposalsLog)
 		.leftJoin(
 			auditEvents,
-			and(eq(auditEvents.proposalId, penalties.proposalId), eq(auditEvents.eventType, "penalized")),
+			and(eq(auditEvents.proposalId, proposalsLog.id), eq(auditEvents.eventType, "penalized")),
 		)
-		.groupBy(penalties.subSolver);
+		.where(isNotNull(proposalsLog.penaltyTxHash))
+		.groupBy(proposalsLog.subSolver);
 
 	// Lifetime uncleared buffer balance per subsolver.
 	const bufferRows = await db
@@ -305,7 +306,12 @@ export async function getProposalDetail(db: Db, id: number): Promise<ProposalDet
 export async function getPendingPenaltiesCount(db: Db): Promise<number> {
 	const [row] = await db
 		.select({ count: count() })
-		.from(penalties)
-		.where(isNull(penalties.penaltyTxHash));
+		.from(proposalsLog)
+		.where(
+			and(
+				inArray(proposalsLog.status, ["settleFailed", "lost"]),
+				isNull(proposalsLog.penaltyTxHash),
+			),
+		);
 	return row?.count ?? 0;
 }
