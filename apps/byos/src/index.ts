@@ -11,7 +11,7 @@ import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
-import { createStaleExecutingWorker } from "./infra/jobs/stale-executing.js";
+import { CandidateStore } from "./infra/candidate-store.js";
 
 async function main() {
 	// 1. Parse config (fail-fast)
@@ -32,6 +32,9 @@ async function main() {
 		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
+	// Singleton in-memory candidate store — shared between public and internal apps.
+	const candidateStore = new CandidateStore();
+
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
@@ -39,6 +42,7 @@ async function main() {
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		validator: ctx.validator,
+		candidateStore,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
 		logger,
@@ -56,6 +60,7 @@ async function main() {
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		validator: ctx.validator,
+		candidateStore,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		selectorBufferMs: config.SELECTOR_BUFFER_MS,
 		onAuditEvent: ctx.onAuditEvent,
@@ -99,16 +104,8 @@ async function main() {
 			: undefined,
 	);
 
-	const staleExecutingWorker = createStaleExecutingWorker(ctx.redis, {
-		db: ctx.db,
-		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
-		onAuditEvent: ctx.onAuditEvent,
-		logger: logger.child({ worker: "stale-executing" }),
-	});
-
 	const retentionWorker = createRetentionWorker(ctx.redis, {
 		db: ctx.db,
-		droppedRetentionSecs: config.DROPPED_RETENTION_SECS,
 		logRedactionAfterSecs: config.LOG_REDACTION_AFTER_SECS,
 		logger: logger.child({ worker: "retention" }),
 	});
@@ -127,7 +124,6 @@ async function main() {
 
 	const workers = [
 		auditWorker,
-		staleExecutingWorker,
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
@@ -181,7 +177,6 @@ async function main() {
 
 		// Close queues
 		await Promise.all([
-			ctx.queues.staleExecuting.close(),
 			ctx.queues.retention.close(),
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),

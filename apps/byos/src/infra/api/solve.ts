@@ -6,9 +6,8 @@ import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import { perProposalCL } from "../../domain/collateral.js";
 import { gasCutSize } from "../../domain/gas-cut.js";
-import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
 import {
-	type Candidate,
+	type Candidate as ScoringCandidate,
 	effectiveGas,
 	scaledToFill,
 	scoreProposal,
@@ -20,6 +19,8 @@ import {
 	clearAuctionStateIfOwned,
 	setAuctionState,
 } from "../auction-state.js";
+import type { Candidate } from "../candidate-store.js";
+import type { CandidateStore } from "../candidate-store.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import {
@@ -35,6 +36,7 @@ export interface SolveConfig {
 	minCollateral?: bigint;
 	collateralRatioBps?: bigint;
 	db: Db;
+	candidateStore: CandidateStore;
 	validator: ValidateProposal;
 	onAuditEvent: (event: AuditEvent) => void;
 	selectorBufferMs?: number;
@@ -132,15 +134,47 @@ export function createSolveRoute(config: SolveConfig) {
 		if (waitMs > 0) {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 		}
-		const grouped = await store.activeByOrderUids(config.db, orderUids, auctionId);
+
+		// Take a snapshot of candidates for this auction (real auctions only).
+		// Quote requests read candidates without modifying them.
+		const snapshot: Candidate[] =
+			auctionId !== null ? config.candidateStore.snapshotForAuction(auctionId) : [];
+
+		// Group snapshot candidates by order UID for O(1) lookup.
+		const snapshotByOrder = new Map<string, Candidate[]>();
+		for (const c of snapshot) {
+			const key = c.orderUid.toLowerCase();
+			const list = snapshotByOrder.get(key);
+			if (list) list.push(c);
+			else snapshotByOrder.set(key, [c]);
+		}
+
+		// For quote requests (no auction ID) read all candidates.
+		const quoteCandidatesByOrder =
+			auctionId === null
+				? (() => {
+						const m = new Map<string, Candidate[]>();
+						for (const c of config.candidateStore.getAll()) {
+							const key = c.orderUid.toLowerCase();
+							const list = m.get(key);
+							if (list) list.push(c);
+							else m.set(key, [c]);
+						}
+						return m;
+					})()
+				: null;
 
 		const solutions: Solution[] = [];
-		const selectedProposalIds: number[] = [];
+		const selectedCandidateIds: number[] = [];
+		const selectedOrderUids = new Set<string>();
 		let solutionId = 1;
 
 		for (const order of auction.orders) {
-			const proposals = grouped.get(order.uid.toLowerCase());
-			if (!proposals || proposals.length === 0) continue;
+			const candidates =
+				auctionId !== null
+					? (snapshotByOrder.get(order.uid.toLowerCase()) ?? [])
+					: (quoteCandidatesByOrder?.get(order.uid.toLowerCase()) ?? []);
+			if (candidates.length === 0) continue;
 
 			const tokenInfo = auction.tokens[order.sellToken];
 			const surplusTkn = surplusToken(
@@ -158,39 +192,43 @@ export function createSolveRoute(config: SolveConfig) {
 			const now = BigInt(Math.floor(Date.now() / 1000));
 
 			let bestScore = 0n;
-			let bestProposal: Proposal | null = null;
+			let bestCandidate: Candidate | null = null;
 			let bestCut: ReturnType<typeof gasCutSize> = null;
-			let bestGasUsed = 0n;
 
-			for (const proposal of proposals) {
-				// Skip non-simulated proposals
-				if (proposal.gasUsed === null || proposal.trampoline === null) continue;
+			for (const candidate of candidates) {
 				// Skip expired
-				if (proposal.validUntil <= now) continue;
+				if (candidate.validUntil <= now) continue;
 
-				// Skip proposals whose fill exceeds the remaining auction amount
+				// Skip candidates whose fill exceeds the remaining auction amount
 				if (order.partiallyFillable) {
+					const effectiveBuy = candidate.simulationBuyAmount != null &&
+						candidate.simulationBuyAmount < candidate.quoteBuyAmount
+						? candidate.simulationBuyAmount
+						: candidate.quoteBuyAmount;
 					const exceeds =
 						order.kind === "sell"
-							? proposal.sellAmount > BigInt(order.sellAmount)
-							: effectiveBuyAmount(proposal) > BigInt(order.buyAmount);
+							? candidate.sellAmount > BigInt(order.sellAmount)
+							: effectiveBuy > BigInt(order.buyAmount);
 					if (exceeds) continue;
 				}
 
-				// Score with the auction's own price, published or not (an
-				// oversized price then legitimately produces no bids this round).
-				const gasCost = effectiveGas(proposal.gasUsed) * auctionGasPrice;
+				const gasCost = effectiveGas(candidate.gasUsed) * auctionGasPrice;
+				const effectiveBuy =
+					candidate.simulationBuyAmount != null &&
+					candidate.simulationBuyAmount < candidate.quoteBuyAmount
+						? candidate.simulationBuyAmount
+						: candidate.quoteBuyAmount;
 
-				const candidate: Candidate = {
+				const scoringCandidate: ScoringCandidate = {
 					orderSell: BigInt(order.sellAmount),
 					orderBuy: BigInt(order.buyAmount),
-					proposalSell: proposal.sellAmount,
-					proposalBuy: effectiveBuyAmount(proposal),
+					proposalSell: candidate.sellAmount,
+					proposalBuy: effectiveBuy,
 					isSellOrder: order.kind === "sell",
 					gasCost,
 				};
 
-				const scaled = scaledToFill(candidate, order.partiallyFillable);
+				const scaled = scaledToFill(scoringCandidate, order.partiallyFillable);
 				if (!scaled) continue;
 
 				const score = scoreProposal(scaled, surplusPrice);
@@ -201,79 +239,127 @@ export function createSolveRoute(config: SolveConfig) {
 
 				if (score > bestScore) {
 					bestScore = score;
-					bestProposal = proposal;
+					bestCandidate = candidate;
 					bestCut = cut;
-					bestGasUsed = proposal.gasUsed;
 				}
 			}
 
-			if (!bestProposal || !bestCut) continue;
+			if (!bestCandidate || !bestCut) continue;
 
-			const solution = buildSolution(solutionId, order, bestProposal, bestGasUsed, bestCut);
+			const solution = buildSolution(
+				solutionId,
+				order,
+				bestCandidate,
+				bestCandidate.gasUsed,
+				bestCut,
+			);
 			if (!solution) continue;
 
-			// Record attribution before bidding: if we cannot record it, we
-			// do not bid it. Quote requests skip the write entirely.
+			// For real auctions: insert as submitted before returning the solution.
+			// Quote requests skip DB writes entirely.
 			if (auctionId !== null) {
 				const buyTokenRefPrice = auction.tokens[order.buyToken]?.referencePrice ?? "0";
 				try {
-					await store.recordSolution(
+					await store.insertAsSubmitted(
 						config.db,
-						auctionId,
-						solutionId,
-						bestProposal.id,
+						bestCandidate,
 						buyTokenRefPrice,
-						perProposalCL(
-							bestProposal.sellAmount,
-							tokenInfo?.referencePrice ? BigInt(tokenInfo.referencePrice) : null,
-							config.collateralRatioBps ?? 4n,
-							config.minCollateral ?? 10n ** 16n,
-						),
+						{
+							sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+							surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+							auctionGasPrice: auctionGasPrice.toString(),
+							clearingPrices: solution.prices,
+						},
 					);
 				} catch {
+					// If we can't record the attribution, don't bid — consistency first.
 					continue;
 				}
-
-				// Mark all competing sub-solver proposals for the same order as
-				// rejected: SubsolverOutbid. Best-effort: we never block /solve for this.
-				store
-					.rejectOutbidProposals(config.db, order.uid, bestProposal.subSolver)
-					.catch(() => undefined);
-
-				// Fire-and-forget: price snapshot on the proposal row; failure is non-fatal.
-				store
-					.saveSolutionPrices(config.db, bestProposal.id, {
-						sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
-						surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
-						auctionGasPrice: auctionGasPrice.toString(),
-						clearingPrices: solution.prices,
-					})
-					.catch(() => undefined);
 			}
 
 			solutions.push(solution);
-			selectedProposalIds.push(bestProposal.id);
+			selectedCandidateIds.push(bestCandidate.id);
+			selectedOrderUids.add(order.uid.toLowerCase());
 			log?.info(
 				{
-					proposalId: bestProposal.id,
+					proposalId: bestCandidate.id,
 					orderUid: order.uid,
 					sellToken: order.sellToken,
 					buyToken: order.buyToken,
-					quoteBuyAmount: bestProposal.quoteBuyAmount.toString(),
+					quoteBuyAmount: bestCandidate.quoteBuyAmount.toString(),
 				},
 				"solution included",
 			);
 			solutionId++;
 		}
-		// Close the auction window: reject all still-submitted proposals so they
-		// cannot bleed into the next auction. Awaited so state is consistent before
-		// the response reaches the driver.
+
+		// Flush snapshot candidates for real auctions:
+		// - Selected candidates: remove from store (now in proposals table as submitted)
+		// - Non-selected candidates: write to log with flush reason
 		if (auctionId !== null) {
-			await store.abandonAuctionProposals(config.db, auctionId, selectedProposalIds);
-			// Only clear the shared state if it still belongs to this auction.
-			// An overlapping request for a newer auction may have already replaced
-			// it; clearing unconditionally would wipe that newer state.
-			// Quote requests (auctionId === null) never set state, so they never clear it.
+			config.candidateStore.removeAll(selectedCandidateIds);
+
+			const selectedSet = new Set(selectedCandidateIds);
+			const toFlush = snapshot.filter((c) => !selectedSet.has(c.id));
+
+			// Write non-selected candidates to log synchronously (before response).
+			await Promise.all(
+				toFlush.map((candidate) => {
+					// Determine flush reason: SubsolverOutbid if the order was won by another sub-solver,
+					// AuctionClosed if the order had no winner.
+					const reason = selectedOrderUids.has(candidate.orderUid.toLowerCase())
+						? ("SubsolverOutbid" as const)
+						: ("AuctionClosed" as const);
+
+					return store
+						.writeToLog(
+							config.db,
+							candidate.id,
+							{
+								subSolver: candidate.subSolver,
+								orderUid: candidate.orderUid,
+								orderUidHash: candidate.orderUidHash,
+								sellToken: candidate.sellToken,
+								buyToken: candidate.buyToken,
+								sellAmount: candidate.sellAmount,
+								minBuyAmount: candidate.minBuyAmount,
+								quoteBuyAmount: candidate.quoteBuyAmount,
+								interactions: candidate.interactions,
+								interactionsHash: candidate.interactionsHash,
+								validUntil: candidate.validUntil,
+								nonce: candidate.nonce,
+								signature: candidate.signature,
+								status: "rejected",
+								rejectionReason: reason,
+								gasUsed: candidate.gasUsed,
+								trampoline: candidate.trampoline,
+								settlementTxHash: null,
+								penaltyTxHash: null,
+								sellTokenRefPrice: candidate.sellTokenRefPrice,
+								buyTokenRefPrice: null,
+								surplusTokenRefPrice: null,
+								auctionGasPrice: null,
+								clearingPrices: null,
+								simulationBuyAmount: candidate.simulationBuyAmount,
+								settlementPenaltyCap: null,
+								auctionId: candidate.auctionId,
+							},
+							"rejected",
+							reason,
+							null,
+						)
+						.catch(() => {
+							log?.warn(
+								{ candidateId: candidate.id },
+								"failed to write flushed candidate to log",
+							);
+						});
+				}),
+			);
+
+			// Also remove flushed candidates from store
+			config.candidateStore.removeAll(toFlush.map((c) => c.id));
+
 			await clearAuctionStateIfOwned(auctionId);
 		}
 
@@ -291,26 +377,24 @@ export function createSolveRoute(config: SolveConfig) {
 function buildSolution(
 	id: number,
 	order: AuctionOrder,
-	proposal: Proposal,
+	candidate: Candidate,
 	gasUsed: bigint,
 	cut: { amount: bigint; executedAmount: bigint },
 ): Solution | null {
-	if (!proposal.trampoline) return null;
-
 	const [transfer, execute] = encodeTrampolineInteractions(
-		proposal.trampoline,
+		candidate.trampoline,
 		{
-			orderUidHash: proposal.orderUidHash,
-			sellToken: proposal.sellToken,
-			buyToken: proposal.buyToken,
-			sellAmount: proposal.sellAmount,
-			minBuyAmount: proposal.minBuyAmount,
-			quoteBuyAmount: proposal.quoteBuyAmount,
-			validUntil: proposal.validUntil,
-			nonce: proposal.nonce,
+			orderUidHash: candidate.orderUidHash,
+			sellToken: candidate.sellToken,
+			buyToken: candidate.buyToken,
+			sellAmount: candidate.sellAmount,
+			minBuyAmount: candidate.minBuyAmount,
+			quoteBuyAmount: candidate.quoteBuyAmount,
+			validUntil: candidate.validUntil,
+			nonce: candidate.nonce,
 		},
-		proposal.interactions,
-		proposal.signature,
+		candidate.interactions,
+		candidate.signature,
 	);
 
 	const interactions: SolutionInteraction[] = [transfer, execute].map((i) => ({
@@ -346,11 +430,17 @@ function buildSolution(
 		outputs: [],
 	});
 
+	const effectiveBuy =
+		candidate.simulationBuyAmount != null &&
+		candidate.simulationBuyAmount < candidate.quoteBuyAmount
+			? candidate.simulationBuyAmount
+			: candidate.quoteBuyAmount;
+
 	return {
 		id,
 		prices: {
-			[order.sellToken]: effectiveBuyAmount(proposal).toString(),
-			[order.buyToken]: proposal.sellAmount.toString(),
+			[order.sellToken]: effectiveBuy.toString(),
+			[order.buyToken]: candidate.sellAmount.toString(),
 		},
 		trades: [trade],
 		pre_interactions: order.preInteractions.map(toSolutionInteraction),

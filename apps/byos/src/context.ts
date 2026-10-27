@@ -164,7 +164,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		BigInt(config.MAX_PROPOSAL_SLIPPAGE_NATIVE),
 		BigInt(config.COLLATERAL_RATIO_BPS),
 		minCollateralWei,
-		(subSolver, current) => store.fetchInflightDataBySubSolver(db, subSolver, current),
+		(subSolver) => store.fetchInflightDataBySubSolver(db, subSolver),
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 		escrowValidator.getBalance.bind(escrowValidator),
@@ -196,7 +196,6 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 
 	// Setup job schedulers
 	await setupJobSchedulers(queues, {
-		staleExecutingIntervalSecs: config.STALE_EXECUTING_INTERVAL_SECS,
 		retentionSweepIntervalSecs: config.RETENTION_SWEEP_INTERVAL_SECS,
 		penaltyIntervalSecs: config.PENALTY_INTERVAL_SECS,
 		balanceRefreshIntervalSecs: config.BALANCE_REFRESH_INTERVAL_SECS,

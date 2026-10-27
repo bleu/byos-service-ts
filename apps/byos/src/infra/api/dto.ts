@@ -88,7 +88,6 @@ export function proposalToGetResponse(p: Proposal) {
 		...(p.trampoline ? { trampoline: p.trampoline } : {}),
 		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
 		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
-		...(p.pendingCancellation ? { pendingCancellation: true } : {}),
 		...(p.simulationFailureParams != null
 			? { simulationFailureParams: p.simulationFailureParams }
 			: {}),
@@ -122,7 +121,6 @@ export function proposalToMetadata(p: Proposal) {
 		...(p.trampoline ? { trampoline: p.trampoline } : {}),
 		...(p.settlementTxHash ? { settlementTxHash: p.settlementTxHash } : {}),
 		...(p.penaltyTxHash ? { penaltyTxHash: p.penaltyTxHash } : {}),
-		...(p.pendingCancellation ? { pendingCancellation: true } : {}),
 	};
 }
 

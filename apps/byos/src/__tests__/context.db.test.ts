@@ -114,7 +114,6 @@ describe("buildContext", () => {
 	});
 
 	afterAll(async () => {
-		await ctx.queues.staleExecuting.close();
 		await ctx.queues.retention.close();
 		await ctx.queues.penalty.close();
 		await ctx.queues.audit.close();
@@ -187,7 +186,6 @@ describe("buildContext — MIN_COLLATERAL override", () => {
 	});
 
 	afterAll(async () => {
-		await ctx.queues.staleExecuting.close();
 		await ctx.queues.retention.close();
 		await ctx.queues.penalty.close();
 		await ctx.queues.audit.close();

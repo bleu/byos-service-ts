@@ -9,6 +9,7 @@ import { unknownBalances } from "../../domain/balance-cache.js";
 import type { RateLimiter, TierParams } from "../../domain/rate-limit.js";
 import { allowAll } from "../../domain/rate-limit.js";
 import type { ValidateProposal } from "../../domain/validator.js";
+import type { CandidateStore } from "../candidate-store.js";
 import { errorHandler } from "./error.js";
 import { bearerAuth, ipRateLimit } from "./middleware.js";
 import { createNotifyRoute } from "./notify.js";
@@ -32,6 +33,7 @@ export interface AppContext {
 	cL: bigint;
 	collateralRatioBps?: bigint;
 	validator: ValidateProposal;
+	candidateStore: CandidateStore;
 	solveBearerToken?: string;
 	selectorBufferMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;
@@ -93,6 +95,7 @@ export function createPublicApp(ctx: PublicAppContext): Hono {
 		cL: ctx.cL,
 		onAuditEvent: ctx.onAuditEvent,
 		validator: ctx.validator,
+		candidateStore: ctx.candidateStore,
 		subsolverWhitelist: ctx.subsolverWhitelist,
 		verifyEip1271: ctx.verifyEip1271,
 		logger: ctx.logger,
@@ -121,6 +124,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		minCollateral: ctx.cL,
 		collateralRatioBps: ctx.collateralRatioBps,
 		db: ctx.db,
+		candidateStore: ctx.candidateStore,
 		validator: ctx.validator,
 		onAuditEvent: ctx.onAuditEvent,
 		selectorBufferMs: ctx.selectorBufferMs,

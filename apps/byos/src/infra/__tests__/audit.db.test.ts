@@ -40,11 +40,11 @@ function sampleProposal(): Proposal {
 		trampoline: null,
 		settlementTxHash: null,
 		penaltyTxHash: null,
-		pendingCancellation: false,
 		simulationFailureParams: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
 		sellTokenRefPrice: null,
+		buyTokenRefPrice: null,
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
@@ -83,7 +83,7 @@ describe("audit persistence", () => {
 				subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,
 				orderUid: `0x${"ab".repeat(56)}`,
 				from: "submitted",
-				to: "active",
+				to: "settled",
 				rejectionReason: null,
 				settlementTxHash: null,
 			},
@@ -94,14 +94,14 @@ describe("audit persistence", () => {
 		const rows = await ctx.db
 			.select()
 			.from(auditEvents)
-			.where(eq(auditEvents.eventType, "validated"));
+			.where(eq(auditEvents.eventType, "settled"));
 
 		expect(rows.length).toBeGreaterThanOrEqual(1);
 		const row = rows.at(-1);
-		if (!row) throw new Error("validated audit event missing");
+		if (!row) throw new Error("settled audit event missing");
 		expect(row.proposalId).toBe(2);
 		expect((row.payload as Record<string, unknown>).from).toBe("submitted");
-		expect((row.payload as Record<string, unknown>).to).toBe("active");
+		expect((row.payload as Record<string, unknown>).to).toBe("settled");
 	});
 
 	it("inserts a cancelled event", async () => {

@@ -8,7 +8,6 @@ import {
 	integer,
 	jsonb,
 	pgTable,
-	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -84,10 +83,10 @@ export const proposals = pgTable(
 		trampoline: text(),
 		settlementTxHash: text("settlement_tx_hash"),
 		penaltyTxHash: text("penalty_tx_hash"),
-		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
 		simulationFailureParams: jsonb("simulation_failure_params"),
 		sellTokenRefPrice: text("sell_token_ref_price"),
 		validationSellTokenRefPrice: text("validation_sell_token_ref_price"),
+		buyTokenRefPrice: text("buy_token_ref_price"),
 		settlementPenaltyCap: text("settlement_penalty_cap"),
 		surplusTokenRefPrice: text("surplus_token_ref_price"),
 		auctionGasPrice: text("auction_gas_price"),
@@ -102,7 +101,6 @@ export const proposals = pgTable(
 		index("proposals_sub_solver_status_idx").on(table.subSolver, table.status),
 		index("proposals_status_status_changed_at_idx").on(table.status, table.statusChangedAt),
 		index("proposals_auction_id_status_idx").on(table.auctionId, table.status),
-		uniqueIndex("proposals_sub_solver_nonce_key").on(table.subSolver, table.nonce),
 	],
 );
 
@@ -134,10 +132,10 @@ export const proposalsLog = pgTable(
 		trampoline: text(),
 		settlementTxHash: text("settlement_tx_hash"),
 		penaltyTxHash: text("penalty_tx_hash"),
-		pendingCancellation: boolean("pending_cancellation").notNull().default(false),
 		simulationFailureParams: jsonb("simulation_failure_params"),
 		sellTokenRefPrice: text("sell_token_ref_price"),
 		validationSellTokenRefPrice: text("validation_sell_token_ref_price"),
+		buyTokenRefPrice: text("buy_token_ref_price"),
 		settlementPenaltyCap: text("settlement_penalty_cap"),
 		surplusTokenRefPrice: text("surplus_token_ref_price"),
 		auctionGasPrice: text("auction_gas_price"),
@@ -179,26 +177,6 @@ export const auditEvents = pgTable(
 	],
 );
 
-// --- solutions ---
-
-export const solutions = pgTable(
-	"solutions",
-	{
-		auctionId: bigint("auction_id", { mode: "number" }).notNull(),
-		solutionId: bigint("solution_id", { mode: "number" }).notNull(),
-		proposalId: bigint("proposal_id", { mode: "number" })
-			.notNull()
-			.references(() => proposals.id, { onDelete: "cascade" }),
-		buyTokenRefPrice: text("buy_token_ref_price").notNull(),
-		penaltyCap: text("penalty_cap"),
-		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-	},
-	(table) => [
-		primaryKey({ columns: [table.auctionId, table.solutionId] }),
-		index("solutions_proposal_id_idx").on(table.proposalId),
-	],
-);
-
 // --- buffer_entries ---
 // Per-proposal ledger for the quoteBuyAmount-vs-delivered gap. Positive native_token_amount
 // means under-delivery (debit); negative means over-delivery (credit).
@@ -210,9 +188,7 @@ export const bufferEntries = pgTable(
 	{
 		id: bigserial({ mode: "number" }).primaryKey(),
 		subSolver: text("sub_solver").notNull(),
-		proposalId: bigint("proposal_id", { mode: "number" })
-			.notNull()
-			.references(() => proposals.id, { onDelete: "cascade" }),
+		proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
 		orderUid: text("order_uid").notNull(),
 		delta: text().notNull(),
 		gap: text().notNull(),

@@ -87,12 +87,8 @@ describe("DTO schemas", () => {
 			expect(isTerminalStatus(Status.Submitted)).toBe(false);
 		});
 
-		it("active is not terminal", () => {
-			expect(isTerminalStatus(Status.Active)).toBe(false);
-		});
-
-		it("executing is not terminal", () => {
-			expect(isTerminalStatus(Status.Executing)).toBe(false);
+		it("candidate is not terminal", () => {
+			expect(isTerminalStatus(Status.Candidate)).toBe(false);
 		});
 
 		const terminalStatuses = [
@@ -103,6 +99,7 @@ describe("DTO schemas", () => {
 			Status.Penalized,
 			Status.SimFailed,
 			Status.Cancelled,
+			Status.Lost,
 		] as const;
 
 		for (const status of terminalStatuses) {
@@ -122,7 +119,7 @@ describe("DTO schemas", () => {
 				minBuyAmount: "990000",
 				quoteBuyAmount: "990000",
 				validUntil: "1750000000",
-				status: "active",
+				status: "candidate",
 				rejectionReason: undefined,
 				settlementTxHash: `0x${"cd".repeat(32)}`,
 			});
@@ -152,7 +149,7 @@ describe("DTO schemas", () => {
 						id: 1,
 						subSolver: "0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7",
 						validUntil: "1750000000",
-						status: "active",
+						status: "submitted",
 					},
 				],
 			});

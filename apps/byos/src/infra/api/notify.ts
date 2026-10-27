@@ -90,10 +90,15 @@ export function createNotifyRoute(config: NotifyConfig) {
 		const solutionIds = parseSolutionIds(notification.solutionId);
 		const kind = notification.kind;
 
-		// Attribute proposals via solutions table
+		// In the new design, solutionId IS the proposal id.
+		// Look up in both proposals table and proposals_log (for already-deleted rows).
 		const proposals =
-			auctionId > 0 && solutionIds.length > 0
-				? await store.solutionProposals(config.db, auctionId, solutionIds)
+			solutionIds.length > 0
+				? (
+						await Promise.all(
+							solutionIds.map((id) => store.getIncludingLog(config.db, id)),
+						)
+					).filter((p): p is Proposal => p !== null)
 				: [];
 
 		if (proposals.length === 0) {

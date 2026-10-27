@@ -63,36 +63,35 @@ export type CreateProposalResponse = z.infer<typeof createProposalResponseSchema
 
 export const Status = {
 	Submitted: "submitted",
-	Active: "active",
 	Rejected: "rejected",
 	Expired: "expired",
-	Executing: "executing",
 	Settled: "settled",
 	SettleFailed: "settleFailed",
 	Penalized: "penalized",
 	SimFailed: "simFailed",
 	Cancelled: "cancelled",
+	Lost: "lost",
+	/** In-memory only — never written to the proposals table.
+	 * Used in GET responses for sub-solvers polling their in-memory proposals. */
+	Candidate: "candidate",
 } as const;
 
 export type Status = (typeof Status)[keyof typeof Status];
 
 export const statusSchema = z.enum([
 	Status.Submitted,
-	Status.Active,
 	Status.Rejected,
 	Status.Expired,
-	Status.Executing,
 	Status.Settled,
 	Status.SettleFailed,
 	Status.Penalized,
 	Status.SimFailed,
 	Status.Cancelled,
+	Status.Lost,
+	Status.Candidate,
 ]);
 
-/**
- * Whether the proposal can never become executable again.
- * Executing is deliberately absent: a settlement in flight can be released back to Active.
- */
+/** Whether the proposal can never become executable again. */
 export function isTerminalStatus(status: Status): boolean {
 	switch (status) {
 		case Status.Rejected:
@@ -102,6 +101,7 @@ export function isTerminalStatus(status: Status): boolean {
 		case Status.Penalized:
 		case Status.SimFailed:
 		case Status.Cancelled:
+		case Status.Lost:
 			return true;
 		default:
 			return false;
@@ -134,6 +134,9 @@ export const RejectionReason = {
 	InflightPriceUnavailable: "InflightPriceUnavailable",
 	/** Proposal arrived after the auction window closed or with an order not in the current auction. */
 	AuctionClosed: "AuctionClosed",
+	/** Proposal was submitted to the driver but the settlement outcome is unknown
+	 * (abandoned, not settled within the observation window). */
+	UnknownOutput: "UnknownOutput",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -154,6 +157,7 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.NativePriceUnavailable,
 	RejectionReason.InflightPriceUnavailable,
 	RejectionReason.AuctionClosed,
+	RejectionReason.UnknownOutput,
 ]);
 
 // --- Proposal Metadata ---

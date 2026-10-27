@@ -13,6 +13,7 @@ import {
 	_patchLocalGasPrice,
 	_setLocalAuctionState,
 } from "../../auction-state.js";
+import type { Candidate } from "../../candidate-store.js";
 import * as store from "../../storage.js";
 import { SimulationValidator } from "../validator.js";
 
@@ -22,40 +23,43 @@ const ADDRESS = "0x1111111111111111111111111111111111111111" as Address;
 const BUY = "0x2222222222222222222222222222222222222222" as Address;
 const SCALE = 10n ** 18n;
 
+const SOLUTION_PRICES: store.SolutionPrices = {
+	sellTokenRefPrice: SCALE.toString(),
+	surplusTokenRefPrice: SCALE.toString(),
+	auctionGasPrice: "1",
+	clearingPrices: {},
+};
+
 it("admits pending siblings independently using persisted active exposure", async () => {
 	const ctx = await createTestDb();
 	try {
-		const insert = async (nonce: bigint) => {
+		let idCounter = 1;
+		const insertSubmitted = async (nonce: bigint) => {
 			const orderUid = `0x${nonce.toString(16).padStart(2, "0").repeat(56)}`;
-			const { id } = await store.insert(ctx.db, {
+			const candidate: Candidate = {
+				id: idCounter++,
 				subSolver: ADDRESS,
 				orderUid,
-				orderUidHash: `0x${"aa".repeat(32)}`,
+				orderUidHash: `0x${"aa".repeat(32)}` as Hex,
 				sellAmount: SCALE,
 				minBuyAmount: SCALE,
 				quoteBuyAmount: SCALE,
 				sellToken: ADDRESS,
 				buyToken: BUY,
 				interactions: [],
-				interactionsHash: `0x${"bb".repeat(32)}`,
+				interactionsHash: `0x${"bb".repeat(32)}` as Hex,
 				validUntil: 2_000_000_000n,
 				nonce,
-				signature: "0x",
-				status: "submitted",
-				rejectionReason: null,
-				gasUsed: null,
+				signature: "0x" as Hex,
+				auctionId: 1,
+				gasUsed: 100_000n,
 				trampoline: ADDRESS,
-				settlementTxHash: null,
-				penaltyTxHash: null,
-				pendingCancellation: false,
-				sellTokenRefPrice: null,
-				surplusTokenRefPrice: null,
-				auctionGasPrice: null,
-				clearingPrices: null,
 				simulationBuyAmount: null,
-				auctionId: null,
-			});
-			return (await store.get(ctx.db, id))!;
+				sellTokenRefPrice: SCALE.toString(),
+				createdAt: new Date(),
+			};
+			await store.insertAsSubmitted(ctx.db, candidate, SCALE.toString(), SOLUTION_PRICES);
+			return (await store.get(ctx.db, candidate.id))!;
 		};
 		const order: CowOrder = {
 			sellToken: ADDRESS,
@@ -101,7 +105,7 @@ it("admits pending siblings independently using persisted active exposure", asyn
 			],
 		} as unknown as PublicClient;
 		// Populate auction state so SimulationValidator can resolve order and prices.
-		// insert(1n) and insert(2n) produce these UIDs (nonce.toString(16).padStart(2,"0").repeat(56)).
+		// insertSubmitted(1n) and insertSubmitted(2n) produce these UIDs.
 		const record = {
 			order,
 			preInteractions: [],
@@ -133,18 +137,47 @@ it("admits pending siblings independently using persisted active exposure", asyn
 			SCALE,
 			4n,
 			SCALE / 100n,
-			(subSolver, current) => store.fetchInflightDataBySubSolver(ctx.db, subSolver, current),
+			(subSolver) => store.fetchInflightDataBySubSolver(ctx.db, subSolver),
 		);
-		const a = await insert(1n);
-		const b = await insert(2n);
-		const accepted = await validator.validate(a);
-		expect(accepted?.kind).toBe("accept");
-		await store.resolveVerdict(ctx.db, a.id, accepted!);
-		const blocked = await validator.validate(b);
+		const a = await insertSubmitted(1n);
+		// Validate b against the exposure of a (already submitted)
+		const bProposal = {
+			id: idCounter++,
+			subSolver: ADDRESS,
+			orderUid: `0x${"02".repeat(56)}`,
+			orderUidHash: `0x${"aa".repeat(32)}` as Hex,
+			sellAmount: SCALE,
+			minBuyAmount: SCALE,
+			quoteBuyAmount: SCALE,
+			sellToken: ADDRESS,
+			buyToken: BUY,
+			interactions: [],
+			interactionsHash: `0x${"bb".repeat(32)}` as Hex,
+			validUntil: 2_000_000_000n,
+			nonce: 2n,
+			signature: "0x" as Hex,
+			status: "submitted" as const,
+			rejectionReason: null,
+			gasUsed: null,
+			trampoline: ADDRESS,
+			settlementTxHash: null,
+			penaltyTxHash: null,
+			simulationFailureParams: null,
+			simulationBuyAmount: null,
+			sellTokenRefPrice: null,
+			buyTokenRefPrice: null,
+			surplusTokenRefPrice: null,
+			auctionGasPrice: null,
+			clearingPrices: null,
+			auctionId: 1,
+			createdAt: new Date(),
+			statusChangedAt: new Date(),
+		};
+		const blocked = await validator.validate(bProposal);
 		expect(blocked).toEqual({ kind: "reject", reason: "ExposureCapExceeded" });
-		// Once A leaves the live exposure set, B is eligible without resubmission.
-		await store.transition(ctx.db, (await store.get(ctx.db, a.id))!, "cancelled");
-		expect((await validator.validate(b))?.kind).toBe("accept");
+		// Once A leaves the live exposure set (cancelled), B is eligible.
+		await store.transition(ctx.db, a, "cancelled");
+		expect((await validator.validate(bProposal))?.kind).toBe("accept");
 	} finally {
 		await ctx.cleanup();
 	}

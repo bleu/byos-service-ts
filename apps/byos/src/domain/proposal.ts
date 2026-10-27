@@ -28,13 +28,14 @@ export interface Proposal {
 	trampoline: Address | null;
 	settlementTxHash: Hex | null;
 	penaltyTxHash: Hex | null;
-	pendingCancellation: boolean;
 	simulationFailureParams: unknown | null;
 	createdAt: Date;
 	statusChangedAt: Date;
 	/** Frozen cap for the attributed settlement; null on pre-policy rows. */
 	settlementPenaltyCap?: bigint | null;
 	sellTokenRefPrice: string | null;
+	/** Auction-time buy-token reference price, stored before the solution is returned. */
+	buyTokenRefPrice: string | null;
 	surplusTokenRefPrice: string | null;
 	auctionGasPrice: string | null;
 	/** Clearing prices map at settlement time: { [tokenAddress]: decimalString } */

@@ -358,13 +358,7 @@ export async function runBufferDebits(
 			continue;
 		}
 
-		let refPriceStr: string | null;
-		try {
-			refPriceStr = await store.buyTokenRefPriceForProposal(db, proposal.id);
-		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "buyTokenRefPrice lookup", logger);
-			continue;
-		}
+		const refPriceStr = proposal.buyTokenRefPrice;
 
 		if (!refPriceStr || refPriceStr === "0") {
 			logger.warn({ id: proposal.id }, "no buy-token ref price for buffer; skipping");

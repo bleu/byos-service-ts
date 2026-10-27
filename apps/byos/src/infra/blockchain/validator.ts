@@ -20,15 +20,14 @@ import { buildSimulation } from "./simulation.js";
 
 /**
  * Per-subsolver in-flight data needed for Gate 2 cumulative exposure check.
- * `sellAmountNative` is null for proposals whose sell-token ref price has not
- * yet been written on legacy active rows — reserve the absolute cap until
- * revalidation supplies a price. Submitted siblings are excluded by the store.
+ * Returns only `submitted` proposals already sent to the driver (in DB).
+ * The candidate being validated is not yet in the DB; its exposure is added
+ * by the validator itself after fetching this data.
  * `bufferBalance` is the sum of uncleared buffer_entries.nativeTokenAmount for
  * the subsolver, subtracted from effectiveBalance to get the adjusted balance.
  */
 export type FetchInflightData = (
 	subSolver: Address,
-	current?: Proposal,
 ) => Promise<{
 	proposals: { id: number; gasUsed: bigint | null; sellAmountNative: bigint | null }[];
 	bufferBalance: bigint;
@@ -241,7 +240,7 @@ export class SimulationValidator implements ValidateProposal {
 		// Settle all independent reads immediately so early returns cannot leave
 		// unhandled rejections. Simulation can proceed while these reads finish.
 		const collateralReads = Promise.allSettled([
-			this.fetchInflightData(proposal.subSolver, proposal),
+			this.fetchInflightData(proposal.subSolver),
 			this.readEscrowBalance(proposal.subSolver),
 		]);
 
@@ -254,11 +253,6 @@ export class SimulationValidator implements ValidateProposal {
 
 		const record = auctionState.orders.get(proposal.orderUid.toLowerCase());
 		if (!record) {
-			// Active proposals were already validated against their own auction window.
-			// Absence from the current auction means the auction changed — not that the
-			// order is invalid or the settlement is finished. Defer so the proposal
-			// stays live for settlement attribution and notify accounting.
-			if (proposal.status === "active") return null;
 			return { kind: "reject", reason: "OrderNotFound" };
 		}
 
@@ -466,10 +460,10 @@ export class SimulationValidator implements ValidateProposal {
 			const inflightData = inflightResult.value;
 			const escrowBalance = balanceResult.value;
 
-			// Legacy unpriced siblings reserve the absolute cap until revalidation.
+			// Sum exposure of all already-submitted proposals for this sub-solver.
+			// The current candidate is not yet in the DB, so it is not included here.
 			let siblingExposure = 0n;
 			for (const p of inflightData.proposals) {
-				if (p.id === proposal.id) continue;
 				const cap = penaltyCap(p.sellAmountNative, this.collateralRatioBps, this.minCollateral);
 				const siblingGas = p.gasUsed ?? ESCROW_GAS_ESTIMATION;
 				siblingExposure += cap + siblingGas * gasPrice;
