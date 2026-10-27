@@ -246,7 +246,8 @@ describe("applySettlementOutcome (submitted proposals)", () => {
 		});
 
 		expect("auditEvent" in result).toBe(true);
-		const updated = await store.get(ctx.db, candidate.id);
+		// settleFailed rows are deleted from proposals immediately; fall back to proposals_log
+		const updated = await store.getIncludingLog(ctx.db, candidate.id);
 		expect(updated?.status).toBe("settleFailed");
 		expect(updated?.settlementTxHash).toBe(txHash);
 	});
@@ -361,10 +362,15 @@ describe("getForOwner", () => {
 
 describe("signedProposalFingerprint", () => {
 	it("derives a fingerprint from all signed payload fields", () => {
-		const proposal = sampleProposalInput();
+		const interaction = {
+			target: "0x0000000000000000000000000000000000000042" as Address,
+			value: 0n,
+			callData: "0xabcdef" as Hex,
+		};
+		const proposal = sampleProposalInput({ interactions: [interaction] });
 		const differentRoute = {
 			...proposal,
-			interactions: [{ ...proposal.interactions[0]!, callData: "0xdeadbeef" as Hex }],
+			interactions: [{ ...interaction, callData: "0xdeadbeef" as Hex }],
 		};
 		expect(store.signedProposalFingerprint(proposal)).not.toBe(
 			store.signedProposalFingerprint(differentRoute),

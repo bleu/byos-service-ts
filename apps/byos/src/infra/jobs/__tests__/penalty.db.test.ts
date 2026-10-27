@@ -134,7 +134,7 @@ describe("revert debits", () => {
 		let signCalls = 0;
 		const broadcasts: Hex[] = [];
 		let landed = false;
-		const proposal = await store.get(ctx.db, id);
+		const proposal = await store.getIncludingLog(ctx.db, id);
 		const operation = await store.createDebitOperation(ctx.db, {
 			sourceKind: "revert",
 			sourceId: `proposal:${id}`,
@@ -206,7 +206,7 @@ describe("revert debits", () => {
 			await runRevertDebits({ ...config(operator), workerId: `replica-${tick}` }, new Map());
 		}
 
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.status).toBe("settleFailed");
 		expect(signCalls).toBe(1);
 		expect(broadcasts).toBe(10);
 	});
@@ -293,7 +293,7 @@ describe("revert debits", () => {
 		}
 
 		expect(debitCalls).toBe(10);
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.status).toBe("settleFailed");
 	});
 
 	it("stops looking up a permanently unpriceable settlement", async () => {
