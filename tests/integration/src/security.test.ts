@@ -164,7 +164,7 @@ describe("bearer token enforcement", () => {
 				solveBearerToken: "driver-secret",
 				onAuditEvent: () => {},
 			});
-			const id = await seedProposal(ctx.db, { orderUid: `0x${"aa".repeat(56)}` });
+			const id = await seedProposal(ctx.db, { orderUid: `0x${"aa".repeat(56)}`, auctionId: 77 });
 
 			const notification = JSON.stringify({
 				auctionId: "77",

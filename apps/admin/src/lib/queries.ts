@@ -1,6 +1,6 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./db";
-import { auditEvents, bufferEntries, proposalsLog } from "./schema";
+import { auditEvents, bufferEntries, proposalsLog, settlementAttempts } from "./schema";
 
 export interface DateRange {
 	from: Date;
@@ -307,11 +307,10 @@ export async function getPendingPenaltiesCount(db: Db): Promise<number> {
 	const [row] = await db
 		.select({ count: count() })
 		.from(proposalsLog)
-		.where(
-			and(
-				inArray(proposalsLog.status, ["settleFailed", "lost"]),
-				isNull(proposalsLog.penaltyTxHash),
-			),
-		);
-	return row?.count ?? 0;
+		.where(and(eq(proposalsLog.status, "settleFailed"), isNull(proposalsLog.penaltyTxHash)));
+	const [nonSettlement] = await db
+		.select({ count: count() })
+		.from(settlementAttempts)
+		.where(eq(settlementAttempts.status, "eligible"));
+	return (row?.count ?? 0) + (nonSettlement?.count ?? 0);
 }

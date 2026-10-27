@@ -203,3 +203,64 @@ export const bufferEntries = pgTable(
 		index("buffer_entries_proposal_id_idx").on(table.proposalId),
 	],
 );
+
+// Financial eligibility is separate from a proposal's operational status.
+export const settlementAttempts = pgTable(
+	"settlement_attempts",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		attemptKey: text("attempt_key").notNull().unique(),
+		auctionId: bigint("auction_id", { mode: "number" }).notNull(),
+		subSolver: text("sub_solver").notNull(),
+		proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
+		orderUid: text("order_uid").notNull(),
+		penaltyCap: text("penalty_cap"),
+		amount: text(),
+		policyVersion: text("policy_version").notNull(),
+		startedAt: timestamp("started_at", { withTimezone: true }),
+		abandonedAt: timestamp("abandoned_at", { withTimezone: true }),
+		abandonmentKind: text("abandonment_kind"),
+		outcome: text(),
+		status: text().notNull().default("awaiting_evidence"),
+		reconciliationReason: text("reconciliation_reason"),
+		penaltyTxHash: text("penalty_tx_hash"),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		index("settlement_attempts_status_idx").on(table.status),
+		check(
+			"settlement_attempt_eligibility",
+			sql`${table.status} <> 'eligible' OR (${table.startedAt} IS NOT NULL AND ${table.abandonedAt} IS NOT NULL AND ${table.abandonmentKind} IS NOT NULL AND ${table.abandonmentKind} IN ('cancelled', 'expired', 'fail') AND ${table.amount} IS NOT NULL AND ${table.penaltyCap} IS NOT NULL AND ${table.outcome} IS NULL AND ${table.amount}::numeric > 0 AND ${table.amount}::numeric = trunc(${table.penaltyCap}::numeric / 10))`,
+		),
+	],
+);
+
+export const settlementAttemptMembers = pgTable("settlement_attempt_members", {
+	attemptId: bigint("attempt_id", { mode: "number" })
+		.notNull()
+		.references(() => settlementAttempts.id),
+	proposalId: bigint("proposal_id", { mode: "number" }).primaryKey(),
+});
+
+export const settlementNotifications = pgTable(
+	"settlement_notifications",
+	{
+		id: bigserial({ mode: "number" }).primaryKey(),
+		attemptId: bigint("attempt_id", { mode: "number" })
+			.notNull()
+			.references(() => settlementAttempts.id),
+		kind: text().notNull(),
+		transactionHash: text("transaction_hash").notNull().default(""),
+		payload: jsonb().notNull(),
+		solutionKey: text("solution_key").notNull(),
+		receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("settlement_notifications_evidence_idx").on(
+			table.attemptId,
+			table.kind,
+			table.transactionHash,
+			table.solutionKey,
+		),
+	],
+);

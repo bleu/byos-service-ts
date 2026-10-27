@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { Address } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
+import { perProposalCL } from "../../domain/collateral.js";
 import { gasCutSize } from "../../domain/gas-cut.js";
 import {
 	effectiveGas,
@@ -258,12 +259,25 @@ export function createSolveRoute(config: SolveConfig) {
 			if (auctionId !== null) {
 				const buyTokenRefPrice = auction.tokens[order.buyToken]?.referencePrice ?? "0";
 				try {
-					await store.insertAsSubmitted(config.db, bestCandidate, buyTokenRefPrice, {
-						sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
-						surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
-						auctionGasPrice: auctionGasPrice.toString(),
-						clearingPrices: solution.prices,
-					});
+					await store.insertAsSubmitted(
+						config.db,
+						bestCandidate,
+						buyTokenRefPrice,
+						{
+							sellTokenRefPrice: tokenInfo?.referencePrice ?? "0",
+							surplusTokenRefPrice: surplusTokenInfo?.referencePrice ?? "0",
+							auctionGasPrice: auctionGasPrice.toString(),
+							clearingPrices: solution.prices,
+						},
+						tokenInfo?.referencePrice && BigInt(tokenInfo.referencePrice) > 0n
+							? perProposalCL(
+									bestCandidate.sellAmount,
+									BigInt(tokenInfo.referencePrice),
+									config.collateralRatioBps ?? 4n,
+									config.minCollateral ?? 10n ** 16n,
+								)
+							: null,
+					);
 				} catch {
 					// If we can't record the attribution, don't bid — consistency first.
 					continue;

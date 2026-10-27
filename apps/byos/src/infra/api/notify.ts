@@ -4,6 +4,7 @@ import type { Hex } from "viem";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
 import { isChargeable, type Proposal, type SettlementOutcome } from "../../domain/proposal.js";
+import { recordSettlementNotification } from "../settlement-attempts.js";
 import * as store from "../storage.js";
 import { AppError, Kind } from "./error.js";
 import { type Notification, notificationSchema } from "./types.js";
@@ -46,7 +47,7 @@ function outcomeOf(notification: Notification): SettlementOutcome | null {
 
 function parseSolutionIds(raw: Notification["solutionId"]): number[] {
 	if (raw == null) return [];
-	return Array.isArray(raw) ? raw : [raw];
+	return [...new Set(Array.isArray(raw) ? raw : [raw])];
 }
 
 /** Audit evidence for a driver notification that caused no transition —
@@ -81,12 +82,6 @@ export function createNotifyRoute(config: NotifyConfig) {
 			throw new AppError(Kind.BadRequest, "Invalid notification body");
 		}
 		const notification = parsed.data;
-		// Strict integer parse, mirroring Rust's parse::<i64>().ok(): a
-		// malformed id means unattributable, not an error.
-		const _auctionId =
-			notification.auctionId && /^\d+$/.test(notification.auctionId)
-				? Number(notification.auctionId)
-				: 0;
 		const solutionIds = parseSolutionIds(notification.solutionId);
 		const kind = notification.kind;
 
@@ -111,6 +106,16 @@ export function createNotifyRoute(config: NotifyConfig) {
 			return c.json({ status: "ok" });
 		}
 
+		// Financial evidence commits before operational state changes. A loss status
+		// cannot authorize a debit, and notifications must match the auction.
+		if (!(await recordSettlementNotification(config.db, notification, log))) {
+			log?.warn(
+				{ kind, auctionId: notification.auctionId, solutionIds },
+				"notification requires attribution review; proposal transition skipped",
+			);
+			return c.json({ status: "ok" });
+		}
+
 		const outcome = outcomeOf(notification);
 		if (!outcome) {
 			// Kinds that carry no transition: pre-submission rejections, future
@@ -120,7 +125,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 				if (OUTCOME_KINDS.has(kind)) {
 					log?.error(
 						{ id: proposal.id, kind },
-						"outcome notification without a tx hash; left for the executing timeout",
+						"outcome notification without a tx hash; no financial outcome recorded",
 					);
 				}
 				config.onAuditEvent(driverNotified(proposal, kind));
@@ -159,6 +164,23 @@ export function createNotifyRoute(config: NotifyConfig) {
 
 			const result = await store.applySettlementOutcome(config.db, proposal, outcome);
 			if ("kind" in result) {
+				// An abandonment can delete the live row after this request read it.
+				// Retry the guarded log correction so a concurrent terminal notification
+				// still drives settlement accounting rather than being lost to that race.
+				if (
+					result.kind === "notFound" &&
+					(outcome.kind === "succeeded" || outcome.kind === "reverted")
+				) {
+					const correction = await store.applyLateLostCorrection(config.db, proposal.id, outcome);
+					if ("auditEvent" in correction) {
+						config.onAuditEvent(correction.auditEvent);
+						log?.info(
+							{ id: proposal.id, outcome: outcome.kind },
+							"concurrent settlement outcome corrected lost proposal",
+						);
+						continue;
+					}
+				}
 				// A write we could not perform on a money path: the debit that
 				// should follow a revert now depends on the timeout backstop.
 				log?.error({ id: proposal.id, kind }, "settlement outcome not recorded");
@@ -211,7 +233,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 					{ id: proposal.id, kind },
 					"chargeable outcome ignored; the sub-solver may go uncharged",
 				);
-			} else {
+			} else if (outcome.kind !== "started") {
 				log?.warn(
 					{ id: proposal.id, kind },
 					"settlement outcome not applicable to the proposal's current status",
