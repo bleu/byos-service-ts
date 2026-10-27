@@ -14,8 +14,10 @@ import type { Address } from "viem";
 import _openapiYaml from "../../../openapi.yml";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import type { ValidateProposal } from "../../domain/validator.js";
+import type { ValidateProposal, Verdict } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
+import type { Candidate } from "../candidate-store.js";
+import { CandidateStore } from "../candidate-store.js";
 import * as store from "../storage.js";
 import {
 	parseCreateProposalRequest,
@@ -33,6 +35,7 @@ export interface RoutesConfig {
 	cL: bigint;
 	onAuditEvent: (event: AuditEvent) => void;
 	validator: ValidateProposal;
+	candidateStore: CandidateStore;
 	signerLimit: SignerLimitConfig;
 	/** If set, only sub-solvers in this set (lowercase) are admitted. */
 	subsolverWhitelist?: Set<string> | null;
@@ -191,7 +194,14 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 		const { auctionId } = auctionState;
 
-		const proposal: store.ProposalInput = {
+		// Allocate an ID from the proposals sequence without inserting a row.
+		// This ID is used in the proposals_log (on reject) or proposals table (on /solve selection).
+		const id = await CandidateStore.allocateId(config.db);
+
+		// Build a proposal-like object for the validator.
+		// status is set to "submitted" so the profitability gate runs.
+		const proposalForValidation = {
+			id,
 			subSolver,
 			orderUid: parsed.orderUid,
 			orderUidHash: parsed.orderUidHash,
@@ -205,78 +215,165 @@ export function createPublicRoutes(config: RoutesConfig) {
 			validUntil: parsed.validUntil,
 			nonce: parsed.nonce,
 			signature: parsed.signature,
-			status: "submitted",
+			status: "submitted" as const,
 			rejectionReason: null,
 			gasUsed: null,
 			trampoline: null,
 			settlementTxHash: null,
 			penaltyTxHash: null,
-			pendingCancellation: false,
 			sellTokenRefPrice: null,
+			buyTokenRefPrice: null,
 			surplusTokenRefPrice: null,
 			auctionGasPrice: null,
 			clearingPrices: null,
 			simulationBuyAmount: null,
+			simulationFailureParams: null,
+			settlementPenaltyCap: null,
 			auctionId,
+			createdAt: new Date(),
+			statusChangedAt: new Date(),
 		};
-		const fingerprint = store.signedProposalFingerprint(proposal);
-		const inserted = await store.insertIfUnused(config.db, proposal);
-		if ("existing" in inserted) {
-			if (store.signedProposalFingerprint(inserted.existing) === fingerprint) {
-				return c.json({ id: inserted.existing.id }, 202);
-			}
-			config.onAuditEvent({
-				occurredAt: new Date(),
-				kind: {
-					type: "nonceConflict",
-					proposalId: inserted.existing.id,
-					subSolver,
-					orderUid: inserted.existing.orderUid,
-					incomingFingerprint: fingerprint,
-				},
-			});
-			throw new AppError(Kind.NonceAlreadyUsed);
-		}
 
-		config.onAuditEvent(inserted.auditEvent);
-		const insertedProposal = inserted.proposal;
 		log?.info(
 			{
-				id: insertedProposal.id,
+				id,
 				subSolver,
 				orderUid: parsed.orderUid,
 				sellToken: parsed.sellToken,
 				buyToken: parsed.buyToken,
 			},
-			"proposal received",
+			"proposal received — validating inline",
 		);
 
-		// Validate inline. A null verdict means no auction state is available —
-		// return 202 so the sub-solver can retry when an auction opens.
-		const verdict = await config.validator.validate(insertedProposal);
+		// Run validation inline. A null verdict means auction state is unavailable — defer.
+		let verdict: Verdict | null;
+		try {
+			verdict = await config.validator.validate(proposalForValidation);
+		} catch {
+			verdict = null;
+		}
 		if (!verdict) {
-			return c.json({ id: insertedProposal.id }, 202);
+			// Auction state unavailable — write to log as rejected (AuctionClosed)
+			// so the sub-solver gets clear feedback. Don't silently discard.
+			await store.writeToLog(
+				config.db,
+				id,
+				{ ...proposalForValidation, settlementPenaltyCap: null },
+				"rejected",
+				"AuctionClosed",
+				null,
+			);
+			throw new AppError(Kind.NoActiveAuction);
 		}
 
-		const resolution = await store.resolveVerdict(config.db, insertedProposal.id, verdict);
-		if ("kind" in resolution) {
-			// Concurrent write won the race (cancellation, duplicate, etc.) — treat
-			// as accepted; the sub-solver can query GET /proposal/:id for the outcome.
-			log?.debug({ id: insertedProposal.id, error: resolution }, "verdict transition lost");
-			return c.json({ id: insertedProposal.id }, 202);
-		}
-
-		if (resolution.auditEvent) config.onAuditEvent(resolution.auditEvent);
-		for (const event of resolution.replacementAuditEvents) config.onAuditEvent(event);
-
-		if (resolution.status === "rejected" || resolution.status === "simFailed") {
-			const reason = verdict.kind === "reject" ? verdict.reason : "SimFailed";
-			log?.info({ id: insertedProposal.id, subSolver, reason }, "proposal rejected at validation");
+		if (verdict.kind === "reject") {
+			const reason = verdict.reason;
+			log?.info({ id, subSolver, reason }, "proposal rejected at validation");
+			await store.writeToLog(
+				config.db,
+				id,
+				{ ...proposalForValidation, settlementPenaltyCap: null },
+				"rejected",
+				reason,
+				null,
+			);
+			config.onAuditEvent({
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged",
+					proposalId: id,
+					subSolver,
+					orderUid: parsed.orderUid,
+					from: "submitted",
+					to: "rejected",
+					rejectionReason: reason,
+					settlementTxHash: null,
+				},
+			});
 			throw new AppError(Kind.ProposalRejected, reason);
 		}
 
-		log?.info({ id: insertedProposal.id, subSolver, orderUid: parsed.orderUid }, "proposal active");
-		return c.json({ id: insertedProposal.id, status: resolution.status }, 200);
+		if (verdict.kind === "simFailed") {
+			// "GPv2: order filled" means an external solver won the CoW auction.
+			// Promote to rejected: SolverOutbid so sub-solvers get a clear signal.
+			const isFilled = verdict.revertReason === "GPv2: order filled";
+			const toStatus = isFilled ? ("rejected" as const) : ("simFailed" as const);
+			const rejectionReason = isFilled ? ("SolverOutbid" as const) : null;
+			log?.info({ id, subSolver, revertReason: verdict.revertReason }, "proposal sim failed");
+			await store.writeToLog(
+				config.db,
+				id,
+				{ ...proposalForValidation, settlementPenaltyCap: null },
+				toStatus,
+				rejectionReason,
+				verdict.simulationFailureParams ?? null,
+			);
+			config.onAuditEvent({
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged",
+					proposalId: id,
+					subSolver,
+					orderUid: parsed.orderUid,
+					from: "submitted",
+					to: toStatus,
+					rejectionReason,
+					settlementTxHash: null,
+				},
+			});
+			throw new AppError(Kind.ProposalRejected, isFilled ? "SolverOutbid" : "SimFailed");
+		}
+
+		// verdict.kind === "accept" — hold as candidate in memory
+		const sim = verdict.simulation;
+		if (!sim) {
+			// Shouldn't happen: accept always has simulation data
+			throw new AppError(Kind.Internal);
+		}
+
+		const candidate: Candidate = {
+			id,
+			subSolver,
+			orderUid: parsed.orderUid,
+			orderUidHash: parsed.orderUidHash,
+			sellAmount: parsed.sellAmount,
+			minBuyAmount: parsed.minBuyAmount,
+			quoteBuyAmount: parsed.quoteBuyAmount,
+			sellToken: sim.sellToken,
+			buyToken: sim.buyToken,
+			interactions: parsed.interactions,
+			interactionsHash: parsed.interactionsHash,
+			validUntil: parsed.validUntil,
+			nonce: parsed.nonce,
+			signature: parsed.signature,
+			auctionId,
+			gasUsed: sim.gasUsed,
+			trampoline: sim.trampoline,
+			simulationBuyAmount: sim.simulationBuyAmount,
+			sellTokenRefPrice: sim.sellTokenRefPrice.toString(),
+			createdAt: new Date(),
+		};
+
+		config.candidateStore.add(candidate);
+
+		config.onAuditEvent({
+			occurredAt: new Date(),
+			kind: {
+				type: "received",
+				proposal: {
+					...proposalForValidation,
+					sellToken: sim.sellToken,
+					buyToken: sim.buyToken,
+					gasUsed: sim.gasUsed,
+					trampoline: sim.trampoline,
+					simulationBuyAmount: sim.simulationBuyAmount,
+					sellTokenRefPrice: sim.sellTokenRefPrice.toString(),
+				},
+			},
+		});
+
+		log?.info({ id, subSolver, orderUid: parsed.orderUid }, "proposal accepted as candidate");
+		return c.json({ id }, 200);
 	});
 
 	// GET /proposal/:id — Get single proposal (owner-scoped)
@@ -297,6 +394,46 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 
 		await enforceSignerLimit(config.signerLimit, reader);
+
+		// Check candidate store first (in-memory proposals not yet in DB).
+		const candidate = config.candidateStore.getForOwner(id, reader);
+		if (candidate) {
+			return c.json(
+				proposalToGetResponse({
+					id: candidate.id,
+					subSolver: candidate.subSolver,
+					orderUid: candidate.orderUid,
+					orderUidHash: candidate.orderUidHash,
+					sellAmount: candidate.sellAmount,
+					minBuyAmount: candidate.minBuyAmount,
+					quoteBuyAmount: candidate.quoteBuyAmount,
+					sellToken: candidate.sellToken,
+					buyToken: candidate.buyToken,
+					interactions: candidate.interactions,
+					interactionsHash: candidate.interactionsHash,
+					validUntil: candidate.validUntil,
+					nonce: candidate.nonce,
+					signature: candidate.signature,
+					status: "candidate",
+					rejectionReason: null,
+					gasUsed: candidate.gasUsed,
+					trampoline: candidate.trampoline,
+					settlementTxHash: null,
+					penaltyTxHash: null,
+					sellTokenRefPrice: candidate.sellTokenRefPrice,
+					buyTokenRefPrice: null,
+					surplusTokenRefPrice: null,
+					auctionGasPrice: null,
+					clearingPrices: null,
+					simulationBuyAmount: candidate.simulationBuyAmount,
+					simulationFailureParams: null,
+					settlementPenaltyCap: null,
+					auctionId: candidate.auctionId,
+					createdAt: candidate.createdAt,
+					statusChangedAt: candidate.createdAt,
+				}),
+			);
+		}
 
 		const result = await store.getForOwner(config.db, id, reader);
 		if ("kind" in result) {
@@ -320,8 +457,50 @@ export function createPublicRoutes(config: RoutesConfig) {
 		await enforceSignerLimit(config.signerLimit, reader);
 
 		const includeArchived = c.req.query("includeArchived") === "true";
-		const proposals = await store.listBySubSolver(config.db, reader, includeArchived);
-		return c.json(proposalToListResponse(proposals));
+		const dbProposals = await store.listBySubSolver(config.db, reader, includeArchived);
+
+		// Also include in-memory candidates for this sub-solver
+		// (only when not querying archived, as candidates are not archived).
+		const candidateProposals = includeArchived
+			? []
+			: config.candidateStore
+					.getAll()
+					.filter((c) => c.subSolver.toLowerCase() === reader.toLowerCase())
+					.map((candidate) => ({
+						id: candidate.id,
+						subSolver: candidate.subSolver,
+						orderUid: candidate.orderUid,
+						orderUidHash: candidate.orderUidHash,
+						sellAmount: candidate.sellAmount,
+						minBuyAmount: candidate.minBuyAmount,
+						quoteBuyAmount: candidate.quoteBuyAmount,
+						sellToken: candidate.sellToken,
+						buyToken: candidate.buyToken,
+						interactions: candidate.interactions,
+						interactionsHash: candidate.interactionsHash,
+						validUntil: candidate.validUntil,
+						nonce: candidate.nonce,
+						signature: candidate.signature,
+						status: "candidate" as const,
+						rejectionReason: null,
+						gasUsed: candidate.gasUsed,
+						trampoline: candidate.trampoline,
+						settlementTxHash: null,
+						penaltyTxHash: null,
+						sellTokenRefPrice: candidate.sellTokenRefPrice,
+						buyTokenRefPrice: null,
+						surplusTokenRefPrice: null,
+						auctionGasPrice: null,
+						clearingPrices: null,
+						simulationBuyAmount: candidate.simulationBuyAmount,
+						simulationFailureParams: null,
+						settlementPenaltyCap: null,
+						auctionId: candidate.auctionId,
+						createdAt: candidate.createdAt,
+						statusChangedAt: candidate.createdAt,
+					}));
+
+		return c.json(proposalToListResponse([...candidateProposals, ...dbProposals]));
 	});
 
 	// GET /proposals/:orderUid — List by order UID (owner-scoped)
@@ -380,7 +559,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 		});
 	});
 
-	// DELETE /proposal/:id — Cancel proposal
+	// DELETE /proposal/:id — Cancel proposal (candidates only)
 	app.delete("/proposal/:id", async (c) => {
 		// Not just NaN: Number("1.5") and Number("1e30") both parse, then fail in
 		// the driver as a 500 for what is a malformed id.
@@ -399,38 +578,74 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 		await enforceSignerLimit(config.signerLimit, canceller);
 
-		const result = await store.cancel(config.db, id, canceller);
-		if ("kind" in result) {
-			switch (result.kind) {
-				case "notFound":
-				case "notOwner":
-					throw new AppError(Kind.ProposalNotFound);
-				case "staleTransition":
-					throw new AppError(Kind.ProposalNotCancellable, cancelDescription(result.actual));
-				default:
-					throw new AppError(Kind.Internal);
-			}
+		// Cancel from candidate store (in-memory).
+		const candidate = config.candidateStore.getForOwner(id, canceller);
+		if (candidate) {
+			config.candidateStore.remove(id);
+			// Write to log so sub-solvers can see the cancellation.
+			await store.writeToLog(
+				config.db,
+				id,
+				{
+					subSolver: candidate.subSolver,
+					orderUid: candidate.orderUid,
+					orderUidHash: candidate.orderUidHash,
+					sellToken: candidate.sellToken,
+					buyToken: candidate.buyToken,
+					sellAmount: candidate.sellAmount,
+					minBuyAmount: candidate.minBuyAmount,
+					quoteBuyAmount: candidate.quoteBuyAmount,
+					interactions: candidate.interactions,
+					interactionsHash: candidate.interactionsHash,
+					validUntil: candidate.validUntil,
+					nonce: candidate.nonce,
+					signature: candidate.signature,
+					status: "cancelled",
+					rejectionReason: null,
+					gasUsed: candidate.gasUsed,
+					trampoline: candidate.trampoline,
+					settlementTxHash: null,
+					penaltyTxHash: null,
+					sellTokenRefPrice: candidate.sellTokenRefPrice,
+					buyTokenRefPrice: null,
+					surplusTokenRefPrice: null,
+					auctionGasPrice: null,
+					clearingPrices: null,
+					simulationBuyAmount: candidate.simulationBuyAmount,
+					settlementPenaltyCap: null,
+					auctionId: candidate.auctionId,
+				},
+				"cancelled",
+				null,
+				null,
+			);
+			config.onAuditEvent({
+				occurredAt: new Date(),
+				kind: {
+					type: "cancelled",
+					proposalId: id,
+					subSolver: canceller,
+					orderUid: candidate.orderUid,
+				},
+			});
+			return c.body(null, 204);
 		}
 
-		config.onAuditEvent(result.auditEvent);
-
-		if ("deferred" in result) {
-			return c.json(
-				{
-					status: "pending",
-					description: "Cancellation will take effect when the current settlement completes.",
-				},
-				202,
+		// Check if the proposal is in proposals (submitted — not cancellable).
+		const submitted = await store.get(config.db, id);
+		if (submitted) {
+			if (submitted.subSolver.toLowerCase() !== canceller.toLowerCase()) {
+				// Don't leak existence info — treat as not found (ADR-0011)
+				throw new AppError(Kind.ProposalNotFound);
+			}
+			throw new AppError(
+				Kind.ProposalNotCancellable,
+				"Proposal is already submitted to the driver and cannot be cancelled.",
 			);
 		}
 
-		return c.body(null, 204);
+		throw new AppError(Kind.ProposalNotFound);
 	});
 
 	return app;
-}
-
-function cancelDescription(actualStatus: string | null): string {
-	if (!actualStatus) return "Proposal cannot be cancelled from its current status.";
-	return `Proposal cannot be cancelled because it has reached terminal status '${actualStatus}'.`;
 }

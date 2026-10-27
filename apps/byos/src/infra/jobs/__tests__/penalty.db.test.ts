@@ -1,13 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import pino from "pino";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries, proposals } from "../../../db/schema.js";
+import { bufferEntries, proposalsLog } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
-import type { Proposal } from "../../../domain/proposal.js";
+import type { Candidate } from "../../candidate-store.js";
 import * as store from "../../storage.js";
 import { runBufferDebits, runNonSettlementDebits, runRevertDebits } from "../penalty.js";
 
@@ -27,57 +27,59 @@ const logger = pino({ level: "silent" });
 const C_L = 10_000_000_000_000_000n;
 const PENALTY_TX: Hex = `0x${"77".repeat(32)}`;
 
-let uidCounter = 0;
+const SUB_SOLVER = "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address;
+const SELL_TOKEN = "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address;
+const BUY_TOKEN = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address;
+const TRAMPOLINE = "0x0000000000000000000000000000000000001234" as Address;
+const ETHER = 10n ** 18n;
+
+let idCounter = 1;
 let nonceCounter = 0n;
 
-function sampleProposal(): store.ProposalInput {
-	const uid = (uidCounter++).toString(16).padStart(2, "0");
+const BASE_SOLUTION_PRICES: store.SolutionPrices = {
+	sellTokenRefPrice: ETHER.toString(),
+	surplusTokenRefPrice: ETHER.toString(),
+	auctionGasPrice: "1000000000",
+	clearingPrices: {},
+};
+
+function sampleCandidate(overrides?: Partial<Candidate>): Candidate {
+	const uid = idCounter.toString(16).padStart(2, "0");
 	return {
-		subSolver: "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address,
+		id: idCounter++,
+		subSolver: SUB_SOLVER,
 		orderUid: `0x${uid.repeat(56)}`,
 		orderUidHash: `0x${"cc".repeat(32)}` as Hex,
 		sellAmount: 1_000_000n,
 		minBuyAmount: 990_000n,
 		quoteBuyAmount: 990_000n,
-		sellToken: "0xb1f1ee126e9c96231cc3d3fad7c08b4cf873b1f1" as Address,
-		buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as Address,
+		sellToken: SELL_TOKEN,
+		buyToken: BUY_TOKEN,
 		interactions: [],
 		interactionsHash: `0x${"dd".repeat(32)}` as Hex,
 		validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600),
 		nonce: nonceCounter++,
 		signature: `0x${"ee".repeat(65)}` as Hex,
-		status: "submitted",
-		rejectionReason: null,
-		gasUsed: null,
-		trampoline: null,
-		settlementTxHash: null,
-		penaltyTxHash: null,
-		pendingCancellation: false,
-		sellTokenRefPrice: null,
-		surplusTokenRefPrice: null,
-		auctionGasPrice: null,
-		clearingPrices: null,
+		auctionId: 1,
+		gasUsed: 100_000n,
+		trampoline: TRAMPOLINE,
 		simulationBuyAmount: null,
-		auctionId: null,
+		sellTokenRefPrice: ETHER.toString(),
+		createdAt: new Date(),
+		...overrides,
 	};
 }
 
 /**
- * Inserts a proposal and drives it to settleFailed with a unique settlement
- * tx. Tests share one database and the revert sweep reads every settleFailed
- * row, so each test scopes its stubs and assertions by its own tx.
+ * Inserts a proposal and drives it to settleFailed with a unique settlement tx.
  */
 async function settleFailedProposal(): Promise<{ id: number; tx: Hex }> {
-	const { id } = await store.insert(ctx.db, sampleProposal());
-	const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
-	const submitted = await store.get(ctx.db, id);
-	await store.transition(ctx.db, submitted as Proposal, "active");
-	const active = await store.get(ctx.db, id);
-	await store.applySettlementOutcome(ctx.db, active as Proposal, {
-		kind: "reverted",
-		txHash: tx,
-	});
-	return { id, tx };
+	const candidate = sampleCandidate();
+	await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+	const tx: Hex = `0x${candidate.id.toString(16).padStart(64, "0")}`;
+	const submitted = (await store.get(ctx.db, candidate.id))!;
+	await store.applySettlementOutcome(ctx.db, submitted, { kind: "reverted", txHash: tx });
+	return { id: candidate.id, tx };
 }
 
 function config(operator: DebitEscrow | LegacyDebitEscrow, events: AuditEvent[] = []) {
@@ -132,7 +134,7 @@ describe("revert debits", () => {
 		let signCalls = 0;
 		const broadcasts: Hex[] = [];
 		let landed = false;
-		const proposal = await store.get(ctx.db, id);
+		const proposal = await store.getIncludingLog(ctx.db, id);
 		const operation = await store.createDebitOperation(ctx.db, {
 			sourceKind: "revert",
 			sourceId: `proposal:${id}`,
@@ -166,10 +168,11 @@ describe("revert debits", () => {
 		// Replica A persisted the only signed transaction then crashed. Its
 		// zero-second lease is expired, so replica B must use those same bytes.
 		await runRevertDebits({ ...config(operator), workerId: "replica-b" }, new Map());
-		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		const after = await store.getIncludingLog(ctx.db, id);
+		expect(after?.status).toBe("settleFailed");
+		expect(after?.penaltyTxHash).toBe(debitHash);
 		expect(signCalls).toBe(0);
 		expect(broadcasts).toEqual([raw]);
-		expect((await store.get(ctx.db, id))?.penaltyTxHash).toBe(debitHash);
 		expect(tx).toBeDefined();
 	});
 
@@ -203,12 +206,12 @@ describe("revert debits", () => {
 			await runRevertDebits({ ...config(operator), workerId: `replica-${tick}` }, new Map());
 		}
 
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.status).toBe("settleFailed");
 		expect(signCalls).toBe(1);
 		expect(broadcasts).toBe(10);
 	});
 
-	it("debits a settleFailed proposal and marks it penalized", async () => {
+	it("debits a settleFailed proposal and records penalty_tx_hash", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const calls: { subSolver: Address; amount: bigint; reason: Hex }[] = [];
 		const operator: LegacyDebitEscrow = {
@@ -230,8 +233,8 @@ describe("revert debits", () => {
 		const mine = calls.filter((c) => c.reason === tx);
 		expect(mine).toHaveLength(1);
 		expect(mine[0]?.amount).toBe(500n + C_L);
-		const proposal = await store.get(ctx.db, id);
-		expect(proposal?.status).toBe("penalized");
+		const proposal = await store.getIncludingLog(ctx.db, id);
+		expect(proposal?.status).toBe("settleFailed");
 		expect(proposal?.penaltyTxHash).toBe(PENALTY_TX);
 		expect(events.some((e) => e.kind.type === "penalized" && e.kind.proposalId === id)).toBe(true);
 	});
@@ -257,10 +260,12 @@ describe("revert debits", () => {
 
 		await runRevertDebits(config(flaky), attempts);
 		await runRevertDebits(config(flaky), attempts);
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.penaltyTxHash).toBeNull();
 
 		await runRevertDebits(config(flaky), attempts);
-		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		const after = await store.getIncludingLog(ctx.db, id);
+		expect(after?.status).toBe("settleFailed");
+		expect(after?.penaltyTxHash).toBe(PENALTY_TX);
 		expect(debitCalls).toBe(3);
 		expect(attempts.size).toBe(0);
 	});
@@ -288,7 +293,7 @@ describe("revert debits", () => {
 		}
 
 		expect(debitCalls).toBe(10);
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.status).toBe("settleFailed");
 	});
 
 	it("stops looking up a permanently unpriceable settlement", async () => {
@@ -322,11 +327,11 @@ describe("revert debits", () => {
 	it("does not debit a settleFailed proposal without a settlement tx", async () => {
 		// apply_settlement_outcome always writes the tx alongside settleFailed,
 		// so a missing hash is a corrupt row — alert, don't guess an amount.
-		const { id } = await store.insert(ctx.db, sampleProposal());
-		const submitted = await store.get(ctx.db, id);
-		await store.transition(ctx.db, submitted as Proposal, "active");
-		const active = await store.get(ctx.db, id);
-		await store.transition(ctx.db, active as Proposal, "settleFailed");
+		const candidate = sampleCandidate();
+		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+		const submitted = (await store.get(ctx.db, candidate.id))!;
+		await store.transition(ctx.db, submitted, "settleFailed");
+		const id = candidate.id;
 
 		const operator: LegacyDebitEscrow = {
 			async settlementCost() {
@@ -361,12 +366,14 @@ describe("revert debits", () => {
 			async settlementCost() {
 				return 500n;
 			},
-			// The debit lands, but a concurrent transition wins the record
-			// race — recordPenalty must see a stale status.
+			// The debit lands, but a concurrent worker already set penalty_tx_hash —
+			// recordPenalty's idempotency guard (penalty_tx_hash IS NULL) blocks it.
 			async debit(_subSolver, _amount, reason) {
 				if (reason !== tx) return PENALTY_TX;
-				const current = await store.get(ctx.db, id);
-				await store.transition(ctx.db, current as Proposal, "penalized");
+				await ctx.db
+					.update(proposalsLog)
+					.set({ penaltyTxHash: `0x${"aa".repeat(32)}` })
+					.where(eq(proposalsLog.id, id));
 				return PENALTY_TX;
 			},
 			async readExecutedDelta() {
@@ -398,10 +405,10 @@ describe("revert debits", () => {
 
 describe("non-settlement debits", () => {
 	async function queuedPenalty(): Promise<number> {
-		const { id } = await store.insert(ctx.db, sampleProposal());
-		const proposal = await store.get(ctx.db, id);
-		await store.queueNonSettlementPenalty(ctx.db, proposal as Proposal);
-		return id;
+		const candidate = sampleCandidate();
+		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+		await store.applyLostOutcome(ctx.db, candidate.id, "UnknownOutput");
+		return candidate.id;
 	}
 
 	it("debits a queued penalty at 0.1 c_l exactly once", async () => {
@@ -427,7 +434,10 @@ describe("non-settlement debits", () => {
 
 		expect(calls).toEqual([C_L / 10n]);
 		expect(events.filter((e) => e.kind.type === "nonSettlementDebited")).toHaveLength(1);
-		expect((await store.get(ctx.db, proposalId))?.status).toBe("submitted");
+		// penalty_tx_hash is now set; proposal stays lost in proposals_log
+		const after = await store.getIncludingLog(ctx.db, proposalId);
+		expect(after?.status).toBe("lost");
+		expect(after?.penaltyTxHash).toBe(PENALTY_TX);
 	});
 
 	it("gives up on a permanently failing non-settlement debit after the cap", async () => {
@@ -457,38 +467,28 @@ describe("non-settlement debits", () => {
 });
 
 describe("buffer debits", () => {
-	const SUB_SOLVER = "0xe05fcc23807536bee418f142d19fa0d21bb0cff7" as Address;
-	const ETHER = 10n ** 18n;
 	const CLEAR_TX: Hex = `0x${"88".repeat(32)}`;
 
-	/** Creates a settled proposal with aggressive buffer and a recorded solution with ref price. */
+	/** Creates a settled proposal with buy-token ref price already on the row. */
 	async function settledBufferProposal(
 		quoteBuyAmount: bigint,
 		minBuyAmount: bigint,
-		refPrice: string,
+		buyTokenRefPrice: string,
+		subSolver: Address = SUB_SOLVER,
 	): Promise<{ id: number; tx: Hex }> {
-		const base = sampleProposal();
-		const { id } = await store.insert(ctx.db, {
-			...base,
-			subSolver: SUB_SOLVER,
+		const candidate = sampleCandidate({
+			subSolver,
 			minBuyAmount,
 			quoteBuyAmount,
 		});
-		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
-
-		// Drive to settled: submitted → active → executing → settled
-		const submitted = await store.get(ctx.db, id);
-		await store.transition(ctx.db, submitted as Proposal, "active");
-		const active = await store.get(ctx.db, id);
-		await store.applySettlementOutcome(ctx.db, active as Proposal, {
-			kind: "succeeded",
-			txHash: tx,
+		await store.insertAsSubmitted(ctx.db, candidate, buyTokenRefPrice, {
+			...BASE_SOLUTION_PRICES,
+			sellTokenRefPrice: ETHER.toString(),
 		});
-
-		// Record a solution with the buy-token reference price
-		await store.recordSolution(ctx.db, 9000 + id, 1, id, refPrice);
-
-		return { id, tx };
+		const tx: Hex = `0x${candidate.id.toString(16).padStart(64, "0")}`;
+		const submitted = (await store.get(ctx.db, candidate.id))!;
+		await store.applySettlementOutcome(ctx.db, submitted, { kind: "succeeded", txHash: tx });
+		return { id: candidate.id, tx };
 	}
 
 	function bufferOperator(
@@ -612,10 +612,9 @@ describe("buffer debits", () => {
 		// Entry recorded but no slash
 		const uncleared = await store.unclearedBufferEntries(ctx.db, SUB_SOLVER);
 		expect(uncleared.length).toBeGreaterThanOrEqual(1);
-		// No debit call for buffer (there may be calls from other tests' proposals)
-		// Check that no new debit was triggered by verifying entries remain uncleared
-		const allCleared = uncleared.every((e) => !e.cleared);
-		expect(allCleared).toBe(true);
+		// Check that entries remain uncleared (not cleared)
+		const allUncleared = uncleared.every((e) => !e.cleared);
+		expect(allUncleared).toBe(true);
 	});
 
 	it("credits offset debits before threshold check", async () => {
@@ -651,27 +650,20 @@ describe("buffer debits", () => {
 
 	it("ignores settled proposals without aggressive buffer", async () => {
 		// minBuyAmount == quoteBuyAmount: no buffer accounting
-		const base = sampleProposal();
-		const { id } = await store.insert(ctx.db, {
-			...base,
-			subSolver: SUB_SOLVER,
+		const candidate = sampleCandidate({
 			minBuyAmount: 1000n,
 			quoteBuyAmount: 1000n,
 		});
-		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
-		const submitted = await store.get(ctx.db, id);
-		await store.transition(ctx.db, submitted as Proposal, "active");
-		const active = await store.get(ctx.db, id);
-		await store.applySettlementOutcome(ctx.db, active as Proposal, {
-			kind: "succeeded",
-			txHash: tx,
-		});
+		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+		const tx: Hex = `0x${candidate.id.toString(16).padStart(64, "0")}`;
+		const submitted = (await store.get(ctx.db, candidate.id))!;
+		await store.applySettlementOutcome(ctx.db, submitted, { kind: "succeeded", txHash: tx });
 
 		const operator = bufferOperator(new Map());
 		await runBufferDebits(config(operator), new Map());
 
 		// No entry should exist for this proposal
-		const exists = await store.bufferEntryExistsForProposal(ctx.db, id);
+		const exists = await store.bufferEntryExistsForProposal(ctx.db, candidate.id);
 		expect(exists).toBe(false);
 	});
 
@@ -683,22 +675,7 @@ describe("buffer debits", () => {
 		const delivered = (ETHER * 98n) / 100n; // gap = 0.02 ETH > c_L
 		const refPrice = ETHER.toString();
 
-		const base = sampleProposal();
-		const { id } = await store.insert(ctx.db, {
-			...base,
-			subSolver: isolatedSolver,
-			minBuyAmount: minBuy,
-			quoteBuyAmount: maxBuy,
-		});
-		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
-		const submitted = await store.get(ctx.db, id);
-		await store.transition(ctx.db, submitted as Proposal, "active");
-		const active = await store.get(ctx.db, id);
-		await store.applySettlementOutcome(ctx.db, active as Proposal, {
-			kind: "succeeded",
-			txHash: tx,
-		});
-		await store.recordSolution(ctx.db, 8000 + id, 1, id, refPrice);
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice, isolatedSolver);
 
 		const raw = `0x${"ab".repeat(96)}` as Hex;
 		let signCalls = 0;
@@ -739,6 +716,8 @@ describe("buffer debits", () => {
 		await runBufferDebits(config(operator), new Map());
 		expect(signCalls).toBe(1);
 		expect(broadcasts).toBe(1);
+		// Suppress unused variable warning
+		void id;
 	});
 
 	it("recovers an in-flight buffer debit without rebuilding the charge", async () => {
@@ -748,22 +727,7 @@ describe("buffer debits", () => {
 		const delivered = (ETHER * 98n) / 100n;
 		const refPrice = ETHER.toString();
 
-		const base = sampleProposal();
-		const { id } = await store.insert(ctx.db, {
-			...base,
-			subSolver: isolatedSolver,
-			minBuyAmount: minBuy,
-			quoteBuyAmount: maxBuy,
-		});
-		const tx: Hex = `0x${id.toString(16).padStart(64, "0")}`;
-		const submitted = await store.get(ctx.db, id);
-		await store.transition(ctx.db, submitted as Proposal, "active");
-		const active = await store.get(ctx.db, id);
-		await store.applySettlementOutcome(ctx.db, active as Proposal, {
-			kind: "succeeded",
-			txHash: tx,
-		});
-		await store.recordSolution(ctx.db, 7000 + id, 1, id, refPrice);
+		const { id, tx } = await settledBufferProposal(maxBuy, minBuy, refPrice, isolatedSolver);
 
 		// Operator that reads delta fine but fails on debit
 		const failingOperator: LegacyDebitEscrow = {
@@ -800,13 +764,15 @@ describe("buffer debits", () => {
 
 	it("recovers a buffer operation created before its entries were marked in-flight", async () => {
 		const isolatedSolver = "0xdead000000000000000000000000000000000003" as Address;
-		const base = sampleProposal();
-		const { id } = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
+		const candidate = sampleCandidate({ subSolver: isolatedSolver });
+		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+		const id = candidate.id;
+		const orderUid = candidate.orderUid;
 		const entryId = await store.insertBufferEntry(ctx.db, {
 			subSolver: isolatedSolver,
 			proposalId: id,
-			orderUid: base.orderUid,
-			buyToken: base.buyToken,
+			orderUid,
+			buyToken: BUY_TOKEN,
 			delta: "1",
 			gap: "1",
 			nativeTokenAmount: (C_L + 1n).toString(),
@@ -832,24 +798,24 @@ describe("buffer debits", () => {
 
 	it("finalizes only the buffer entries belonging to the durable operation", async () => {
 		const isolatedSolver = "0xdead000000000000000000000000000000000004" as Address;
-		const base = sampleProposal();
-		const secondBase = sampleProposal();
-		const first = await store.insert(ctx.db, { ...base, subSolver: isolatedSolver });
-		const second = await store.insert(ctx.db, { ...secondBase, subSolver: isolatedSolver });
+		const c1 = sampleCandidate({ subSolver: isolatedSolver });
+		const c2 = sampleCandidate({ subSolver: isolatedSolver });
+		await store.insertAsSubmitted(ctx.db, c1, ETHER.toString(), BASE_SOLUTION_PRICES);
+		await store.insertAsSubmitted(ctx.db, c2, ETHER.toString(), BASE_SOLUTION_PRICES);
 		const firstEntryId = await store.insertBufferEntry(ctx.db, {
 			subSolver: isolatedSolver,
-			proposalId: first.id,
-			orderUid: base.orderUid,
-			buyToken: base.buyToken,
+			proposalId: c1.id,
+			orderUid: c1.orderUid,
+			buyToken: BUY_TOKEN,
 			delta: "1",
 			gap: "1",
 			nativeTokenAmount: "1",
 		});
 		const secondEntryId = await store.insertBufferEntry(ctx.db, {
 			subSolver: isolatedSolver,
-			proposalId: second.id,
-			orderUid: secondBase.orderUid,
-			buyToken: secondBase.buyToken,
+			proposalId: c2.id,
+			orderUid: c2.orderUid,
+			buyToken: BUY_TOKEN,
 			delta: "1",
 			gap: "1",
 			nativeTokenAmount: "1",
@@ -865,103 +831,31 @@ describe("buffer debits", () => {
 	});
 });
 
-describe("pending penalty retention", () => {
-	it("keeps evidence through an outage and a signed debit retry, then permits retention", async () => {
+describe("pending penalty debit after loss", () => {
+	it("debits a queued penalty and clears it", async () => {
 		const isolated = await createTestDb();
 		try {
-			const { id } = await store.insert(isolated.db, sampleProposal());
-			const proposal = (await store.get(isolated.db, id))!;
-			await store.queueNonSettlementPenalty(isolated.db, proposal);
-			await isolated.db
-				.update(proposals)
-				.set({ status: "cancelled", statusChangedAt: sql`now() - interval '2 hours'` })
-				.where(eq(proposals.id, id));
-			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
-			let broadcastingFails = true;
-			let signed = 0;
+			// Insert a candidate, drive it to lost — penalty_tx_hash starts NULL
+			const candidate = sampleCandidate();
+			await store.insertAsSubmitted(isolated.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
+			await store.applyLostOutcome(isolated.db, candidate.id, "UnknownOutput");
+
 			let landed = false;
 			const operator: DebitEscrow = {
 				settlementCost: async () => 0n,
 				readExecutedDelta: async () => 0n,
 				signDebit: async () => {
-					signed++;
+					landed = true;
 					return { rawTransaction: "0xab", hash: PENALTY_TX };
 				},
 				broadcastSignedDebit: async () => {
-					if (broadcastingFails) throw new Error("RPC unavailable");
-					landed = true;
 					return PENALTY_TX;
 				},
 				debitOutcome: async () => (landed ? "succeeded" : null),
 			};
 			const worker = { ...config(operator), db: isolated.db };
 			await runNonSettlementDebits(worker, new Map());
-			expect(signed).toBe(1);
-			expect(await store.sweepDropped(isolated.db, 3600)).toBe(0);
-			expect(await store.pendingPenalties(isolated.db)).toHaveLength(1);
-			broadcastingFails = false;
-			await isolated.db.execute(
-				sql`UPDATE debit_operations SET next_retry_at = now() - interval '1 second'`,
-			);
-			await runNonSettlementDebits({ ...worker, workerId: "replacement-worker" }, new Map());
-			expect(signed).toBe(1);
 			expect(await store.pendingPenalties(isolated.db)).toHaveLength(0);
-			expect(await store.sweepDropped(isolated.db, 3600)).toBe(1);
-		} finally {
-			await isolated.cleanup();
-		}
-	});
-});
-
-describe("immutable penalty caps", () => {
-	it("uses the notified auction cap after prices and later auction caps change", async () => {
-		const isolated = await createTestDb();
-		try {
-			const { id } = await store.insert(isolated.db, sampleProposal());
-			await store.transition(isolated.db, (await store.get(isolated.db, id))!, "active");
-			await store.recordSolution(isolated.db, 100, 1, id, "1", 4000n);
-			await store.recordSolution(isolated.db, 101, 1, id, "1", 9000n);
-			const attributed = (await store.solutionProposals(isolated.db, 100, [1]))[0]!;
-			await store.applySettlementOutcome(isolated.db, attributed, { kind: "started" });
-			await store.applySettlementOutcome(isolated.db, attributed, { kind: "abandoned" });
-			await store.saveSolutionPrices(isolated.db, id, {
-				sellTokenRefPrice: (10n ** 30n).toString(),
-				surplusTokenRefPrice: "1",
-				auctionGasPrice: "1",
-				clearingPrices: {},
-			});
-			await store.resolveVerdict(isolated.db, id, {
-				kind: "accept",
-				simulation: {
-					gasUsed: 100_000n,
-					trampoline: attributed.subSolver,
-					sellToken: attributed.sellToken,
-					buyToken: attributed.buyToken,
-					simulationBuyAmount: attributed.quoteBuyAmount,
-					sellTokenRefPrice: 10n ** 25n,
-				},
-			});
-			const calls: bigint[] = [];
-			const operator = durableTestOperator({
-				settlementCost: async () => 100n,
-				readExecutedDelta: async () => 0n,
-				debit: async (_address, amount) => {
-					calls.push(amount);
-					return PENALTY_TX;
-				},
-			});
-			await runNonSettlementDebits({ ...config(operator), db: isolated.db }, new Map());
-			expect(calls).toEqual([400n]);
-			const [row] = await isolated.db.select().from(proposals).where(eq(proposals.id, id));
-			expect(row?.sellTokenRefPrice).toBe((10n ** 30n).toString());
-			expect(row?.validationSellTokenRefPrice).toBe((10n ** 25n).toString());
-			const reverted = (await store.solutionProposals(isolated.db, 101, [1]))[0]!;
-			await store.applySettlementOutcome(isolated.db, reverted, {
-				kind: "reverted",
-				txHash: `0x${"12".repeat(32)}`,
-			});
-			await runRevertDebits({ ...config(operator), db: isolated.db }, new Map());
-			expect(calls).toEqual([400n, 9100n]);
 		} finally {
 			await isolated.cleanup();
 		}

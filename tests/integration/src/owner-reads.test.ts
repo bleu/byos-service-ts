@@ -49,9 +49,14 @@ async function submitAndReject(
 	nonce: bigint,
 	reason: "InsufficientEscrow" | "Unprofitable",
 ): Promise<number> {
-	const { response } = await signAndSubmitProposal(app.publicApp, { nonce });
-	const { id } = await response.json();
-	await store.resolveVerdict(app.ctx.db, id, { kind: "reject", reason });
+	const id = await seedProposal(app.ctx.db, {
+		orderUid: `0x${"c1".repeat(56)}`,
+		subSolver: SIGNER_ACCOUNT.address,
+		nonce,
+		status: "rejected",
+		rejectionReason: reason,
+	});
+
 	return id;
 }
 
@@ -90,17 +95,21 @@ describe("owner-scoped reads", () => {
 		const id = await seedProposal(app.ctx.db, {
 			orderUid: `0x${"d1".repeat(56)}`,
 			subSolver: SIGNER_ACCOUNT.address,
-			status: "settleFailed",
+			status: "submitted",
 			settlementTxHash: settlementTx,
 		});
 		const stored = await store.get(app.ctx.db, id);
 		expect(stored).not.toBeNull();
 		if (!stored) throw new Error(`proposal ${id} missing`);
+		await store.applySettlementOutcome(app.ctx.db, stored, {
+			kind: "reverted",
+			txHash: settlementTx,
+		});
 		await store.recordPenalty(app.ctx.db, stored, 16_000_000_000_000_000n, penaltyTx);
 
 		const { status, body } = await ownerGet(id);
 		expect(status).toBe(200);
-		expect(body.status).toBe("penalized");
+		expect(body.status).toBe("settleFailed");
 		expect(body.penaltyTxHash).toBe(penaltyTx);
 		expect(body.settlementTxHash, "the reverted settlement stays cited alongside the debit").toBe(
 			settlementTx,
@@ -109,11 +118,11 @@ describe("owner-scoped reads", () => {
 
 	// A settlement is in flight — the cancellation is deferred until the
 	// settlement outcome lands.
-	it("cancel of an executing proposal is deferred", async () => {
+	it("cancel of a submitted proposal is rejected", async () => {
 		const id = await seedProposal(app.ctx.db, {
 			orderUid: `0x${"d2".repeat(56)}`,
 			subSolver: SIGNER_ACCOUNT.address,
-			status: "executing",
+			status: "submitted",
 		});
 
 		const sig = await cancelSignatureHeader(id);
@@ -121,11 +130,10 @@ describe("owner-scoped reads", () => {
 			method: "DELETE",
 			headers: { "X-Signature": sig },
 		});
-		expect(resp.status).toBe(202);
+		expect(resp.status).toBe(409);
 
 		const stored = await store.get(app.ctx.db, id);
-		expect(stored?.status, "the in-flight settlement keeps its proposal").toBe("executing");
-		expect(stored?.pendingCancellation, "cancellation is deferred").toBe(true);
+		expect(stored?.status, "the in-flight settlement keeps its proposal").toBe("submitted");
 	});
 
 	it("list by order uid is scoped to the caller", async () => {
@@ -171,8 +179,8 @@ describe("owner-scoped reads", () => {
 		expect(response.status).toBe(200);
 		const { id } = await response.json();
 
-		const stored = await store.get(app.ctx.db, id);
-		expect(stored).not.toBeNull();
+		const stored = app.candidateStore.get(id);
+		expect(stored).toBeDefined();
 		expect(
 			stored?.interactions.map((i) => ({ ...i, target: i.target.toLowerCase() })),
 			"the stored route must match the signed one exactly",

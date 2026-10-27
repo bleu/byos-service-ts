@@ -22,17 +22,12 @@ it("bounds scheduled history, removes successful audit jobs and preserves failed
 	try {
 		await events.waitUntilReady();
 		await setupJobSchedulers(queues, {
-			staleExecutingIntervalSecs: 300,
 			retentionSweepIntervalSecs: 300,
 			penaltyIntervalSecs: 12,
 			balanceRefreshIntervalSecs: 60,
+			outcomeCheckIntervalSecs: 60,
 		});
-		for (const queue of [
-			queues.staleExecuting,
-			queues.retention,
-			queues.penalty,
-			queues.balanceRefresh,
-		]) {
+		for (const queue of [queues.retention, queues.penalty, queues.balanceRefresh]) {
 			const jobs = await queue.getJobs(["waiting", "delayed"]);
 			expect(jobs).toHaveLength(1);
 			expect(jobs[0]?.opts).toMatchObject({
@@ -75,40 +70,3 @@ it("bounds scheduled history, removes successful audit jobs and preserves failed
 		await connection.quit();
 	}
 }, 15000);
-
-it("caps completed operational jobs at 100 under sustained ticks", async () => {
-	const connection = new Redis(process.env.BYOS_TEST_REDIS_URL ?? "redis://localhost:6379", {
-		maxRetriesPerRequest: null,
-	});
-	const prefix = `byos:test:${randomUUID()}`;
-	const queues = createQueues(connection, prefix);
-	const events = new QueueEvents("stale-executing", { connection, prefix });
-	const worker = new Worker("stale-executing", async () => {}, {
-		connection,
-		prefix,
-		autorun: false,
-	});
-	let running: Promise<void> | undefined;
-	try {
-		await events.waitUntilReady();
-		const jobs = await queues.staleExecuting.addBulk(
-			Array.from({ length: 105 }, () => ({ name: "tick", data: {} })),
-		);
-		const last = jobs.at(-1);
-		if (!last) throw new Error("missing tick");
-		const finished = last.waitUntilFinished(events, 5000);
-		running = worker.run();
-		await finished;
-		expect(await queues.staleExecuting.getCompletedCount()).toBe(100);
-		expect(await queues.staleExecuting.getJob(jobs[0]!.id!)).toBeUndefined();
-	} finally {
-		await worker.close();
-		await running;
-		await events.close();
-		for (const queue of Object.values(queues)) {
-			await queue.obliterate({ force: true });
-			await queue.close();
-		}
-		await connection.quit();
-	}
-}, 10000);

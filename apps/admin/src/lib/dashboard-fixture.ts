@@ -149,10 +149,6 @@ export async function seedDashboardFixture(sql: Sql, now = new Date()): Promise<
 		if (fixture.status === "settleFailed") {
 			await addEvent("settle_failed", { from: "executing", to: "settleFailed" }, 4);
 			await sql`
-				INSERT INTO penalties (proposal_id, sub_solver, order_uid, penalty_tx_hash, created_at)
-				VALUES (${proposal.id}, ${fixture.subSolver}, ${orderUid}, NULL, ${createdAt.toISOString()})
-			`;
-			await sql`
 				INSERT INTO buffer_entries (sub_solver, proposal_id, order_uid, delta, gap, buy_token, native_token_amount, cleared, created_at)
 				VALUES (${fixture.subSolver}, ${proposal.id}, ${orderUid},
 					'980000000000000000', '20000000000000000', ${hex(178, 20)},
@@ -166,10 +162,6 @@ export async function seedDashboardFixture(sql: Sql, now = new Date()): Promise<
 				{ amount: "2500000000000000", settlementTxHash, penaltyTxHash },
 				5,
 			);
-			await sql`
-				INSERT INTO penalties (proposal_id, sub_solver, order_uid, penalty_tx_hash, created_at)
-				VALUES (${proposal.id}, ${fixture.subSolver}, ${orderUid}, ${penaltyTxHash}, ${createdAt.toISOString()})
-			`;
 			await sql`
 				INSERT INTO buffer_entries (sub_solver, proposal_id, order_uid, delta, gap, buy_token, native_token_amount, cleared, created_at)
 				VALUES (${fixture.subSolver}, ${proposal.id}, ${orderUid},

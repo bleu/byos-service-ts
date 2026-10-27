@@ -6,12 +6,13 @@ import pino from "pino";
 import { parseConfig } from "./config.js";
 import { buildContext } from "./context.js";
 import { createInternalApp, createPublicApp } from "./infra/api/index.js";
+import { CandidateStore } from "./infra/candidate-store.js";
 import { createAuditWorker } from "./infra/jobs/audit-worker.js";
 import { createBalanceRefreshWorker } from "./infra/jobs/balance-refresh.js";
+import { createOutcomeWorker } from "./infra/jobs/outcome-worker.js";
 import { createPenaltyWorker } from "./infra/jobs/penalty.js";
 import { createRetentionWorker } from "./infra/jobs/retention.js";
 import { createSlackWorker, enqueueSlackNotification } from "./infra/jobs/slack-worker.js";
-import { createStaleExecutingWorker } from "./infra/jobs/stale-executing.js";
 
 async function main() {
 	// 1. Parse config (fail-fast)
@@ -32,6 +33,9 @@ async function main() {
 		throw new Error("MIN_COLLATERAL is required for buffer accounting");
 	}
 
+	// Singleton in-memory candidate store — shared between public and internal apps.
+	const candidateStore = new CandidateStore();
+
 	const publicApp = createPublicApp({
 		db: ctx.db,
 		chainId: config.CHAIN_ID,
@@ -39,6 +43,7 @@ async function main() {
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		validator: ctx.validator,
+		candidateStore,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		onAuditEvent: ctx.onAuditEvent,
 		logger,
@@ -56,6 +61,7 @@ async function main() {
 		maxProposalLifetimeSecs: config.MAX_PROPOSAL_LIFETIME_SECS,
 		cL,
 		validator: ctx.validator,
+		candidateStore,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		selectorBufferMs: config.SELECTOR_BUFFER_MS,
 		onAuditEvent: ctx.onAuditEvent,
@@ -99,16 +105,8 @@ async function main() {
 			: undefined,
 	);
 
-	const staleExecutingWorker = createStaleExecutingWorker(ctx.redis, {
-		db: ctx.db,
-		executingTimeoutSecs: config.EXECUTING_TIMEOUT_SECS,
-		onAuditEvent: ctx.onAuditEvent,
-		logger: logger.child({ worker: "stale-executing" }),
-	});
-
 	const retentionWorker = createRetentionWorker(ctx.redis, {
 		db: ctx.db,
-		droppedRetentionSecs: config.DROPPED_RETENTION_SECS,
 		logRedactionAfterSecs: config.LOG_REDACTION_AFTER_SECS,
 		logger: logger.child({ worker: "retention" }),
 	});
@@ -125,12 +123,21 @@ async function main() {
 		logger: logger.child({ worker: "penalty" }),
 	});
 
+	const outcomeWorker = createOutcomeWorker(ctx.redis, {
+		db: ctx.db,
+		publicClient: ctx.publicClient,
+		settlementAddress: ctx.settlementAddress,
+		blockDurationMs: config.BLOCK_DURATION_MS,
+		onAuditEvent: ctx.onAuditEvent,
+		logger: logger.child({ worker: "outcome" }),
+	});
+
 	const workers = [
 		auditWorker,
-		staleExecutingWorker,
 		retentionWorker,
 		balanceRefreshWorker,
 		penaltyWorker,
+		outcomeWorker,
 		slackWorker,
 	].filter(Boolean) as import("bullmq").Worker[];
 
@@ -181,12 +188,12 @@ async function main() {
 
 		// Close queues
 		await Promise.all([
-			ctx.queues.staleExecuting.close(),
 			ctx.queues.retention.close(),
 			ctx.queues.penalty.close(),
 			ctx.queues.audit.close(),
 			ctx.queues.balanceRefresh.close(),
 			ctx.queues.slackNotification.close(),
+			ctx.queues.outcome.close(),
 		]);
 
 		// Close Redis

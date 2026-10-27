@@ -171,11 +171,13 @@ export async function runRevertDebits(
 ): Promise<void> {
 	const { db, operator, minCollateral, onAuditEvent, logger } = config;
 
-	let pending: Awaited<ReturnType<typeof store.snapshotByStatuses>>;
+	// settleFailed live rows are deleted immediately on settlement failure;
+	// the penalty worker reads from proposals_log instead.
+	let pending: Awaited<ReturnType<typeof store.snapshotSettleFailedFromLog>>;
 	try {
-		pending = await store.snapshotByStatuses(db, ["settleFailed"]);
+		pending = await store.snapshotSettleFailedFromLog(db);
 	} catch (e) {
-		logger.error({ err: e }, "penalty: failed to snapshot SettleFailed");
+		logger.error({ err: e }, "penalty: failed to snapshot SettleFailed from log");
 		return;
 	}
 
@@ -358,13 +360,7 @@ export async function runBufferDebits(
 			continue;
 		}
 
-		let refPriceStr: string | null;
-		try {
-			refPriceStr = await store.buyTokenRefPriceForProposal(db, proposal.id);
-		} catch (e) {
-			noteDebitFailure(attempts, proposal.id, e, "buyTokenRefPrice lookup", logger);
-			continue;
-		}
+		const refPriceStr = proposal.buyTokenRefPrice;
 
 		if (!refPriceStr || refPriceStr === "0") {
 			logger.warn({ id: proposal.id }, "no buy-token ref price for buffer; skipping");

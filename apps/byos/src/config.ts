@@ -84,13 +84,15 @@ export const configSchema = z.object({
 	VALIDATION_CONCURRENCY: z.coerce.number().int().positive().default(50),
 
 	// Timing
-	STALE_EXECUTING_INTERVAL_SECS: z.coerce.number().default(300),
 	PENALTY_INTERVAL_SECS: z.coerce.number().default(12),
-	DROPPED_RETENTION_SECS: z.coerce.number().default(3600),
 	RETENTION_SWEEP_INTERVAL_SECS: z.coerce.number().default(300),
 	LOG_REDACTION_AFTER_SECS: z.coerce.number().default(604800), // 7 days
 	MAX_PROPOSAL_LIFETIME_SECS: z.coerce.number().default(300),
-	EXECUTING_TIMEOUT_SECS: z.coerce.number().default(300),
+	/** Average block duration in ms — used by the outcome worker to convert a
+	 * wall-clock observation window to a block range. */
+	BLOCK_DURATION_MS: z.coerce.number().int().positive().default(12000),
+	/** How often the outcome worker runs, in seconds. */
+	OUTCOME_WORKER_INTERVAL_SECS: z.coerce.number().int().positive().default(60),
 	/** How many milliseconds before the driver-supplied deadline BYOS stops
 	 * waiting for proposals and runs the selector. A small safety margin that
 	 * accounts for serialisation and network round-trip back to the driver. */

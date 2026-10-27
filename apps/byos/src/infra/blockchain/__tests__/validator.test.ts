@@ -141,12 +141,12 @@ function submittedProposal(): Proposal {
 		trampoline: TRAMPOLINE,
 		settlementTxHash: null,
 		penaltyTxHash: null,
-		pendingCancellation: false,
 		simulationFailureParams: null,
 		simulationBuyAmount: null,
 		createdAt: new Date(0),
 		statusChangedAt: new Date(0),
 		sellTokenRefPrice: null,
+		buyTokenRefPrice: null,
 		surplusTokenRefPrice: null,
 		auctionGasPrice: null,
 		clearingPrices: null,
@@ -430,7 +430,7 @@ describe("SimulationValidator", () => {
 		expect(verdict).toMatchObject({ kind: "accept" });
 	});
 
-	it("revalidation of an active proposal skips the profitability gate", async () => {
+	it("submitted proposal is rejected when unprofitable", async () => {
 		// 1 gwei: the simulated 100k gas costs ~1.3e14 wei, dwarfing the
 		// 10_000-wei surplus at parity pricing — the score is deeply negative.
 		const gasPrice = 1_000_000_000n;
@@ -438,15 +438,8 @@ describe("SimulationValidator", () => {
 		const record = sampleRecord(sampleOrder({ buyAmount: submitted.quoteBuyAmount - 10_000n }));
 		setupAuctionState(record);
 
-		// The gate would reject these inputs on a first (Submitted) pass…
 		const first = await validatorAt(fakeNode(), gasPrice).validate(submitted);
 		expect(first).toEqual({ kind: "reject", reason: "Unprofitable" });
-
-		// …but re-validation of an Active proposal must not churn it: the
-		// simulation still runs (gas refresh), the gate is skipped.
-		const active = { ...submittedProposal(), status: "active" as const };
-		const revalidated = await validatorAt(fakeNode(), gasPrice).validate(active);
-		expect(revalidated).toMatchObject({ kind: "accept" });
 	});
 
 	it("missing native price rejects with NativePriceUnavailable", async () => {
@@ -711,7 +704,10 @@ function collateralValidator(
 		fetchInflight?: import("../validator.js").FetchInflightData;
 	} = {},
 ) {
-	setupAuctionState(sampleRecord(sampleOrder()));
+	// buyAmount: 0n → order limit is zero, so any positive proposalBuy gives surplus.
+	// This prevents the profitability gate from interfering with collateral tests whose
+	// purpose is to exercise the exposure math, not scoring.
+	setupAuctionState(sampleRecord(sampleOrder({ buyAmount: 0n })));
 	// Gas price lives in auction state — patch it if a specific value is needed.
 	if (options.gasPrice !== undefined) _patchLocalGasPrice(options.gasPrice);
 	const node = fakeNode({
@@ -727,12 +723,14 @@ function collateralValidator(
 		multicall: async ({ contracts }: { contracts: unknown[] }) =>
 			contracts.map(() => ({ status: "success", result: options.balance ?? ETHER })),
 	} as unknown as PublicClient;
+	// Use a very negative minScore to disable the profitability gate for
+	// collateral tests — they exercise exposure logic, not scoring.
 	return new SimulationValidator(
 		client,
 		SETTLEMENT,
 		ESCROW,
 		TRAMPOLINE_FACTORY,
-		0n,
+		-(10n ** 30n),
 		10_000n,
 		ETHER,
 		4n,
@@ -746,7 +744,7 @@ function collateralValidator(
 }
 
 function activeProposal(): Proposal {
-	return { ...submittedProposal(), status: "active", gasUsed: 100_000n };
+	return { ...submittedProposal(), gasUsed: 100_000n };
 }
 
 describe("collateral admission", () => {
@@ -757,10 +755,12 @@ describe("collateral admission", () => {
 		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
 	});
 
-	it("counts the current active proposal once", async () => {
+	it("accepts when the sibling list is empty and balance covers the single proposal", async () => {
+		// With no siblings, the only exposure is the current proposal (400 wei).
+		// A balance of exactly 400 wei is sufficient.
 		const validator = collateralValidator({
 			balance: 400n,
-			siblings: [{ id: 1, gasUsed: 100_000n, sellAmountNative: 1_000_000n }],
+			siblings: [],
 		});
 		expect((await validator.validate(activeProposal()))?.kind).toBe("accept");
 	});
@@ -813,14 +813,6 @@ describe("post-simulation collateral", () => {
 		}).validate(activeProposal());
 		expect(verdict).toEqual({ kind: "reject", reason: "ExposureCapExceeded" });
 	});
-	it("uses fresh gas when revalidation is cheaper than the previous estimate", async () => {
-		const verdict = await collateralValidator({
-			balance: 100_400n,
-			gasPrice: 1n,
-			gasUsed: 100_000n,
-		}).validate({ ...activeProposal(), gasUsed: 1_000_000n });
-		expect(verdict?.kind).toBe("accept");
-	});
 	it("defers on a failed collateral snapshot", async () => {
 		const verdict = await collateralValidator({
 			fetchInflight: async () => {
@@ -860,7 +852,8 @@ describe("concurrent simulation metadata reads", () => {
 				return AUTHENTICATOR;
 			},
 		});
-		setupAuctionState(sampleRecord(sampleOrder()));
+		// Use buyAmount well below quoteBuyAmount to ensure positive surplus.
+		setupAuctionState(sampleRecord(sampleOrder({ buyAmount: 800_000n })));
 		const validator = validatorAt(node);
 		expect((await validator.validate({ ...activeProposal(), trampoline: null }))?.kind).toBe(
 			"accept",
@@ -872,7 +865,8 @@ describe("concurrent simulation metadata reads", () => {
 				throw new Error("RPC unavailable");
 			},
 		});
-		setupAuctionState(sampleRecord(sampleOrder()));
+		// Use buyAmount well below quoteBuyAmount to ensure positive surplus.
+		setupAuctionState(sampleRecord(sampleOrder({ buyAmount: 800_000n })));
 		const validator = validatorAt(node);
 		expect(await validator.validate(activeProposal())).toBeNull();
 	});

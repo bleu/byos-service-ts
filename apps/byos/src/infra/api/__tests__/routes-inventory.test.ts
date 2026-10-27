@@ -1,5 +1,6 @@
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
+import { CandidateStore } from "../../candidate-store.js";
 import { createPublicApp, type PublicAppContext } from "../index.js";
 
 /**
@@ -33,6 +34,7 @@ function publicRoutes(): string[] {
 		maxProposalLifetimeSecs: 300,
 		cL: 10n ** 16n,
 		validator: { validate: async () => null } as any,
+		candidateStore: new CandidateStore(),
 		onAuditEvent: () => {},
 		rateLimits: {
 			windowSecs: 60,

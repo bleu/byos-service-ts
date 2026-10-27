@@ -106,19 +106,6 @@ export const auditEvents = pgTable(
 	],
 );
 
-export const penalties = pgTable(
-	"penalties",
-	{
-		id: bigserial({ mode: "number" }).primaryKey(),
-		proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
-		subSolver: text("sub_solver").notNull(),
-		orderUid: text("order_uid").notNull(),
-		penaltyTxHash: text("penalty_tx_hash"),
-		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-	},
-	(table) => [index("penalties_pending_idx").on(table.id).where(sql`penalty_tx_hash IS NULL`)],
-);
-
 export const bufferEntries = pgTable(
 	"buffer_entries",
 	{

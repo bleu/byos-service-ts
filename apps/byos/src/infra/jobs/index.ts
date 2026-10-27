@@ -28,12 +28,12 @@ export function createRequestPathRedisConnection(url: string): Redis {
 const REQUEST_PATH_COMMAND_TIMEOUT_MS = 250;
 
 export interface Queues {
-	staleExecuting: Queue;
 	retention: Queue;
 	penalty: Queue;
 	audit: Queue;
 	balanceRefresh: Queue;
 	slackNotification: Queue;
+	outcome: Queue;
 }
 
 const PREFIX = "byos";
@@ -46,11 +46,6 @@ export const OPERATIONAL_JOB_RETENTION = {
 
 export function createQueues(connection: Redis, prefix = PREFIX): Queues {
 	return {
-		staleExecuting: new Queue("stale-executing", {
-			connection,
-			prefix,
-			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
-		}),
 		retention: new Queue("retention", {
 			connection,
 			prefix,
@@ -76,24 +71,26 @@ export function createQueues(connection: Redis, prefix = PREFIX): Queues {
 			prefix,
 			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
 		}),
+		outcome: new Queue("outcome", {
+			connection,
+			prefix,
+			defaultJobOptions: OPERATIONAL_JOB_RETENTION,
+		}),
 	};
 }
 
 export interface JobSchedulerConfig {
-	staleExecutingIntervalSecs: number;
 	retentionSweepIntervalSecs: number;
 	penaltyIntervalSecs: number;
 	balanceRefreshIntervalSecs: number;
+	/** How often the outcome worker checks for stale submitted proposals. */
+	outcomeCheckIntervalSecs: number;
 }
 
 export async function setupJobSchedulers(
 	queues: Queues,
 	config: JobSchedulerConfig,
 ): Promise<void> {
-	await queues.staleExecuting.upsertJobScheduler("stale-executing-sweep", {
-		every: config.staleExecutingIntervalSecs * 1000,
-	});
-
 	await queues.retention.upsertJobScheduler("retention-sweep", {
 		every: config.retentionSweepIntervalSecs * 1000,
 	});
@@ -104,5 +101,9 @@ export async function setupJobSchedulers(
 
 	await queues.balanceRefresh.upsertJobScheduler("balance-refresh-tick", {
 		every: config.balanceRefreshIntervalSecs * 1000,
+	});
+
+	await queues.outcome.upsertJobScheduler("outcome-check-tick", {
+		every: config.outcomeCheckIntervalSecs * 1000,
 	});
 }

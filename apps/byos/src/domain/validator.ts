@@ -45,7 +45,17 @@ export interface ValidateProposal {
 
 /** Stub validator that accepts everything. Used for local dev and tests. */
 export const acceptAll: ValidateProposal = {
-	async validate(): Promise<Verdict> {
-		return { kind: "accept", simulation: null };
+	async validate(proposal): Promise<Verdict> {
+		return {
+			kind: "accept",
+			simulation: {
+				gasUsed: 200_000n,
+				trampoline: "0x0000000000000000000000000000000000001234" as Address,
+				sellToken: proposal.sellToken,
+				buyToken: proposal.buyToken,
+				simulationBuyAmount: proposal.quoteBuyAmount,
+				sellTokenRefPrice: 10n ** 18n,
+			},
+		};
 	},
 };

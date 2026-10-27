@@ -12,12 +12,6 @@ export type AuditKind =
 			incomingFingerprint: string;
 	  }
 	| { type: "cancelled"; proposalId: number; subSolver: Address; orderUid: string }
-	// Emitted when a sub-solver requests cancellation while the proposal is in
-	// an active auction settlement ("executing"). The proposal stays executing
-	// but its pendingCancellation flag is set. When the settlement resolves:
-	//   - abandoned → proposal transitions to "cancelled" (not back to "active")
-	//   - succeeded/reverted → flag is cleared (proposal is terminal anyway)
-	| { type: "cancellationDeferred"; proposalId: number; subSolver: Address; orderUid: string }
 	| {
 			type: "statusChanged";
 			proposalId: number;
@@ -74,8 +68,6 @@ export function eventType(kind: AuditKind): string {
 			return "nonce_conflict";
 		case "cancelled":
 			return "cancelled";
-		case "cancellationDeferred":
-			return "cancellation_deferred";
 		case "penalized":
 			return "penalized";
 		case "nonSettlementDebited":
@@ -85,18 +77,14 @@ export function eventType(kind: AuditKind): string {
 		case "driverNotified":
 			return "driver_notified";
 		case "statusChanged": {
-			const { from, to } = kind;
-			if (to === "active" && from === "executing") return "released";
-			if (to === "active") return "validated";
+			const { to } = kind;
 			if (to === "rejected") return "rejected";
-			if (to === "expired") return "expired";
-			if (to === "executing") return "settlement_started";
 			if (to === "simFailed") return "sim_failed";
 			if (to === "settled") return "settled";
 			if (to === "settleFailed") return "settle_failed";
-			if (to === "penalized") return "penalized";
 			if (to === "cancelled") return "cancelled";
 			if (to === "submitted") return "resubmitted";
+			if (to === "lost") return "lost";
 			return "status_changed";
 		}
 	}
@@ -127,8 +115,6 @@ export function auditPayload(kind: AuditKind): Record<string, unknown> {
 		case "nonceConflict":
 			return { incomingFingerprint: kind.incomingFingerprint };
 		case "cancelled":
-			return {};
-		case "cancellationDeferred":
 			return {};
 		case "statusChanged":
 			return {
