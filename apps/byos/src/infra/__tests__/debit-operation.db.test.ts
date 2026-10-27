@@ -79,11 +79,11 @@ describe("debit operations", () => {
 		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("needs_reconciliation");
 
 		expect(await store.resumeDebitOperation(ctx.db, operation.id)).toBe(true);
-		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("retrying");
+		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("pending");
 		expect(await store.resumeDebitOperation(ctx.db, operation.id)).toBe(false);
 
 		await store.claimDebitOperation(ctx.db, operation.id, "replica-b", 60);
 		await store.recordDebitFailure(ctx.db, operation.id, "replica-b", "RPC unavailable");
-		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("retrying");
+		expect(await store.debitOperationStatus(ctx.db, operation.id)).toBe("pending");
 	});
 });

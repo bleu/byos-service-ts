@@ -4,10 +4,9 @@ import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { TestContext } from "../../../../test/setup.js";
 import { createTestDb } from "../../../../test/setup.js";
-import { bufferEntries, proposals } from "../../../db/schema.js";
+import { bufferEntries, proposals, proposalsLog } from "../../../db/schema.js";
 import type { AuditEvent } from "../../../domain/audit.js";
 import type { DebitEscrow } from "../../../domain/penalty.js";
-import type { Proposal } from "../../../domain/proposal.js";
 import type { Candidate } from "../../candidate-store.js";
 import * as store from "../../storage.js";
 import { runBufferDebits, runNonSettlementDebits, runRevertDebits } from "../penalty.js";
@@ -169,10 +168,11 @@ describe("revert debits", () => {
 		// Replica A persisted the only signed transaction then crashed. Its
 		// zero-second lease is expired, so replica B must use those same bytes.
 		await runRevertDebits({ ...config(operator), workerId: "replica-b" }, new Map());
-		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		const after = await store.getIncludingLog(ctx.db, id);
+		expect(after?.status).toBe("settleFailed");
+		expect(after?.penaltyTxHash).toBe(debitHash);
 		expect(signCalls).toBe(0);
 		expect(broadcasts).toEqual([raw]);
-		expect((await store.get(ctx.db, id))?.penaltyTxHash).toBe(debitHash);
 		expect(tx).toBeDefined();
 	});
 
@@ -211,7 +211,7 @@ describe("revert debits", () => {
 		expect(broadcasts).toBe(10);
 	});
 
-	it("debits a settleFailed proposal and marks it penalized", async () => {
+	it("debits a settleFailed proposal and records penalty_tx_hash", async () => {
 		const { id, tx } = await settleFailedProposal();
 		const calls: { subSolver: Address; amount: bigint; reason: Hex }[] = [];
 		const operator: LegacyDebitEscrow = {
@@ -233,8 +233,8 @@ describe("revert debits", () => {
 		const mine = calls.filter((c) => c.reason === tx);
 		expect(mine).toHaveLength(1);
 		expect(mine[0]?.amount).toBe(500n + C_L);
-		const proposal = await store.get(ctx.db, id);
-		expect(proposal?.status).toBe("penalized");
+		const proposal = await store.getIncludingLog(ctx.db, id);
+		expect(proposal?.status).toBe("settleFailed");
 		expect(proposal?.penaltyTxHash).toBe(PENALTY_TX);
 		expect(events.some((e) => e.kind.type === "penalized" && e.kind.proposalId === id)).toBe(true);
 	});
@@ -260,10 +260,12 @@ describe("revert debits", () => {
 
 		await runRevertDebits(config(flaky), attempts);
 		await runRevertDebits(config(flaky), attempts);
-		expect((await store.get(ctx.db, id))?.status).toBe("settleFailed");
+		expect((await store.getIncludingLog(ctx.db, id))?.penaltyTxHash).toBeNull();
 
 		await runRevertDebits(config(flaky), attempts);
-		expect((await store.get(ctx.db, id))?.status).toBe("penalized");
+		const after = await store.getIncludingLog(ctx.db, id);
+		expect(after?.status).toBe("settleFailed");
+		expect(after?.penaltyTxHash).toBe(PENALTY_TX);
 		expect(debitCalls).toBe(3);
 		expect(attempts.size).toBe(0);
 	});
@@ -364,12 +366,14 @@ describe("revert debits", () => {
 			async settlementCost() {
 				return 500n;
 			},
-			// The debit lands, but a concurrent transition wins the record
-			// race — recordPenalty must see a stale status.
+			// The debit lands, but a concurrent worker already set penalty_tx_hash —
+			// recordPenalty's idempotency guard (penalty_tx_hash IS NULL) blocks it.
 			async debit(_subSolver, _amount, reason) {
 				if (reason !== tx) return PENALTY_TX;
-				const current = await store.get(ctx.db, id);
-				await store.transition(ctx.db, current as Proposal, "penalized");
+				await ctx.db
+					.update(proposalsLog)
+					.set({ penaltyTxHash: `0x${"aa".repeat(32)}` })
+					.where(eq(proposalsLog.id, id));
 				return PENALTY_TX;
 			},
 			async readExecutedDelta() {
@@ -403,8 +407,7 @@ describe("non-settlement debits", () => {
 	async function queuedPenalty(): Promise<number> {
 		const candidate = sampleCandidate();
 		await store.insertAsSubmitted(ctx.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
-		const proposal = (await store.get(ctx.db, candidate.id))!;
-		await store.queueNonSettlementPenalty(ctx.db, proposal);
+		await store.applyLostOutcome(ctx.db, candidate.id, "UnknownOutput");
 		return candidate.id;
 	}
 
@@ -431,7 +434,10 @@ describe("non-settlement debits", () => {
 
 		expect(calls).toEqual([C_L / 10n]);
 		expect(events.filter((e) => e.kind.type === "nonSettlementDebited")).toHaveLength(1);
-		expect((await store.get(ctx.db, proposalId))?.status).toBe("submitted");
+		// penalty_tx_hash is now set; proposal stays lost in proposals_log
+		const after = await store.getIncludingLog(ctx.db, proposalId);
+		expect(after?.status).toBe("lost");
+		expect(after?.penaltyTxHash).toBe(PENALTY_TX);
 	});
 
 	it("gives up on a permanently failing non-settlement debit after the cap", async () => {
@@ -829,11 +835,10 @@ describe("pending penalty debit after loss", () => {
 	it("debits a queued penalty and clears it", async () => {
 		const isolated = await createTestDb();
 		try {
-			// Insert a candidate and queue a non-settlement penalty
+			// Insert a candidate, drive it to lost — penalty_tx_hash starts NULL
 			const candidate = sampleCandidate();
 			await store.insertAsSubmitted(isolated.db, candidate, ETHER.toString(), BASE_SOLUTION_PRICES);
-			const proposal = (await store.get(isolated.db, candidate.id))!;
-			await store.queueNonSettlementPenalty(isolated.db, proposal);
+			await store.applyLostOutcome(isolated.db, candidate.id, "UnknownOutput");
 
 			let landed = false;
 			const operator: DebitEscrow = {

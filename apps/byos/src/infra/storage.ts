@@ -5,7 +5,6 @@ import type { Db } from "../db/index.js";
 import {
 	bufferEntries,
 	debitOperations,
-	penalties,
 	proposals,
 	proposalsLog,
 	serviceState,
@@ -182,7 +181,7 @@ export async function claimDebitOperation(
 		.where(
 			and(
 				eq(debitOperations.id, id),
-				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+				inArray(debitOperations.status, ["pending", "broadcasting"]),
 				or(
 					sql`${debitOperations.leaseExpiresAt} IS NULL`,
 					sql`${debitOperations.leaseExpiresAt} < now()`,
@@ -205,7 +204,7 @@ export async function recordDebitFailure(
 		.set({
 			attemptCount: sql`${debitOperations.attemptCount} + 1`,
 			lastError: error,
-			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'retrying' END`,
+			status: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN 'needs_reconciliation' ELSE 'pending' END`,
 			nextRetryAt: sql`CASE WHEN ${debitOperations.attemptCount} + 1 >= 10 THEN NULL ELSE now() END`,
 			leaseOwner: null,
 			leaseExpiresAt: null,
@@ -228,7 +227,7 @@ export async function resumeDebitOperation(db: Db, id: number): Promise<boolean>
 	const [operation] = await db
 		.update(debitOperations)
 		.set({
-			status: "retrying",
+			status: "pending",
 			attemptCount: 0,
 			lastError: null,
 			nextRetryAt: sql`now()`,
@@ -249,7 +248,7 @@ export async function openDebitOperations(db: Db, sourceKind: string): Promise<D
 		.where(
 			and(
 				eq(debitOperations.sourceKind, sourceKind),
-				inArray(debitOperations.status, ["ready", "retrying", "broadcasting"]),
+				inArray(debitOperations.status, ["pending", "broadcasting"]),
 			),
 		);
 	return rows.map(rowToDebitOperation);
@@ -516,7 +515,7 @@ export async function applySettlementOutcome(
 	proposal: Proposal,
 	outcome: SettlementOutcome,
 ): Promise<
-	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[]; insertedPenalty: boolean }
+	| { auditEvent: AuditEvent | null; cancelledAuditEvents: AuditEvent[] }
 	| StoreError
 > {
 	const result = await db.transaction(async (tx) => {
@@ -538,7 +537,6 @@ export async function applySettlementOutcome(
 		const from = locked.status as Status;
 		let toStatus: Status | null = null;
 		let txHash: Hex | null = null;
-		let insertPenalty = false;
 
 		// In the new design only `submitted` proposals are in the proposals table.
 		switch (outcome.kind) {
@@ -560,13 +558,12 @@ export async function applySettlementOutcome(
 			case "abandoned":
 				if (from === "submitted") {
 					toStatus = "lost";
-					insertPenalty = true;
 				}
 				break;
 		}
 
 		if (!toStatus) {
-			return { auditEvent: null, cancelledAuditEvents: [], insertedPenalty: false };
+			return { auditEvent: null, cancelledAuditEvents: [] };
 		}
 
 		await tx
@@ -584,15 +581,6 @@ export async function applySettlementOutcome(
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
-
-		if (insertPenalty) {
-			await tx.insert(penalties).values({
-				proposalId: proposal.id,
-				penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
-				subSolver: proposal.subSolver.toLowerCase(),
-				orderUid: proposal.orderUid.toLowerCase(),
-			});
-		}
 
 		// On success, cancel any other submitted proposals for the same order.
 		const cancelled =
@@ -660,7 +648,6 @@ export async function applySettlementOutcome(
 					settlementTxHash: null,
 				},
 			})),
-			insertedPenalty: insertPenalty,
 		};
 	});
 
@@ -674,14 +661,18 @@ export async function recordPenalty(
 	penaltyTxHash: Hex,
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
 	// settleFailed live rows are deleted immediately; update proposals_log instead.
+	// Guard on penalty_tx_hash IS NULL for idempotency — a debit that landed but
+	// whose record call was retried must not overwrite the first hash.
 	const result = await db
 		.update(proposalsLog)
-		.set({
-			status: "penalized" as Status,
-			penaltyTxHash: penaltyTxHash.toLowerCase(),
-			statusChangedAt: sql`now()`,
-		})
-		.where(and(eq(proposalsLog.id, proposal.id), eq(proposalsLog.status, "settleFailed")))
+		.set({ penaltyTxHash: penaltyTxHash.toLowerCase() })
+		.where(
+			and(
+				eq(proposalsLog.id, proposal.id),
+				eq(proposalsLog.status, "settleFailed"),
+				sql`${proposalsLog.penaltyTxHash} IS NULL`,
+			),
+		)
 		.returning({ id: proposalsLog.id });
 
 	if (result.length === 0) {
@@ -752,9 +743,9 @@ export async function recordNonSettlementDebit(
 	penaltyTxHash: Hex,
 ): Promise<AuditEvent> {
 	await db
-		.update(penalties)
+		.update(proposalsLog)
 		.set({ penaltyTxHash: penaltyTxHash.toLowerCase() })
-		.where(eq(penalties.id, penalty.id));
+		.where(eq(proposalsLog.id, penalty.id));
 
 	return {
 		occurredAt: new Date(),
@@ -767,15 +758,6 @@ export async function recordNonSettlementDebit(
 			penaltyTxHash,
 		},
 	};
-}
-
-export async function queueNonSettlementPenalty(db: Db, proposal: Proposal): Promise<void> {
-	await db.insert(penalties).values({
-		proposalId: proposal.id,
-		penaltyCap: proposal.settlementPenaltyCap?.toString() ?? null,
-		subSolver: proposal.subSolver.toLowerCase(),
-		orderUid: proposal.orderUid.toLowerCase(),
-	});
 }
 
 // --- Reads ---
@@ -1021,13 +1003,6 @@ export async function applyLostOutcome(
 			})
 			.where(eq(proposals.id, proposalId));
 
-		await tx.insert(penalties).values({
-			proposalId,
-			penaltyCap: locked.settlementPenaltyCap ?? null,
-			subSolver: locked.subSolver.toLowerCase(),
-			orderUid: locked.orderUid.toLowerCase(),
-		});
-
 		// Delete the live row — proposals_log already has the updated state.
 		await tx.delete(proposals).where(eq(proposals.id, proposalId));
 
@@ -1051,13 +1026,13 @@ export async function applyLostOutcome(
 /**
  * Late correction: a `/notify` success or revert arrived after the outcome
  * worker already marked the proposal `lost` and deleted the live row.
- * Updates proposals_log in place and, for reverts, inserts a penalty entry.
+ * Updates proposals_log in place; the penalty worker will pick up settleFailed
+ * rows with penalty_tx_hash IS NULL on its next tick.
  */
 export async function applyLateLostCorrection(
 	db: Db,
 	proposalId: number,
 	outcome: { kind: "succeeded"; txHash: Hex } | { kind: "reverted"; txHash: Hex },
-	penaltyCap: bigint | null,
 ): Promise<{ auditEvent: AuditEvent } | StoreError> {
 	const toStatus = outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
 
@@ -1088,15 +1063,6 @@ export async function applyLateLostCorrection(
 
 		const row = result[0]!;
 
-		if (outcome.kind === "reverted") {
-			await tx.insert(penalties).values({
-				proposalId,
-				penaltyCap: penaltyCap?.toString() ?? null,
-				subSolver: row.subSolver.toLowerCase(),
-				orderUid: row.orderUid.toLowerCase(),
-			});
-		}
-
 		const auditEvent: AuditEvent = {
 			occurredAt: new Date(),
 			kind: {
@@ -1122,7 +1088,7 @@ export async function snapshotSettleFailedFromLog(db: Db): Promise<Proposal[]> {
 	const rows = await db
 		.select()
 		.from(proposalsLog)
-		.where(eq(proposalsLog.status, "settleFailed"))
+		.where(and(eq(proposalsLog.status, "settleFailed"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
 		.orderBy(proposalsLog.id);
 
 	return rows.map(tryRowToProposal).filter((p): p is Proposal => p !== null);
@@ -1316,19 +1282,18 @@ export interface PendingPenaltyWithCap extends PendingPenalty {
 export async function pendingPenalties(db: Db): Promise<PendingPenaltyWithCap[]> {
 	const rows = await db
 		.select({
-			id: penalties.id,
-			proposalId: penalties.proposalId,
-			subSolver: penalties.subSolver,
-			orderUid: penalties.orderUid,
-			penaltyCap: penalties.penaltyCap,
+			id: proposalsLog.id,
+			subSolver: proposalsLog.subSolver,
+			orderUid: proposalsLog.orderUid,
+			penaltyCap: proposalsLog.settlementPenaltyCap,
 		})
-		.from(penalties)
-		.where(sql`${penalties.penaltyTxHash} IS NULL`)
-		.orderBy(penalties.id);
+		.from(proposalsLog)
+		.where(and(eq(proposalsLog.status, "lost"), sql`${proposalsLog.penaltyTxHash} IS NULL`))
+		.orderBy(proposalsLog.id);
 
 	return rows.map((r) => ({
 		id: r.id,
-		proposalId: r.proposalId,
+		proposalId: r.id,
 		subSolver: r.subSolver as Address,
 		orderUid: r.orderUid,
 		penaltyCap: r.penaltyCap == null ? null : BigInt(r.penaltyCap),

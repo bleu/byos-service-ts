@@ -142,7 +142,6 @@ export function createNotifyRoute(config: NotifyConfig) {
 							config.db,
 							proposal.id,
 							outcome as { kind: "succeeded"; txHash: `0x${string}` } | { kind: "reverted"; txHash: `0x${string}` },
-							proposal.settlementPenaltyCap ?? null,
 						)
 					: null;
 
