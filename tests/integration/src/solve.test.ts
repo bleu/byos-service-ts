@@ -2,7 +2,7 @@ import type { Auction, SolveResponse } from "@byos/byos/src/infra/api/types.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import type { Address } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, seedProposal, type TestApp } from "./helpers.js";
+import { createTestApp, seedCandidate, type TestApp } from "./helpers.js";
 
 let app: TestApp;
 
@@ -82,7 +82,7 @@ async function seedSimulatedProposal(
 	orderUid: `0x${string}`,
 	buyAmount = 2n * 10n ** 18n,
 ): Promise<number> {
-	return seedProposal(app.ctx.db, {
+	return seedCandidate(app, {
 		orderUid,
 		nonce,
 		sellAmount: 10n ** 18n,
@@ -93,7 +93,7 @@ async function seedSimulatedProposal(
 		gasUsed: 150_000n,
 		trampoline: "0x0000000000000000000000000000000000001234" as Address,
 		simulationBuyAmount: buyAmount,
-		status: "active",
+		status: "submitted",
 		auctionId: 1,
 	});
 }
@@ -194,10 +194,8 @@ describe("/solve", () => {
 
 		// Quote requests are never settled, so nothing was attributed —
 		// in particular no row under the synthetic auction id 0.
-		expect(await store.solutionProposals(app.ctx.db, 0, [1])).toHaveLength(0);
-		expect(await store.solutionProposals(app.ctx.db, 0, [1, 2, 3])).not.toContainEqual(
-			expect.objectContaining({ id }),
-		);
+		expect(await store.get(app.ctx.db, id)).toBeNull();
+		expect(app.candidateStore.get(id)).toBeDefined();
 	});
 
 	it("a non-decimal auction id is rejected", async () => {

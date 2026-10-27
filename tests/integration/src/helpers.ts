@@ -1,15 +1,14 @@
 import { parseConfig, rateLimitsFromConfig } from "@byos/byos/src/config.js";
+import { proposals as proposalsTable } from "@byos/byos/src/db/schema.js";
 import type { AuditEvent } from "@byos/byos/src/domain/audit.js";
 import type { BalanceCache } from "@byos/byos/src/domain/balance-cache.js";
-import type { OrderRecord } from "@byos/byos/src/domain/order.js";
-import type { Proposal } from "@byos/byos/src/domain/proposal.js";
 import type { RateLimiter } from "@byos/byos/src/domain/rate-limit.js";
 import { acceptAll, type ValidateProposal } from "@byos/byos/src/domain/validator.js";
 import { createInternalApp, createPublicApp } from "@byos/byos/src/infra/api/index.js";
 import { _setLocalAuctionState } from "@byos/byos/src/infra/auction-state.js";
-import * as store from "@byos/byos/src/infra/storage.js";
+import { type Candidate, CandidateStore } from "@byos/byos/src/infra/candidate-store.js";
 import { createTestDb, type TestContext } from "@byos/byos/test/setup.js";
-import type { ContractInteraction, Eip1271Verifier } from "@byos/common";
+import type { ContractInteraction, Eip1271Verifier, RejectionReason, Status } from "@byos/common";
 import {
 	byosDomain,
 	computeInteractionsHash,
@@ -31,7 +30,7 @@ import { foundry } from "viem/chains";
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
 
 /** Minimal OrderRecord: the route only checks whether the UID is present in the map. */
-const STUB_ORDER_RECORD: OrderRecord = {
+const STUB_ORDER_RECORD = {
 	order: {
 		sellToken: ZERO_ADDR,
 		buyToken: ZERO_ADDR,
@@ -100,6 +99,7 @@ export interface TestApp {
 	internalApp: Hono;
 	ctx: TestContext;
 	auditEvents: AuditEvent[];
+	candidateStore: CandidateStore;
 }
 
 /** Rate limiting is off unless a test asks for it: the default `allowAll`
@@ -138,6 +138,7 @@ function testRateLimits(overrides: TestAppOverrides) {
 export async function createTestApp(overrides: TestAppOverrides = {}): Promise<TestApp> {
 	const ctx = await createTestDb();
 	const auditEvents: AuditEvent[] = [];
+	const candidateStore = new CandidateStore();
 
 	const appCtx = {
 		db: ctx.db,
@@ -146,6 +147,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 		maxProposalLifetimeSecs: MAX_PROPOSAL_LIFETIME_SECS,
 		cL: 10_000_000_000_000_000n, // 0.01 ETH — mainnet c_L
 		validator: overrides.validator ?? acceptAll,
+		candidateStore,
 		onAuditEvent: (e: AuditEvent) => auditEvents.push(e),
 		rateLimiter: overrides.rateLimiter,
 		balances: overrides.balances,
@@ -156,7 +158,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<T
 	const publicApp = createPublicApp(appCtx);
 	const internalApp = createInternalApp(appCtx);
 
-	return { publicApp, internalApp, ctx, auditEvents };
+	return { publicApp, internalApp, ctx, auditEvents, candidateStore };
 }
 
 // --- Proposal Helpers ---
@@ -237,48 +239,114 @@ export async function signAndSubmitProposal(app: Hono, overrides?: ProposalOverr
 	return { response, body, orderUid };
 }
 
-// --- Direct-insert seeding (the Rust tests' test_proposal fixture) ---
+// --- Direct-insert seeding ---
 
 let seededNonce = 0n;
 
-/** Inserts a proposal directly into the store, bypassing the HTTP layer, so
- * tests can seed any status/simulation state. Defaults mirror the Rust
- * test_proposal fixture: sell 1_000_000, buy 990_000, far-future expiry. */
+/** Seed persisted proposals directly, or allocate an id for an in-memory candidate.
+ * Tests use seedCandidate for validated routes and seedProposal for driver bids. */
 export async function seedProposal(
 	db: TestContext["db"],
-	overrides: Partial<Omit<Proposal, "id">> & { orderUid: string },
+	overrides: {
+		orderUid: string;
+		subSolver?: Address;
+		status?: Status;
+		rejectionReason?: RejectionReason;
+		nonce?: bigint;
+		validUntil?: bigint;
+		interactions?: ContractInteraction[];
+		signature?: Hex;
+		sellAmount?: bigint;
+		minBuyAmount?: bigint;
+		quoteBuyAmount?: bigint;
+		sellToken?: Address;
+		buyToken?: Address;
+		gasUsed?: bigint | null;
+		trampoline?: Address | null;
+		settlementTxHash?: string | null;
+		penaltyTxHash?: string | null;
+		auctionId?: number;
+		simulationBuyAmount?: bigint | null;
+		sellTokenRefPrice?: string | null;
+	},
+	candidateStore?: CandidateStore,
 ): Promise<number> {
 	const orderUid = overrides.orderUid.toLowerCase() as Hex;
-	const proposal: Omit<Proposal, "id"> = {
-		subSolver: "0x0101010101010101010101010101010101010101" as Address,
-		orderUidHash: keccak256(orderUid),
-		sellAmount: 1_000_000n,
-		minBuyAmount: 990_000n,
-		quoteBuyAmount: 990_000n,
-		sellToken: "0x0000000000000000000000000000000000000000" as Address,
-		buyToken: "0x0000000000000000000000000000000000000000" as Address,
-		interactions: [],
-		interactionsHash: `0x${"00".repeat(32)}` as Hex,
-		validUntil: 2n ** 40n,
-		nonce: seededNonce++,
-		signature: "0x" as Hex,
-		status: "active",
-		rejectionReason: null,
-		gasUsed: null,
-		trampoline: null,
-		settlementTxHash: null,
-		penaltyTxHash: null,
-		pendingCancellation: false,
-		sellTokenRefPrice: null,
-		surplusTokenRefPrice: null,
-		auctionGasPrice: null,
-		clearingPrices: null,
-		simulationBuyAmount: null,
-		auctionId: 1,
-		...overrides,
-		orderUid,
-	} as Omit<Proposal, "id">;
-	const { id } = await store.insert(db, proposal);
+	const subSolver: Address = overrides.subSolver ?? "0x0101010101010101010101010101010101010101";
+	const sellAmount = overrides.sellAmount ?? 1_000_000n;
+	const minBuyAmount = overrides.minBuyAmount ?? 990_000n;
+	const quoteBuyAmount = overrides.quoteBuyAmount ?? minBuyAmount;
+	const sellToken: Address = overrides.sellToken ?? "0x0000000000000000000000000000000000000000";
+	const buyToken: Address = overrides.buyToken ?? "0x0000000000000000000000000000000000000000";
+	const gasUsed = overrides.gasUsed ?? null;
+	const trampoline = overrides.trampoline ?? null;
+	const nonce = overrides.nonce ?? seededNonce++;
+	const status = overrides.status ?? "submitted";
+	const auctionId = overrides.auctionId ?? 1;
+
+	const [row] = candidateStore
+		? [{ id: await CandidateStore.allocateId(db) }]
+		: await db
+				.insert(proposalsTable)
+				.values({
+					subSolver: subSolver.toLowerCase(),
+					orderUid,
+					orderUidHash: keccak256(orderUid),
+					sellAmount: sellAmount.toString(),
+					minBuyAmount: minBuyAmount.toString(),
+					quoteBuyAmount: quoteBuyAmount.toString(),
+					sellToken: sellToken.toLowerCase(),
+					buyToken: buyToken.toLowerCase(),
+					interactions:
+						overrides.interactions?.map((i) => ({ ...i, value: i.value.toString() })) ?? [],
+					interactionsHash: `0x${"00".repeat(32)}`,
+					validUntil: (overrides.validUntil ?? 2n ** 40n).toString(),
+					nonce: nonce.toString(),
+					signature: overrides.signature ?? `0x${"00".repeat(65)}`,
+					status,
+					rejectionReason: overrides.rejectionReason ?? null,
+					gasUsed: gasUsed != null ? Number(gasUsed) : null,
+					trampoline: trampoline?.toLowerCase() ?? null,
+					settlementTxHash: overrides.settlementTxHash?.toLowerCase() ?? null,
+					penaltyTxHash: overrides.penaltyTxHash?.toLowerCase() ?? null,
+					simulationFailureParams: null,
+					sellTokenRefPrice: overrides.sellTokenRefPrice ?? null,
+					auctionId,
+					simulationBuyAmount: overrides.simulationBuyAmount?.toString() ?? null,
+				})
+				.returning({ id: proposalsTable.id });
+
+	if (!row) throw new Error("seedProposal: insert did not return a row");
+
+	const id = row.id;
+
+	// Validated candidates have no persisted row until selected by /solve.
+	if (candidateStore && status === "submitted") {
+		const candidate: Candidate = {
+			id,
+			subSolver,
+			orderUid,
+			orderUidHash: keccak256(orderUid),
+			sellAmount,
+			minBuyAmount,
+			quoteBuyAmount,
+			sellToken,
+			buyToken,
+			interactions: overrides.interactions ?? [],
+			interactionsHash: `0x${"00".repeat(32)}` as Hex,
+			validUntil: overrides.validUntil ?? 2n ** 40n,
+			nonce,
+			signature: overrides.signature ?? (`0x${"00".repeat(65)}` as Hex),
+			auctionId,
+			gasUsed: gasUsed ?? 200_000n,
+			trampoline: (trampoline ?? "0x0000000000000000000000000000000000001234") as Address,
+			simulationBuyAmount: overrides.simulationBuyAmount ?? null,
+			sellTokenRefPrice: overrides.sellTokenRefPrice ?? "1000000000000000000",
+			createdAt: new Date(),
+		};
+		candidateStore.add(candidate);
+	}
+
 	return id;
 }
 
@@ -294,4 +362,12 @@ export async function otherReadAuthHeader(): Promise<Hex> {
 
 export async function cancelSignatureHeader(proposalId: number): Promise<Hex> {
 	return signCancellation(SIGN_FN, DOMAIN, BigInt(proposalId));
+}
+
+/** Seed a validated candidate without a live database row. */
+export async function seedCandidate(
+	app: TestApp,
+	overrides: Parameters<typeof seedProposal>[1],
+): Promise<number> {
+	return seedProposal(app.ctx.db, overrides, app.candidateStore);
 }

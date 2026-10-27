@@ -93,10 +93,8 @@ describe("DTO schemas", () => {
 
 		const terminalStatuses = [
 			Status.Rejected,
-			Status.Expired,
 			Status.Settled,
 			Status.SettleFailed,
-			Status.Penalized,
 			Status.SimFailed,
 			Status.Cancelled,
 			Status.Lost,

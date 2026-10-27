@@ -64,10 +64,8 @@ export type CreateProposalResponse = z.infer<typeof createProposalResponseSchema
 export const Status = {
 	Submitted: "submitted",
 	Rejected: "rejected",
-	Expired: "expired",
 	Settled: "settled",
 	SettleFailed: "settleFailed",
-	Penalized: "penalized",
 	SimFailed: "simFailed",
 	Cancelled: "cancelled",
 	Lost: "lost",
@@ -81,10 +79,8 @@ export type Status = (typeof Status)[keyof typeof Status];
 export const statusSchema = z.enum([
 	Status.Submitted,
 	Status.Rejected,
-	Status.Expired,
 	Status.Settled,
 	Status.SettleFailed,
-	Status.Penalized,
 	Status.SimFailed,
 	Status.Cancelled,
 	Status.Lost,
@@ -95,10 +91,8 @@ export const statusSchema = z.enum([
 export function isTerminalStatus(status: Status): boolean {
 	switch (status) {
 		case Status.Rejected:
-		case Status.Expired:
 		case Status.Settled:
 		case Status.SettleFailed:
-		case Status.Penalized:
 		case Status.SimFailed:
 		case Status.Cancelled:
 		case Status.Lost:

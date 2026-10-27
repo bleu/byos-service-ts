@@ -142,10 +142,7 @@ describe("writeToLog", () => {
 
 		await store.writeToLog(ctx.db, id, input, "rejected", "InsufficientEscrow", null);
 
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row).not.toBeUndefined();
 		expect(row?.status).toBe("rejected");
 		expect(row?.rejectionReason).toBe("InsufficientEscrow");
@@ -157,10 +154,7 @@ describe("writeToLog", () => {
 
 		await store.writeToLog(ctx.db, id, input, "cancelled", null, null);
 
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row?.status).toBe("cancelled");
 		expect(row?.rejectionReason).toBeNull();
 	});
@@ -176,10 +170,7 @@ describe("writeToLog", () => {
 		).resolves.not.toThrow();
 
 		// First write wins due to onConflictDoNothing
-		const [row] = await ctx.db
-			.select()
-			.from(proposalsLog)
-			.where(eq(proposalsLog.id, id));
+		const [row] = await ctx.db.select().from(proposalsLog).where(eq(proposalsLog.id, id));
 		expect(row?.status).toBe("cancelled");
 	});
 });
@@ -255,21 +246,22 @@ describe("applySettlementOutcome (submitted proposals)", () => {
 		});
 
 		expect("auditEvent" in result).toBe(true);
-		const updated = await store.get(ctx.db, candidate.id);
+		// settleFailed rows are deleted from proposals immediately; fall back to proposals_log
+		const updated = await store.getIncludingLog(ctx.db, candidate.id);
 		expect(updated?.status).toBe("settleFailed");
 		expect(updated?.settlementTxHash).toBe(txHash);
 	});
 
-	it("transitions submitted → lost on abandoned, queues penalty, deletes the row", async () => {
+	it("transitions submitted → lost on abandoned, marks for penalty via proposals_log, deletes the row", async () => {
 		const candidate = sampleCandidate();
 		await store.insertAsSubmitted(ctx.db, candidate, "1000000000000000000", SOLUTION_PRICES);
 		const proposal = (await store.get(ctx.db, candidate.id))!;
 
-		const result = await store.applySettlementOutcome(ctx.db, proposal, { kind: "abandoned" });
+		await store.applySettlementOutcome(ctx.db, proposal, { kind: "abandoned" });
 
-		expect("insertedPenalty" in result && result.insertedPenalty).toBe(true);
-		// Lost rows are deleted immediately
+		// Lost rows are deleted immediately from the live table
 		expect(await store.get(ctx.db, candidate.id)).toBeNull();
+		// The penalty worker finds them via proposals_log (lost + penalty_tx_hash IS NULL)
 		const queued = (await store.pendingPenalties(ctx.db)).filter(
 			(p) => p.proposalId === candidate.id,
 		);
@@ -324,8 +316,8 @@ describe("transition", () => {
 		// First transition succeeds
 		await store.transition(ctx.db, proposal, "settleFailed");
 
-		// Second transition with stale status fails
-		const result = await store.transition(ctx.db, proposal, "penalized");
+		// Second transition with stale status fails (proposal is now settleFailed, not submitted)
+		const result = await store.transition(ctx.db, proposal, "cancelled");
 		expect("kind" in result && result.kind === "staleTransition").toBe(true);
 	});
 });
@@ -370,10 +362,15 @@ describe("getForOwner", () => {
 
 describe("signedProposalFingerprint", () => {
 	it("derives a fingerprint from all signed payload fields", () => {
-		const proposal = sampleProposalInput();
+		const interaction = {
+			target: "0x0000000000000000000000000000000000000042" as Address,
+			value: 0n,
+			callData: "0xabcdef" as Hex,
+		};
+		const proposal = sampleProposalInput({ interactions: [interaction] });
 		const differentRoute = {
 			...proposal,
-			interactions: [{ ...proposal.interactions[0]!, callData: "0xdeadbeef" as Hex }],
+			interactions: [{ ...interaction, callData: "0xdeadbeef" as Hex }],
 		};
 		expect(store.signedProposalFingerprint(proposal)).not.toBe(
 			store.signedProposalFingerprint(differentRoute),

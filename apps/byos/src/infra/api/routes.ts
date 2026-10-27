@@ -649,4 +649,3 @@ export function createPublicRoutes(config: RoutesConfig) {
 
 	return app;
 }
-

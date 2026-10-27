@@ -154,10 +154,20 @@ describe.concurrent("order scenarios", () => {
 			CONTRACTS.weth,
 		]);
 		if (quote === undefined) throw new Error("missing quote");
-		const params = await scenario(3, timing, quote);
-		params.quoteBuyAmount = quote;
-		params.minBuyAmount = quote;
-		params.interactions = buildSellInteractions(CONTRACTS.usdc, CONTRACTS.weth, SELL_AMOUNT, quote);
+		// Other scenarios trade against this pool concurrently. Leave output margin
+		// so a stale AMM quote does not fail simulation before the profitability gate.
+		// The signed quote still equals the order limit, leaving zero scored surplus
+		// even when the route delivers more than quoted.
+		const orderLimit = (quote * 95n) / 100n;
+		const params = await scenario(3, timing, orderLimit);
+		params.quoteBuyAmount = orderLimit;
+		params.minBuyAmount = orderLimit;
+		params.interactions = buildSellInteractions(
+			CONTRACTS.usdc,
+			CONTRACTS.weth,
+			SELL_AMOUNT,
+			orderLimit,
+		);
 		const { response } = await submitProposalInAuction(params, timing);
 		expect(response.status).toBe(400);
 		expect(await response.json()).toMatchObject({
