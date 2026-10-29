@@ -245,12 +245,18 @@ export function createSolveRoute(config: SolveConfig) {
 
 			if (!bestCandidate || !bestCut) continue;
 
+			const ETHER = 10n ** 18n;
+			const bestGasCost = effectiveGas(bestCandidate.gasUsed) * auctionGasPrice;
+			const gasInBuyToken =
+				surplusPrice > 0n ? (bestGasCost * ETHER) / surplusPrice : 0n;
+
 			const solution = buildSolution(
 				bestCandidate.id,
 				order,
 				bestCandidate,
 				bestCandidate.gasUsed,
 				bestCut,
+				gasInBuyToken,
 			);
 			if (!solution) continue;
 
@@ -383,6 +389,7 @@ function buildSolution(
 	candidate: Candidate,
 	gasUsed: bigint,
 	cut: { amount: bigint; executedAmount: bigint },
+	gasInBuyToken: bigint,
 ): Solution | null {
 	const [transfer, execute] = encodeTrampolineInteractions(
 		candidate.trampoline,
@@ -411,11 +418,14 @@ function buildSolution(
 		outputs: [],
 	}));
 
+	// For sell orders: gas is embedded in the clearing price (buy-side deduction),
+	// so the full sell amount executes with no fee.
+	// For buy orders: gas is taken as a sell-token fee on top of the route input.
 	const trade: Fulfillment = {
 		kind: "fulfillment",
 		order: order.uid,
-		executedAmount: cut.executedAmount.toString(),
-		fee: cut.amount.toString(),
+		executedAmount: order.kind === "sell" ? candidate.sellAmount.toString() : cut.executedAmount.toString(),
+		fee: order.kind === "sell" ? "0" : cut.amount.toString(),
 	};
 
 	const toSolutionInteraction = (i: {
@@ -439,10 +449,17 @@ function buildSolution(
 			? candidate.simulationBuyAmount
 			: candidate.quoteBuyAmount;
 
+	// For sell orders: deduct gas cost (in buy-token terms) from the clearing price.
+	// For buy orders: clearing price is unchanged (gas rides on the sell-side fee).
+	const clearingBuyAmount =
+		order.kind === "sell" && effectiveBuy > gasInBuyToken
+			? effectiveBuy - gasInBuyToken
+			: effectiveBuy;
+
 	return {
 		id,
 		prices: {
-			[order.sellToken]: effectiveBuy.toString(),
+			[order.sellToken]: clearingBuyAmount.toString(),
 			[order.buyToken]: candidate.sellAmount.toString(),
 		},
 		trades: [trade],
