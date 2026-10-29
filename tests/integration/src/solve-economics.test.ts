@@ -136,17 +136,16 @@ describe("/solve economics", () => {
 		expect(solutions[0]?.trades[0]?.executedAmount).toBe("900");
 	});
 
-	// The driver checks executed + fee == order.sellAmount on a sell order,
-	// and rejects a solution that declares no fee at all.
-	it("declares the gas cut on a sell order", async () => {
+	// For sell orders the gas cost is embedded in the clearing price (buy-side
+	// deduction). The full sell amount executes and the fee is zero.
+	it("sell order: full sell amount executes with no fee", async () => {
 		const u = uid("e4");
 		await seedActive(u, 1_000_000_000n, 1_000_000_000n);
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000000000", "900000000", "1"));
 		const trade = solutions[0]?.trades[0];
-		expect(trade?.fee).toBe(CUT_AT_PARITY.toString());
-		expect(trade?.executedAmount).toBe((1_000_000_000n - CUT_AT_PARITY).toString());
-		expect(BigInt(trade?.executedAmount ?? "0") + BigInt(trade?.fee ?? "0")).toBe(1_000_000_000n);
+		expect(trade?.fee).toBe("0");
+		expect(trade?.executedAmount).toBe("1000000000");
 	});
 
 	// A buy order's cut rides alongside an unchanged execution.
@@ -160,14 +159,16 @@ describe("/solve economics", () => {
 		expect(trade?.fee).toBe(CUT_AT_PARITY.toString());
 	});
 
-	// If the cut ever moved the price vector, encode_settle would stop
-	// producing the transaction ADR-0012 simulated.
-	it("clearing prices are unchanged by the cut", async () => {
+	// For sell orders the clearing price for the sell token is reduced by the gas
+	// cost (expressed in buy-token atoms), so the user receives fewer buy tokens.
+	// At parity (both tokens priced at 10^18) with gas price 1 the deduction
+	// equals effectiveGas = 230_000 atoms.
+	it("sell order: clearing price reflects gas deduction", async () => {
 		const u = uid("e6");
 		await seedActive(u, 1_000_000_000n, 1_000_000_000n);
 
 		const { solutions } = await postSolve(auctionJson(u, "sell", "1000000000", "900000000", "1"));
-		expect(solutions[0]?.prices[SELL_TOKEN]).toBe("1000000000");
+		expect(solutions[0]?.prices[SELL_TOKEN]).toBe((1_000_000_000n - CUT_AT_PARITY).toString());
 		expect(solutions[0]?.prices[BUY_TOKEN]).toBe("1000000000");
 	});
 
@@ -197,25 +198,30 @@ describe("/solve economics", () => {
 	// breach costs us that proposal and not the whole order.
 	it("falls back to the runner-up when the best cut breaches", async () => {
 		const u = uid("e8");
-		// Cut 530_000, score 470_000, delivers 1_998_940_000 — under the limit.
+		// effectiveGas(500_000) = 530_000 → gasCutSize receives = 1_998_940_000 < 1_999_000_000 → skip.
 		await seedActive(u, 1_000_000_000n, 2_000_000_000n, 500_000n);
-		// Cut 130_000, score 270_000, delivers 1_999_140_078 — over it.
+		// effectiveGas(100_000) = 130_000 → gasCutSize receives = 1_999_139_878 >= 1_999_000_000 → bid.
 		await seedActive(u, 1_000_000_000n, 1_999_400_000n, 100_000n);
 
 		const tight = await postSolve(auctionJson(u, "sell", "1000000000", "1999000000", "1"));
 		expect(tight.solutions, "the runner-up still deserves a bid").toHaveLength(1);
+		// Sell orders: fee is zero, full sell amount executes.
+		expect(tight.solutions[0]?.trades[0]?.fee).toBe("0");
+		expect(tight.solutions[0]?.trades[0]?.executedAmount).toBe("1000000000");
+		// Clearing price reflects runner-up's gas deduction: 1_999_400_000 − 130_000.
 		expect(
-			tight.solutions[0]?.trades[0]?.fee,
+			tight.solutions[0]?.prices[SELL_TOKEN],
 			"the surviving bid must be the runner-up, not the higher-scoring proposal",
-		).toBe("130000");
-		expect(tight.solutions[0]?.trades[0]?.executedAmount).toBe("999870000");
+		).toBe((1_999_400_000n - 130_000n).toString());
 
 		// Same two proposals, a limit with room for both cuts: the fat route
 		// wins on score, which is what makes the run above a fallback.
 		// The fat proposal was abandoned at auction close; re-seed it.
 		await seedActive(u, 1_000_000_000n, 2_000_000_000n, 500_000n);
 		const loose = await postSolve(auctionJson(u, "sell", "1000000000", "1990000000", "1"));
-		expect(loose.solutions[0]?.trades[0]?.fee).toBe("530000");
+		expect(loose.solutions[0]?.trades[0]?.fee).toBe("0");
+		// Fat route wins: clearing price = 2_000_000_000 − 530_000.
+		expect(loose.solutions[0]?.prices[SELL_TOKEN]).toBe((2_000_000_000n - 530_000n).toString());
 	});
 
 	// The driver's settlement budget: simulated gas plus the scoring buffer.
