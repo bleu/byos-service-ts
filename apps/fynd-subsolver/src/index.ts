@@ -5,8 +5,8 @@ import {
 	ByosClient,
 	FyndConfigurationError,
 	FyndProvider,
-	OrderFilter,
 	OrderbookClient,
+	OrderFilter,
 	RequestBudget,
 	SolveOrderbookClient,
 } from "@byos/subsolver-core";

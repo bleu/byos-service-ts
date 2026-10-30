@@ -23,8 +23,7 @@ export class OrderFilter {
 			orders
 				.filter(
 					(o) =>
-						o.createdAt !== undefined &&
-						o.createdAt >= nowSecs - this.opts.freshOrderWindowSecs,
+						o.createdAt !== undefined && o.createdAt >= nowSecs - this.opts.freshOrderWindowSecs,
 				)
 				.map((o) => o.uid),
 		);
@@ -34,23 +33,15 @@ export class OrderFilter {
 				.map((o) => ({
 					uid: o.uid,
 					relativeSpread:
-						o.nativeSellValue > 0n
-							? (o.nativeBuyValue * SCALE) / o.nativeSellValue
-							: 0n,
+						o.nativeSellValue > 0n ? (o.nativeBuyValue * SCALE) / o.nativeSellValue : 0n,
 				}))
 				.sort((a, b) =>
-					a.relativeSpread > b.relativeSpread
-						? -1
-						: a.relativeSpread < b.relativeSpread
-							? 1
-							: 0,
+					a.relativeSpread > b.relativeSpread ? -1 : a.relativeSpread < b.relativeSpread ? 1 : 0,
 				)
 				.slice(0, this.opts.closeToExecutionTopN)
 				.map((x) => x.uid),
 		);
 
-		return orders.filter(
-			(o) => freshUids.has(o.uid) || closeToExecutionUids.has(o.uid),
-		);
+		return orders.filter((o) => freshUids.has(o.uid) || closeToExecutionUids.has(o.uid));
 	}
 }

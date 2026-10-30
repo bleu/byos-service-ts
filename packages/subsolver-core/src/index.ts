@@ -1,5 +1,4 @@
 export { AwsOrderbookClient } from "./aws-orderbook-client.js";
-export { SolveOrderbookClient } from "./solve-orderbook-client.js";
 export { ByosClient, ByosRateLimitError, type ProposalMetadata } from "./byos-client.js";
 export {
 	FyndConfigurationError,
@@ -8,7 +7,7 @@ export {
 } from "./fynd-provider.js";
 export { randomNonce } from "./nonce.js";
 export { OrderFilter, type OrderFilterOptions } from "./order-filter.js";
-export { OrderbookClient, toOrderbookOrders, type OrderbookOrder } from "./orderbook-client.js";
+export { OrderbookClient, type OrderbookOrder, toOrderbookOrders } from "./orderbook-client.js";
 export {
 	ceilDiv,
 	type PollOrder,
@@ -30,3 +29,4 @@ export {
 	type RouteProvider,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
+export { SolveOrderbookClient } from "./solve-orderbook-client.js";
