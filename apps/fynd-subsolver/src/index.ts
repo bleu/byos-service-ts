@@ -79,7 +79,6 @@ async function main() {
 	}
 
 	const orderFilter = new OrderFilter({
-		freshOrderWindowSecs: config.freshOrderWindowSecs,
 		closeToExecutionTopN: config.closeToExecutionTopN,
 	});
 

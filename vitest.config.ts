@@ -38,6 +38,10 @@ export default defineConfig({
 		projects: [
 			{
 				plugins: [yamlTextPlugin],
+				// Exercise current workspace source rather than a potentially stale dist build.
+				resolve: {
+					alias: { "@byos/subsolver-core": resolve("packages/subsolver-core/src/index.ts") },
+				},
 				test: {
 					name: "unit",
 					include: ["apps/*/src/**/*.test.ts", "packages/*/src/**/*.test.ts"],

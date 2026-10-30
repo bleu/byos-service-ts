@@ -69,6 +69,14 @@ export class FyndSubsolver {
 	}
 
 	async pollOnce(now: bigint): Promise<void> {
+		let orders: OrderbookOrder[];
+		try {
+			const raw = await this.orderbook.solvableOrders();
+			orders = this.orderFilter.filter(raw);
+		} catch (error) {
+			this.logger.error({ err: error }, "failed to fetch solvable orders");
+			return;
+		}
 		if (Date.now() < this.retryAtMs) return;
 		if (!this.hasSynchronized) {
 			if (!(await this.synchronize(now))) return;
@@ -76,14 +84,7 @@ export class FyndSubsolver {
 			await this.synchronize(now);
 		}
 		for (const [uid, live] of this.live) if (live.validUntil < now) this.live.delete(uid);
-		let orders: OrderbookOrder[];
-		try {
-			const raw = await this.orderbook.solvableOrders();
-			orders = this.orderFilter.filter(raw.filter((order) => order.kind === "sell"));
-		} catch (error) {
-			this.logger.error({ err: error }, "failed to fetch solvable orders");
-			return;
-		}
+
 		this.logger.debug(
 			{ count: orders.length, liveProposals: this.live.size },
 			"fetched solvable sell orders",
