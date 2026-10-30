@@ -27,6 +27,24 @@ export const configSchema = z.object({
 	SLACK_TOKEN: z.string().optional(),
 	SLACK_CHANNEL: z.string().optional(),
 
+	// Sub-solver forwarding
+	SUBSOLVER_BEARER: z
+		.string()
+		.regex(/^[A-Za-z0-9._~+/-]+=*$/)
+		.optional(),
+	/** Comma-separated list of subsolver /solve endpoints to forward each auction to.
+	 * Fire-and-forget: failures are logged at info level and never surface to the driver. */
+	SUBSOLVERS_ENDPOINTS: z
+		.string()
+		.optional()
+		.transform((v) => {
+			if (!v) return [];
+			return v
+				.split(",")
+				.map((u) => u.trim())
+				.filter(Boolean);
+		}),
+
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 	/** Comma-separated list of allowed sub-solver addresses (e.g. 0xabc...,0x123...).
@@ -156,6 +174,13 @@ export const configSchema = z.object({
 });
 
 const refinedConfigSchema = configSchema.superRefine((cfg, ctx) => {
+	if (cfg.SUBSOLVERS_ENDPOINTS.length > 0 && !cfg.SUBSOLVER_BEARER) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["SUBSOLVER_BEARER"],
+			message: "required when SUBSOLVERS_ENDPOINTS is configured",
+		});
+	}
 	if (cfg.RATE_MIN_PER_WINDOW > cfg.RATE_MAX_PER_WINDOW) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
@@ -182,6 +207,7 @@ export function safeConfigForLogging(config: Config): Record<string, unknown> {
 		DATABASE_URL: "<redacted>",
 		REDIS_URL: "<redacted>",
 		RPC_URL: config.RPC_URL ? "<redacted>" : undefined,
+		SUBSOLVER_BEARER: config.SUBSOLVER_BEARER ? "<redacted>" : undefined,
 		SOLVE_BEARER_TOKEN: config.SOLVE_BEARER_TOKEN ? "<redacted>" : undefined,
 		OPERATOR_PRIVATE_KEY: config.OPERATOR_PRIVATE_KEY ? "<redacted>" : undefined,
 		SLACK_TOKEN: config.SLACK_TOKEN ? "<redacted>" : undefined,

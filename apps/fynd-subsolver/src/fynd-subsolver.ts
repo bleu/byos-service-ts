@@ -5,6 +5,7 @@ import {
 	buildProposalFromRoute,
 	type FyndProvider,
 	type OrderbookOrder,
+	type OrderFilter,
 	prioritizeCandidates,
 	quoteBatch,
 	type RequestBudget,
@@ -39,6 +40,7 @@ export class FyndSubsolver {
 		private readonly signFn: (params: unknown) => Promise<Hex>,
 		private readonly logger: pino.Logger,
 		private readonly budget: RequestBudget,
+		private readonly orderFilter: OrderFilter,
 	) {}
 
 	async synchronize(now: bigint): Promise<boolean> {
@@ -76,7 +78,8 @@ export class FyndSubsolver {
 		for (const [uid, live] of this.live) if (live.validUntil < now) this.live.delete(uid);
 		let orders: OrderbookOrder[];
 		try {
-			orders = (await this.orderbook.solvableOrders()).filter((order) => order.kind === "sell");
+			const raw = await this.orderbook.solvableOrders();
+			orders = this.orderFilter.filter(raw.filter((order) => order.kind === "sell"));
 		} catch (error) {
 			this.logger.error({ err: error }, "failed to fetch solvable orders");
 			return;

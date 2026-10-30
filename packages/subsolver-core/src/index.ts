@@ -6,7 +6,8 @@ export {
 	type FyndProviderConfig,
 } from "./fynd-provider.js";
 export { randomNonce } from "./nonce.js";
-export { OrderbookClient, type OrderbookOrder } from "./orderbook-client.js";
+export { OrderFilter, type OrderFilterOptions } from "./order-filter.js";
+export { OrderbookClient, type OrderbookOrder, toOrderbookOrders } from "./orderbook-client.js";
 export {
 	ceilDiv,
 	type PollOrder,
@@ -28,3 +29,4 @@ export {
 	type RouteProvider,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
+export { SolveOrderbookClient } from "./solve-orderbook-client.js";

@@ -1,6 +1,6 @@
 import { byosDomain } from "@byos/common";
 import type { ByosClient, FyndProvider, OrderbookOrder } from "@byos/subsolver-core";
-import { RequestBudget } from "@byos/subsolver-core";
+import { OrderFilter, RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import type { Config } from "./config.js";
@@ -29,8 +29,8 @@ const config: Config = {
 	proposalRefreshIntervalSeconds: 15,
 	proposalTtlSeconds: 60,
 	pollIntervalSeconds: 2,
-	awsFreshOrderWindowSecs: 4000,
-	awsCloseToExecutionTopN: 20,
+	freshOrderWindowSecs: 4000,
+	closeToExecutionTopN: 20,
 };
 
 function order(index: number): OrderbookOrder {
@@ -45,6 +45,8 @@ function order(index: number): OrderbookOrder {
 		fullSellAmount: 100n,
 		fullBuyAmount: 90n,
 		estimatedNativeSurplus: 0n,
+		nativeBuyValue: 0n,
+		nativeSellValue: 0n,
 	};
 }
 
@@ -66,10 +68,29 @@ function subsolver(
 		async () => "0x" as `0x${string}`,
 		logger,
 		new RequestBudget(),
+		new OrderFilter({ freshOrderWindowSecs: 4000, closeToExecutionTopN: 20 }),
 	);
 }
 
 describe("FyndSubsolver", () => {
+	it("keeps sell-order slots when buy orders rank higher", async () => {
+		const buys = Array.from({ length: 20 }, (_, i) => ({
+			...order(i + 1),
+			kind: "buy" as const,
+			nativeBuyValue: 200n,
+			nativeSellValue: 100n,
+		}));
+		const sell = { ...order(21), nativeBuyValue: 90n, nativeSellValue: 100n };
+		const ready = vi.fn(async () => false);
+		const fynd = subsolver(
+			vi.fn(async () => []),
+			[...buys, sell],
+			ready,
+		);
+		await fynd.pollOnce(100n);
+		expect(ready).toHaveBeenCalledOnce();
+	});
+
 	it("keeps its last known live proposals when a later synchronization fails", async () => {
 		const liveOrder = order(1);
 		const proposals = vi

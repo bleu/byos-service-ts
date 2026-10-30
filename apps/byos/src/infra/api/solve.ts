@@ -39,6 +39,9 @@ export interface SolveConfig {
 	validator: ValidateProposal;
 	onAuditEvent: (event: AuditEvent) => void;
 	selectorBufferMs?: number;
+	/** Subsolver /solve endpoints to forward each auction to (fire-and-forget). */
+	subsolvingEndpoints?: string[];
+	subsolverBearer?: string;
 	logger?: Logger;
 }
 
@@ -82,6 +85,23 @@ export function createSolveRoute(config: SolveConfig) {
 			{ auctionId: auction.id ?? null, orderCount: auction.orders.length },
 			"/solve received",
 		);
+
+		// Forward auction to configured subsolvers (fire-and-forget).
+		if (config.subsolvingEndpoints && config.subsolvingEndpoints.length > 0) {
+			const body = JSON.stringify(raw);
+			for (const endpoint of config.subsolvingEndpoints) {
+				fetch(`${endpoint}/solve`, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${config.subsolverBearer}`,
+					},
+					body,
+				}).catch((err: unknown) => {
+					log?.info({ endpoint, err }, "subsolver forward failed");
+				});
+			}
+		}
 
 		// Auctions without an id are quote requests: never settled, so there
 		// is nothing to attribute. A present id must be a decimal integer —

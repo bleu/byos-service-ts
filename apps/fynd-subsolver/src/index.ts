@@ -6,8 +6,11 @@ import {
 	FyndConfigurationError,
 	FyndProvider,
 	OrderbookClient,
+	OrderFilter,
 	RequestBudget,
+	SolveOrderbookClient,
 } from "@byos/subsolver-core";
+import { serve } from "@hono/node-server";
 import { FyndClient } from "@kayibal/fynd-client";
 import pino from "pino";
 import type { Address } from "viem";
@@ -15,6 +18,7 @@ import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { FyndSubsolver } from "./fynd-subsolver.js";
+import { createSolveApp } from "./solve-app.js";
 
 const delay = (milliseconds: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -60,14 +64,28 @@ async function main() {
 		maxQuoteAgeSeconds: config.fyndMaxQuoteAgeSeconds,
 	});
 	await waitForFyndStartup(fynd, logger);
-	const orderbook =
-		config.discoveryMethod === "aws"
-			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, {
-					logger,
-					freshOrderWindowSecs: config.awsFreshOrderWindowSecs,
-					closeToExecutionTopN: config.awsCloseToExecutionTopN,
-				})
-			: new OrderbookClient(config.discoveryUrl);
+
+	let orderbook: { solvableOrders(): Promise<import("@byos/subsolver-core").OrderbookOrder[]> };
+	if (config.discoveryMethod === "aws") {
+		orderbook = new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, {
+			logger,
+		});
+	} else if (config.discoveryMethod === "solve") {
+		const solveClient = new SolveOrderbookClient(logger);
+		const app = createSolveApp(solveClient, config.subsolverBearer);
+		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
+			logger.info({ port: info.port }, "solve discovery listener started");
+		});
+		orderbook = solveClient;
+	} else {
+		orderbook = new OrderbookClient(config.discoveryUrl);
+	}
+
+	const orderFilter = new OrderFilter({
+		freshOrderWindowSecs: config.freshOrderWindowSecs,
+		closeToExecutionTopN: config.closeToExecutionTopN,
+	});
+
 	const subsolver = new FyndSubsolver(
 		config,
 		orderbook,
@@ -77,6 +95,7 @@ async function main() {
 		signFn,
 		logger,
 		new RequestBudget(config.byosRequestsPerMinute, config.byosReadReserve),
+		orderFilter,
 	);
 	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
 	const tick = async () => {
