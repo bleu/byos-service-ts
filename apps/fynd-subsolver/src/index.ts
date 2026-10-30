@@ -12,13 +12,13 @@ import {
 } from "@byos/subsolver-core";
 import { serve } from "@hono/node-server";
 import { FyndClient } from "@kayibal/fynd-client";
-import { Hono } from "hono";
 import pino from "pino";
 import type { Address } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { FyndSubsolver } from "./fynd-subsolver.js";
+import { createSolveApp } from "./solve-app.js";
 
 const delay = (milliseconds: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -72,17 +72,7 @@ async function main() {
 		});
 	} else if (config.discoveryMethod === "solve") {
 		const solveClient = new SolveOrderbookClient(logger);
-		const app = new Hono();
-		app.post("/solve", async (c) => {
-			let body: unknown;
-			try {
-				body = await c.req.json();
-			} catch {
-				return c.json({ error: "invalid json" }, 400);
-			}
-			solveClient.receive(body);
-			return c.json({}, 200);
-		});
+		const app = createSolveApp(solveClient, config.subsolverBearer);
 		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
 			logger.info({ port: info.port }, "solve discovery listener started");
 		});

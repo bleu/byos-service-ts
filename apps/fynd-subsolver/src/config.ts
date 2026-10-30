@@ -23,6 +23,10 @@ const envSchema = z.object({
 	POLL_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(2),
 	FRESH_ORDER_WINDOW_SECS: z.coerce.number().int().positive().default(4000),
 	CLOSE_TO_EXECUTION_TOP_N: z.coerce.number().int().positive().default(20),
+	SUBSOLVER_BEARER: z
+		.string()
+		.regex(/^[A-Za-z0-9._~+/-]+=*$/)
+		.optional(),
 	SOLVE_PORT: z.coerce.number().int().positive().default(3001),
 	JSON_LOGS: z.enum(["true", "false"]).optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
@@ -54,7 +58,7 @@ interface BaseConfig {
 export type Config =
 	| (BaseConfig & { discoveryMethod: "orderbook" })
 	| (BaseConfig & { discoveryMethod: "aws" })
-	| (BaseConfig & { discoveryMethod: "solve"; solvePort: number });
+	| (BaseConfig & { discoveryMethod: "solve"; solvePort: number; subsolverBearer: string });
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
@@ -99,7 +103,14 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		return { ...base, discoveryMethod: "aws" as const };
 	}
 	if (result.data.DISCOVERY_METHOD === "solve") {
-		return { ...base, discoveryMethod: "solve" as const, solvePort: result.data.SOLVE_PORT };
+		if (!result.data.SUBSOLVER_BEARER)
+			throw new Error("SUBSOLVER_BEARER is required for solve discovery");
+		return {
+			...base,
+			discoveryMethod: "solve" as const,
+			solvePort: result.data.SOLVE_PORT,
+			subsolverBearer: result.data.SUBSOLVER_BEARER,
+		};
 	}
 	return { ...base, discoveryMethod: "orderbook" as const };
 }

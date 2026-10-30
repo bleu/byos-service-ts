@@ -41,6 +41,7 @@ export interface SolveConfig {
 	selectorBufferMs?: number;
 	/** Subsolver /solve endpoints to forward each auction to (fire-and-forget). */
 	subsolvingEndpoints?: string[];
+	subsolverBearer?: string;
 	logger?: Logger;
 }
 
@@ -91,7 +92,10 @@ export function createSolveRoute(config: SolveConfig) {
 			for (const endpoint of config.subsolvingEndpoints) {
 				fetch(`${endpoint}/solve`, {
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${config.subsolverBearer}`,
+					},
 					body,
 				}).catch((err: unknown) => {
 					log?.info({ endpoint, err }, "subsolver forward failed");

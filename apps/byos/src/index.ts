@@ -65,6 +65,7 @@ async function main() {
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		selectorBufferMs: config.SELECTOR_BUFFER_MS,
 		subsolvingEndpoints: config.SUBSOLVERS_ENDPOINTS,
+		subsolverBearer: config.SUBSOLVER_BEARER,
 		onAuditEvent: ctx.onAuditEvent,
 		logger,
 	});

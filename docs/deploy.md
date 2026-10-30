@@ -105,7 +105,7 @@ This command starts the BYOS service, PostgreSQL, Redis, and the admin dashboard
 ### Port mapping
 
 The `docker-compose.prod-local.yml` file uses the following default host ports.
-Set any override in the **repo-root `.env` file**; all six variables belong in
+Set any override in the **repo-root `.env` file**; all seven variables belong in
 that file, rather than `.env.byos`, `.env.admin`, or a sub-solver env file.
 Service `env_file` entries configure containers and do not supply Compose port
 interpolation values.
@@ -118,6 +118,7 @@ interpolation values.
 | PostgreSQL | 5432 | 55432 | `POSTGRES_HOST_PORT` |
 | Redis | 6379 | 56379 | `REDIS_HOST_PORT` |
 | Fynd | 3000 | 53000 | `FYND_HOST_PORT` |
+| Fynd sub-solver solve listener | 3001 | 53002 | `FYND_SUBSOLVER_HOST_PORT` |
 
 For example, to publish the admin dashboard on port 53002:
 

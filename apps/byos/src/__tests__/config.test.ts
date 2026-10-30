@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseConfig } from "../config.js";
+import { parseConfig, safeConfigForLogging } from "../config.js";
 
 const base = {
 	DATABASE_URL: "postgres://localhost/byos",
@@ -12,6 +12,14 @@ const base = {
 };
 
 describe("parseConfig", () => {
+	it("requires a bearer token for sub-solver forwarding and redacts it", () => {
+		const forwarding = { ...base, SUBSOLVERS_ENDPOINTS: "http://subsolver:3001" };
+		expect(() => parseConfig(forwarding)).toThrow(/SUBSOLVER_BEARER/);
+		const config = parseConfig({ ...forwarding, SUBSOLVER_BEARER: "secret" });
+		expect(config.SUBSOLVER_BEARER).toBe("secret");
+		expect(safeConfigForLogging(config).SUBSOLVER_BEARER).toBe("<redacted>");
+	});
+
 	it("parses a minimal config with all required fields", () => {
 		const config = parseConfig(base);
 		expect(config.RPC_URL).toBe(base.RPC_URL);

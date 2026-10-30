@@ -79,7 +79,7 @@ export class FyndSubsolver {
 		let orders: OrderbookOrder[];
 		try {
 			const raw = await this.orderbook.solvableOrders();
-			orders = this.orderFilter.filter(raw).filter((order) => order.kind === "sell");
+			orders = this.orderFilter.filter(raw.filter((order) => order.kind === "sell"));
 		} catch (error) {
 			this.logger.error({ err: error }, "failed to fetch solvable orders");
 			return;
