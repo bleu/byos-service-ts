@@ -29,7 +29,6 @@ const config: Config = {
 	proposalRefreshIntervalSeconds: 15,
 	proposalTtlSeconds: 60,
 	pollIntervalSeconds: 2,
-	freshOrderWindowSecs: 4000,
 	closeToExecutionTopN: 20,
 };
 
@@ -68,7 +67,7 @@ function subsolver(
 		async () => "0x" as `0x${string}`,
 		logger,
 		new RequestBudget(),
-		new OrderFilter({ freshOrderWindowSecs: 4000, closeToExecutionTopN: 20 }),
+		new OrderFilter({ closeToExecutionTopN: 20 }),
 	);
 }
 

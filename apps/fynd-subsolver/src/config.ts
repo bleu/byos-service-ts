@@ -21,7 +21,6 @@ const envSchema = z.object({
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 	PROPOSAL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
 	POLL_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(2),
-	FRESH_ORDER_WINDOW_SECS: z.coerce.number().int().positive().default(4000),
 	CLOSE_TO_EXECUTION_TOP_N: z.coerce.number().int().positive().default(20),
 	SUBSOLVER_BEARER: z
 		.string()
@@ -51,7 +50,6 @@ interface BaseConfig {
 	proposalRefreshIntervalSeconds: number;
 	proposalTtlSeconds: number;
 	pollIntervalSeconds: number;
-	freshOrderWindowSecs: number;
 	closeToExecutionTopN: number;
 }
 
@@ -96,7 +94,6 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,
 		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
-		freshOrderWindowSecs: result.data.FRESH_ORDER_WINDOW_SECS,
 		closeToExecutionTopN: result.data.CLOSE_TO_EXECUTION_TOP_N,
 	};
 	if (result.data.DISCOVERY_METHOD === "aws") {
