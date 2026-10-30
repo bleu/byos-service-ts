@@ -45,6 +45,8 @@ function order(index: number): OrderbookOrder {
 		fullSellAmount: 100n,
 		fullBuyAmount: 90n,
 		estimatedNativeSurplus: 0n,
+		nativeBuyValue: 0n,
+		nativeSellValue: 0n,
 	};
 }
 

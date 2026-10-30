@@ -118,6 +118,8 @@ services:
         FYND_URL: http://fynd:3000
         BYOS_URL: http://byos:9585
         CONFIG_PATH: config/bsc/subsolver.toml
+      ports:
+        - "${FYND_SUBSOLVER_SOLVE_HOST_PORT:-53002}:3001"
       deploy:
         resources:
           limits:

@@ -4,8 +4,8 @@ import { z } from "zod";
 const addressSchema = z.string().refine(isAddress, { message: "must be a valid address" });
 
 const envSchema = z.object({
-	DISCOVERY_URL: z.string(),
-	DISCOVERY_METHOD: z.enum(["orderbook", "aws"]),
+	DISCOVERY_URL: z.string().optional(),
+	DISCOVERY_METHOD: z.enum(["orderbook", "aws", "solve"]),
 	BYOS_URL: z.string(),
 	RPC_URL: z.string(),
 	SUBSOLVER_PRIVATE_KEY: z.string(),
@@ -21,8 +21,9 @@ const envSchema = z.object({
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 	PROPOSAL_TTL_SECONDS: z.coerce.number().int().positive().default(60),
 	POLL_INTERVAL_SECONDS: z.coerce.number().int().nonnegative().default(2),
-	AWS_FRESH_ORDER_WINDOW_SECS: z.coerce.number().int().positive().default(4000),
-	AWS_CLOSE_TO_EXECUTION_TOP_N: z.coerce.number().int().positive().default(20),
+	FRESH_ORDER_WINDOW_SECS: z.coerce.number().int().positive().default(4000),
+	CLOSE_TO_EXECUTION_TOP_N: z.coerce.number().int().positive().default(20),
+	SOLVE_PORT: z.coerce.number().int().positive().default(3001),
 	JSON_LOGS: z.enum(["true", "false"]).optional(),
 	LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
@@ -46,13 +47,14 @@ interface BaseConfig {
 	proposalRefreshIntervalSeconds: number;
 	proposalTtlSeconds: number;
 	pollIntervalSeconds: number;
-	awsFreshOrderWindowSecs: number;
-	awsCloseToExecutionTopN: number;
+	freshOrderWindowSecs: number;
+	closeToExecutionTopN: number;
 }
 
 export type Config =
 	| (BaseConfig & { discoveryMethod: "orderbook" })
-	| (BaseConfig & { discoveryMethod: "aws" });
+	| (BaseConfig & { discoveryMethod: "aws" })
+	| (BaseConfig & { discoveryMethod: "solve"; solvePort: number });
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
@@ -66,8 +68,11 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 	if (result.data.BYOS_READ_RESERVE >= result.data.BYOS_REQUESTS_PER_MINUTE) {
 		throw new Error("BYOS_READ_RESERVE must be lower than BYOS_REQUESTS_PER_MINUTE");
 	}
+	if (result.data.DISCOVERY_METHOD !== "solve" && !result.data.DISCOVERY_URL) {
+		throw new Error("DISCOVERY_URL is required for orderbook and aws discovery methods");
+	}
 	const base = {
-		discoveryUrl: result.data.DISCOVERY_URL,
+		discoveryUrl: result.data.DISCOVERY_URL ?? "",
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
 		privateKey: result.data.SUBSOLVER_PRIVATE_KEY as `0x${string}`,
@@ -87,11 +92,14 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,
 		proposalTtlSeconds: result.data.PROPOSAL_TTL_SECONDS,
 		pollIntervalSeconds: result.data.POLL_INTERVAL_SECONDS,
-		awsFreshOrderWindowSecs: result.data.AWS_FRESH_ORDER_WINDOW_SECS,
-		awsCloseToExecutionTopN: result.data.AWS_CLOSE_TO_EXECUTION_TOP_N,
+		freshOrderWindowSecs: result.data.FRESH_ORDER_WINDOW_SECS,
+		closeToExecutionTopN: result.data.CLOSE_TO_EXECUTION_TOP_N,
 	};
 	if (result.data.DISCOVERY_METHOD === "aws") {
 		return { ...base, discoveryMethod: "aws" as const };
+	}
+	if (result.data.DISCOVERY_METHOD === "solve") {
+		return { ...base, discoveryMethod: "solve" as const, solvePort: result.data.SOLVE_PORT };
 	}
 	return { ...base, discoveryMethod: "orderbook" as const };
 }

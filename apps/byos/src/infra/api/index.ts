@@ -38,6 +38,8 @@ export interface AppContext {
 	selectorBufferMs?: number;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
+	/** Subsolver /solve endpoints to forward each auction to (fire-and-forget). */
+	subsolvingEndpoints?: string[];
 }
 
 /**
@@ -128,6 +130,7 @@ export function createInternalApp(ctx: AppContext): Hono {
 		validator: ctx.validator,
 		onAuditEvent: ctx.onAuditEvent,
 		selectorBufferMs: ctx.selectorBufferMs,
+		subsolvingEndpoints: ctx.subsolvingEndpoints,
 		logger: ctx.logger,
 	});
 

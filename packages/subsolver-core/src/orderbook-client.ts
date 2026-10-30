@@ -12,6 +12,10 @@ export interface OrderbookOrder {
 	fullBuyAmount: bigint;
 	/** Limit-price heuristic in native-token units, for quote prioritization. */
 	estimatedNativeSurplus: bigint;
+	nativeBuyValue: bigint;
+	nativeSellValue: bigint;
+	/** Unix seconds; set by AWS client, undefined for others. */
+	createdAt?: number;
 }
 
 interface AuctionOrderDto {
@@ -25,6 +29,7 @@ interface AuctionOrderDto {
 	kind: string;
 	sellTokenBalance: string;
 	buyTokenBalance: string;
+	created?: number;
 }
 
 export interface AuctionDto {
@@ -41,19 +46,30 @@ function nativeValue(amount: bigint, referencePrice: string | null | undefined):
 export function toOrderbookOrders(auction: AuctionDto): OrderbookOrder[] {
 	return auction.orders
 		.filter((order) => order.sellTokenBalance === "erc20" && order.buyTokenBalance === "erc20")
-		.map((order) => ({
-			uid: order.uid as Hex,
-			sellToken: order.sellToken as Address,
-			buyToken: order.buyToken as Address,
-			sellAmount: BigInt(order.sellAmount),
-			buyAmount: BigInt(order.buyAmount),
-			fullSellAmount: BigInt(order.fullSellAmount ?? order.sellAmount),
-			fullBuyAmount: BigInt(order.fullBuyAmount ?? order.buyAmount),
-			estimatedNativeSurplus:
-				nativeValue(BigInt(order.buyAmount), auction.tokens?.[order.buyToken]?.referencePrice) -
-				nativeValue(BigInt(order.sellAmount), auction.tokens?.[order.sellToken]?.referencePrice),
-			kind: order.kind as "sell" | "buy",
-		}));
+		.map((order) => {
+			const nativeBuyValue = nativeValue(
+				BigInt(order.buyAmount),
+				auction.tokens?.[order.buyToken]?.referencePrice,
+			);
+			const nativeSellValue = nativeValue(
+				BigInt(order.sellAmount),
+				auction.tokens?.[order.sellToken]?.referencePrice,
+			);
+			return {
+				uid: order.uid as Hex,
+				sellToken: order.sellToken as Address,
+				buyToken: order.buyToken as Address,
+				sellAmount: BigInt(order.sellAmount),
+				buyAmount: BigInt(order.buyAmount),
+				fullSellAmount: BigInt(order.fullSellAmount ?? order.sellAmount),
+				fullBuyAmount: BigInt(order.fullBuyAmount ?? order.buyAmount),
+				estimatedNativeSurplus: nativeBuyValue - nativeSellValue,
+				nativeBuyValue,
+				nativeSellValue,
+				createdAt: order.created,
+				kind: order.kind as "sell" | "buy",
+			};
+		});
 }
 
 /** Reusable CoW auction polling client, normalized at the wire boundary. */

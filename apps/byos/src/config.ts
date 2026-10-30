@@ -27,6 +27,20 @@ export const configSchema = z.object({
 	SLACK_TOKEN: z.string().optional(),
 	SLACK_CHANNEL: z.string().optional(),
 
+	// Sub-solver forwarding
+	/** Comma-separated list of subsolver /solve endpoints to forward each auction to.
+	 * Fire-and-forget: failures are logged at info level and never surface to the driver. */
+	SUBSOLVERS_ENDPOINTS: z
+		.string()
+		.optional()
+		.transform((v) => {
+			if (!v) return [];
+			return v
+				.split(",")
+				.map((u) => u.trim())
+				.filter(Boolean);
+		}),
+
 	// Auth
 	SOLVE_BEARER_TOKEN: z.string().optional(),
 	/** Comma-separated list of allowed sub-solver addresses (e.g. 0xabc...,0x123...).
