@@ -65,17 +65,14 @@ async function main() {
 	});
 	await waitForFyndStartup(fynd, logger);
 
+	const solveClient =
+		config.discoveryMethod === "solve" ? new SolveOrderbookClient(logger) : undefined;
 	let orderbook: { solvableOrders(): Promise<import("@byos/subsolver-core").OrderbookOrder[]> };
 	if (config.discoveryMethod === "aws") {
 		orderbook = new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, {
 			logger,
 		});
-	} else if (config.discoveryMethod === "solve") {
-		const solveClient = new SolveOrderbookClient(logger);
-		const app = createSolveApp(solveClient, config.subsolverBearer);
-		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
-			logger.info({ port: info.port }, "solve discovery listener started");
-		});
+	} else if (solveClient) {
 		orderbook = solveClient;
 	} else {
 		orderbook = new OrderbookClient(config.discoveryUrl);
@@ -98,6 +95,25 @@ async function main() {
 		orderFilter,
 	);
 	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
+	if (config.discoveryMethod === "solve" && solveClient) {
+		const app = createSolveApp(solveClient, config.subsolverBearer, async () => {
+			try {
+				await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
+			} catch (error) {
+				logger.warn({ err: error }, "solve cycle failed");
+			}
+		});
+		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
+			logger.info({ port: info.port }, "solve discovery listener started");
+		});
+		const shutdown = () => {
+			logger.info("shutting down");
+			process.exit(0);
+		};
+		process.on("SIGTERM", shutdown);
+		process.on("SIGINT", shutdown);
+		return;
+	}
 	const tick = async () => {
 		try {
 			await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
