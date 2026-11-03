@@ -17,6 +17,7 @@ import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../d
 import { getAuctionState } from "../auction-state.js";
 import { createBatchedEscrowBalanceReader, type EscrowValidator } from "./escrow.js";
 import { buildSimulation } from "./simulation.js";
+import { simulationOrder } from "./simulation-order.js";
 
 /**
  * Per-subsolver in-flight data needed for Gate 2 cumulative exposure check.
@@ -323,7 +324,12 @@ export class SimulationValidator implements ValidateProposal {
 			authenticator,
 			escrow: this.escrowAddress,
 			trampoline,
-			order: record.order,
+			order: simulationOrder(
+				record.order,
+				proposal.orderUid,
+				this.publicClient.chain?.id,
+				this.settlementAddress,
+			),
 			proposal: {
 				orderUidHash: proposal.orderUidHash,
 				sellToken: proposal.sellToken,

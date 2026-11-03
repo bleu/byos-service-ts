@@ -1,7 +1,8 @@
+import { BUY_ETH_ADDRESS } from "@cowprotocol/cow-sdk";
 import type { Address, Hex } from "viem";
-import { keccak256 } from "viem";
+import { decodeFunctionData, keccak256, parseAbi } from "viem";
 import { describe, expect, it } from "vitest";
-
+import { GPv2SettlementAbi } from "../abis/gpv2-settlement.js";
 import { type CowOrder, encodeSettle, OrderKind, SigningScheme } from "../settlement.js";
 import type { SettlementInteraction } from "../trampoline.js";
 import type { ContractInteraction, Proposal } from "../types.js";
@@ -43,6 +44,50 @@ const trampolineAddr: Address = "0x0000000000000000000000000000000000007777";
 const proposalSig: Hex = `0x${"11".repeat(65)}`;
 
 describe("settlement encoding", () => {
+	it.each([OrderKind.SELL, OrderKind.BUY])(
+		"unwraps native-buy proceeds before payout for a %s order",
+		(kind) => {
+			const order = {
+				...fixtureOrder(),
+				kind,
+				buyToken: BUY_ETH_ADDRESS as Address,
+				partiallyFillable: true,
+			};
+			const proposal = { ...fixtureProposal(), sellAmount: fixtureOrder().sellAmount / 2n };
+			const calldata = encodeSettle(order, proposal, trampolineAddr, [], proposalSig, [], []);
+			const decoded = decodeFunctionData({ abi: GPv2SettlementAbi, data: calldata });
+			const [tokens, , trades, interactions] = decoded.args;
+			expect(tokens[1]!.toLowerCase()).toBe(BUY_ETH_ADDRESS.toLowerCase());
+			expect(trades[0]!.signature).toBe(order.signature);
+			expect(trades[0]!.executedAmount).toBe(
+				kind === OrderKind.SELL ? proposal.sellAmount : proposal.quoteBuyAmount,
+			);
+			expect(interactions[1]).toHaveLength(3);
+			const unwrap = interactions[1][2]!;
+			expect(unwrap.target.toLowerCase()).toBe(proposal.buyToken.toLowerCase());
+			expect(unwrap.value).toBe(0n);
+			expect(
+				decodeFunctionData({
+					abi: parseAbi(["function withdraw(uint256 amount)"]),
+					data: unwrap.callData,
+				}).args,
+			).toEqual([proposal.quoteBuyAmount]);
+		},
+	);
+
+	it("does not append an unwrap for ERC20 buy orders", () => {
+		const calldata = encodeSettle(
+			fixtureOrder(),
+			fixtureProposal(),
+			trampolineAddr,
+			[],
+			proposalSig,
+			[],
+			[],
+		);
+		const decoded = decodeFunctionData({ abi: GPv2SettlementAbi, data: calldata });
+		expect(decoded.args[3][1]).toHaveLength(2);
+	});
 	it("settle calldata is stable and non-empty", () => {
 		const route: ContractInteraction[] = [
 			{

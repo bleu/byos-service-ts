@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestContext } from "../../../../test/setup.js";
+import { nativeBuyAuctionOrder } from "../../blockchain/__tests__/fixtures/native-buy-order.js";
 import { type Candidate, CandidateStore } from "../../candidate-store.js";
 import * as store from "../../storage.js";
 import { createSolveRoute } from "../solve.js";
@@ -109,10 +110,48 @@ async function postSolve(app: Hono, body: unknown) {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	});
-	return res.json() as Promise<{ solutions: Array<{ prices: Record<string, string> }> }>;
+	return res.json() as Promise<{
+		solutions: Array<{
+			prices: Record<string, string>;
+			interactions: Array<{ target: string; callData: string }>;
+		}>;
+	}>;
 }
 
 describe("/solve clearing price uses effectiveBuyAmount", () => {
+	it("leaves native-buy unwrapping to the driver and returns wrapped-token prices", async () => {
+		const sellToken = nativeBuyAuctionOrder.sellToken.toLowerCase() as Address;
+		const buyToken = nativeBuyAuctionOrder.buyToken.toLowerCase() as Address;
+		const candidateStore = new CandidateStore();
+		candidateStore.add(
+			sampleCandidate({
+				orderUid: nativeBuyAuctionOrder.uid,
+				sellToken,
+				buyToken,
+				sellAmount: BigInt(nativeBuyAuctionOrder.fullSellAmount),
+				minBuyAmount: 2_000_000_000_000_000n,
+				quoteBuyAmount: 2_000_000_000_000_000n,
+			}),
+		);
+		const json = await postSolve(createSolveApp(candidateStore), {
+			...buildAuction(),
+			orders: [{ ...nativeBuyAuctionOrder, sellToken, buyToken }],
+			tokens: {
+				[sellToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
+				[buyToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
+			},
+		});
+		expect(json.solutions).toHaveLength(1);
+		const solution = json.solutions[0]!;
+		expect(solution.prices[buyToken]).toBe(nativeBuyAuctionOrder.fullSellAmount);
+		// Only funding and trampoline execution: no solver-supplied unwrap.
+		expect(solution.interactions).toHaveLength(2);
+		expect(solution.interactions.map((i) => i.target.toLowerCase())).toEqual([
+			sellToken,
+			TRAMPOLINE.toLowerCase(),
+		]);
+	});
+
 	it("uses simulationBuyAmount as clearing price when it is lower than quoteBuyAmount", async () => {
 		const quoteBuyAmount = 1_000_000n;
 		const simulationBuyAmount = 800_000n; // route delivered less than quoted

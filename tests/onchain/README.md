@@ -10,6 +10,7 @@ contract.
 |------|--------|
 | Chain fixture boots with BYOS contracts | Implemented |
 | Partial fill settlement (50% + 30%) | Implemented |
+| Native-buy payout through trampoline and unwrap (full and partial fills) | Implemented |
 | Hooks settlement via HooksTrampoline | Placeholder (TODO) |
 | Partial fills with hooks | Placeholder (TODO) |
 
@@ -35,6 +36,15 @@ contract.
    `tests/onchain/artifacts/Escrow.json` (sourced from
    [byos-contracts](https://github.com/bleu/byos-contracts)). The HooksTrampoline
    bytecode is in `artifacts/HooksTrampoline.json`.
+
+   Regenerate the Escrow artifact from the contracts submodule pinned by
+   offline-mode when its embedded Trampoline interface changes:
+
+   ```sh
+   forge build --root offline-mode/modules/byos-contracts
+   jq '{abi, bytecode}' offline-mode/modules/byos-contracts/out/Escrow.sol/Escrow.json > tests/onchain/artifacts/Escrow.json
+   pnpm exec biome format --write tests/onchain/artifacts/Escrow.json
+   ```
 
 ## Running
 
