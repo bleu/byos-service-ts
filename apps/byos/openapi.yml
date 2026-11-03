@@ -609,6 +609,13 @@ components:
           $ref: "#/components/schemas/HexBytes"
     CreateProposalRequest:
       type: object
+      description: >-
+        Proposal token addresses identify the signed route's execution assets.
+        For a native-buy order, a route may deliver either native currency
+        (the 0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee sentinel) or the chain's
+        wrapped native token. BYOS verifies the original order digest before
+        accepting that distinction and preserves the proposal's signed token
+        addresses. Native output is wrapped when required by driver routing.
       required:
         - orderUid
         - sellAmount

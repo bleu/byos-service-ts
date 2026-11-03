@@ -254,6 +254,21 @@ export class SimulationValidator implements ValidateProposal {
 		if (!record) {
 			return { kind: "reject", reason: "OrderNotFound" };
 		}
+		const signedOrder = simulationOrder(
+			record.order,
+			proposal.orderUid,
+			this.publicClient.chain?.id,
+			this.settlementAddress,
+		);
+		// Native and wrapped outputs are both valid for a native-signed order.
+		// Matching the UID above proves this is a native order, rather than
+		// treating arbitrary ERC20/native pairs as interchangeable.
+		const envelopeRecord =
+			proposal.buyToken.toLowerCase() === signedOrder.buyToken.toLowerCase()
+				? { ...record, order: signedOrder }
+				: record;
+		const envelopeReason = checkEnvelope(envelopeRecord, proposal);
+		if (envelopeReason) return { kind: "reject", reason: envelopeReason };
 
 		const sellTokenRefPrice = auctionState.prices.get(proposal.sellToken.toLowerCase());
 		if (!sellTokenRefPrice || sellTokenRefPrice <= 0n) {
@@ -264,7 +279,7 @@ export class SimulationValidator implements ValidateProposal {
 		// the check entirely so 0n is a safe sentinel.
 		let nativePrice = 0n;
 		if (record.order.kind === OrderKind.SELL) {
-			const p = auctionState.prices.get(proposal.buyToken.toLowerCase());
+			const p = auctionState.prices.get(record.order.buyToken.toLowerCase());
 			if (!p) return { kind: "reject", reason: "NativePriceUnavailable" };
 			nativePrice = p;
 		}
@@ -277,12 +292,6 @@ export class SimulationValidator implements ValidateProposal {
 		);
 		const surplusPrice = auctionState.prices.get(surplusTkn.toLowerCase());
 		if (!surplusPrice) return { kind: "reject", reason: "NativePriceUnavailable" };
-
-		// Step 2: Check envelope validity
-		const envelopeReason = checkEnvelope(record, proposal);
-		if (envelopeReason) {
-			return { kind: "reject", reason: envelopeReason };
-		}
 
 		// Step 3: Gap check — reject if min/quote spread exceeds configured limits
 		const slippageReason = checkProposalSlippage(
@@ -324,12 +333,8 @@ export class SimulationValidator implements ValidateProposal {
 			authenticator,
 			escrow: this.escrowAddress,
 			trampoline,
-			order: simulationOrder(
-				record.order,
-				proposal.orderUid,
-				this.publicClient.chain?.id,
-				this.settlementAddress,
-			),
+			order: signedOrder,
+			routingBuyToken: record.order.buyToken,
 			proposal: {
 				orderUidHash: proposal.orderUidHash,
 				sellToken: proposal.sellToken,
@@ -504,8 +509,8 @@ export class SimulationValidator implements ValidateProposal {
 			simulation: {
 				gasUsed: gas,
 				trampoline,
-				sellToken: record.order.sellToken,
-				buyToken: record.order.buyToken,
+				sellToken: proposal.sellToken,
+				buyToken: proposal.buyToken,
 				simulationBuyAmount,
 				sellTokenRefPrice,
 			},

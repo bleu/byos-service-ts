@@ -1,4 +1,4 @@
-import { encodeTrampolineInteractions } from "@byos/common";
+import { encodeNativeBuyWrap, encodeTrampolineInteractions } from "@byos/common";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { Address } from "viem";
@@ -458,6 +458,13 @@ function buildSolution(
 		candidate.simulationBuyAmount < candidate.quoteBuyAmount
 			? candidate.simulationBuyAmount
 			: candidate.quoteBuyAmount;
+	// Preserve the proposal's signed token. Native deliveries must be wrapped
+	// here when the driver expects wrapped output and will append an unwrap.
+	interactions.push(
+		...encodeNativeBuyWrap(candidate.buyToken, order.buyToken as Address, effectiveBuy).map((i) =>
+			toSolutionInteraction({ target: i.target, value: i.value.toString(), callData: i.callData }),
+		),
+	);
 
 	return {
 		id,

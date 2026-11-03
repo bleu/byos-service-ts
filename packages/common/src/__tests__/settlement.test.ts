@@ -44,6 +44,44 @@ const trampolineAddr: Address = "0x0000000000000000000000000000000000007777";
 const proposalSig: Hex = `0x${"11".repeat(65)}`;
 
 describe("settlement encoding", () => {
+	it.each([false, true])(
+		"preserves native-output proposals and converts only for wrapped routing (wrapped routing: %s)",
+		(wrappedRouting) => {
+			const order = { ...fixtureOrder(), buyToken: BUY_ETH_ADDRESS as Address };
+			const proposal = { ...fixtureProposal(), buyToken: BUY_ETH_ADDRESS as Address };
+			const routingBuyToken = wrappedRouting
+				? ("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c" as Address)
+				: undefined;
+			const calldata = encodeSettle(
+				order,
+				proposal,
+				trampolineAddr,
+				[],
+				proposalSig,
+				[],
+				[],
+				routingBuyToken,
+			);
+			const { args } = decodeFunctionData({ abi: GPv2SettlementAbi, data: calldata });
+			expect(args[3][1]).toHaveLength(wrappedRouting ? 4 : 2);
+			if (wrappedRouting) {
+				const wrap = args[3][1][2]!;
+				const unwrap = args[3][1][3]!;
+				expect(wrap.target.toLowerCase()).toBe(routingBuyToken!.toLowerCase());
+				expect(wrap.value).toBe(proposal.quoteBuyAmount);
+				expect(wrap.callData).toBe("0xd0e30db0");
+				expect(unwrap.target).toBe(wrap.target);
+				expect(unwrap.value).toBe(0n);
+				expect(
+					decodeFunctionData({
+						abi: parseAbi(["function withdraw(uint256)"]),
+						data: unwrap.callData,
+					}).args,
+				).toEqual([proposal.quoteBuyAmount]);
+			}
+		},
+	);
+
 	it.each([OrderKind.SELL, OrderKind.BUY])(
 		"unwraps native-buy proceeds before payout for a %s order",
 		(kind) => {

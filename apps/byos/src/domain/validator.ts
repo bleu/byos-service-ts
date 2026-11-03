@@ -6,6 +6,7 @@ import type { Proposal } from "./proposal.js";
 export interface SimulationOutcome {
 	gasUsed: bigint;
 	trampoline: Address;
+	/** Original signed proposal assets; pricing uses the auction's routing assets separately. */
 	sellToken: Address;
 	buyToken: Address;
 	/** Buy token amount received by the trampoline (Executed._delta). */

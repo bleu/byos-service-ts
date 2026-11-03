@@ -2,6 +2,13 @@
 export const WrappedNativeAbi = [
 	{
 		type: "function",
+		name: "deposit",
+		inputs: [],
+		outputs: [],
+		stateMutability: "payable",
+	},
+	{
+		type: "function",
 		name: "withdraw",
 		inputs: [{ name: "amount", type: "uint256" }],
 		outputs: [],

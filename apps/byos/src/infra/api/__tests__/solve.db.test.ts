@@ -1,5 +1,6 @@
+import { BUY_ETH_ADDRESS, TrampolineAbi } from "@byos/common";
 import { Hono } from "hono";
-import type { Address, Hex } from "viem";
+import { type Address, decodeFunctionData, type Hex, parseAbi } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestContext } from "../../../../test/setup.js";
 import { nativeBuyAuctionOrder } from "../../blockchain/__tests__/fixtures/native-buy-order.js";
@@ -113,44 +114,64 @@ async function postSolve(app: Hono, body: unknown) {
 	return res.json() as Promise<{
 		solutions: Array<{
 			prices: Record<string, string>;
-			interactions: Array<{ target: string; callData: string }>;
+			interactions: Array<{ target: string; callData: Hex; value: string }>;
 		}>;
 	}>;
 }
 
 describe("/solve clearing price uses effectiveBuyAmount", () => {
-	it("leaves native-buy unwrapping to the driver and returns wrapped-token prices", async () => {
-		const sellToken = nativeBuyAuctionOrder.sellToken.toLowerCase() as Address;
-		const buyToken = nativeBuyAuctionOrder.buyToken.toLowerCase() as Address;
-		const candidateStore = new CandidateStore();
-		candidateStore.add(
-			sampleCandidate({
-				orderUid: nativeBuyAuctionOrder.uid,
+	it.each([false, true])(
+		"preserves the signed buy token and leaves unwrapping to the driver (native output: %s)",
+		async (nativeOutput) => {
+			const sellToken = nativeBuyAuctionOrder.sellToken.toLowerCase() as Address;
+			const buyToken = nativeBuyAuctionOrder.buyToken.toLowerCase() as Address;
+			const candidateStore = new CandidateStore();
+			candidateStore.add(
+				sampleCandidate({
+					orderUid: nativeBuyAuctionOrder.uid,
+					sellToken,
+					buyToken: nativeOutput ? (BUY_ETH_ADDRESS as Address) : buyToken,
+					sellAmount: BigInt(nativeBuyAuctionOrder.fullSellAmount),
+					minBuyAmount: 2_000_000_000_000_000n,
+					quoteBuyAmount: 2_000_000_000_000_000n,
+				}),
+			);
+			const json = await postSolve(createSolveApp(candidateStore), {
+				...buildAuction(),
+				orders: [{ ...nativeBuyAuctionOrder, sellToken, buyToken }],
+				tokens: {
+					[sellToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
+					[buyToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
+				},
+			});
+			expect(json.solutions).toHaveLength(1);
+			const solution = json.solutions[0]!;
+			expect(solution.prices[buyToken]).toBe(nativeBuyAuctionOrder.fullSellAmount);
+			// Native proposals wrap their delivery; the driver alone adds the unwrap.
+			expect(solution.interactions).toHaveLength(nativeOutput ? 3 : 2);
+			expect(solution.interactions.map((i) => i.target.toLowerCase())).toEqual([
 				sellToken,
-				buyToken,
-				sellAmount: BigInt(nativeBuyAuctionOrder.fullSellAmount),
-				minBuyAmount: 2_000_000_000_000_000n,
-				quoteBuyAmount: 2_000_000_000_000_000n,
-			}),
-		);
-		const json = await postSolve(createSolveApp(candidateStore), {
-			...buildAuction(),
-			orders: [{ ...nativeBuyAuctionOrder, sellToken, buyToken }],
-			tokens: {
-				[sellToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
-				[buyToken]: { referencePrice: String(10n ** 18n), availableBalance: "0", trusted: true },
-			},
-		});
-		expect(json.solutions).toHaveLength(1);
-		const solution = json.solutions[0]!;
-		expect(solution.prices[buyToken]).toBe(nativeBuyAuctionOrder.fullSellAmount);
-		// Only funding and trampoline execution: no solver-supplied unwrap.
-		expect(solution.interactions).toHaveLength(2);
-		expect(solution.interactions.map((i) => i.target.toLowerCase())).toEqual([
-			sellToken,
-			TRAMPOLINE.toLowerCase(),
-		]);
-	});
+				TRAMPOLINE.toLowerCase(),
+				...(nativeOutput ? [buyToken] : []),
+			]);
+			const execute = decodeFunctionData({
+				abi: TrampolineAbi,
+				data: solution.interactions[1]!.callData,
+			});
+			expect(execute.args[0].buyToken.toLowerCase()).toBe(
+				nativeOutput ? BUY_ETH_ADDRESS.toLowerCase() : buyToken,
+			);
+			expect(execute.args[2]).toBe(`0x${"ee".repeat(65)}`);
+			if (nativeOutput) {
+				const wrap = solution.interactions[2]!;
+				expect(wrap.value).toBe("2000000000000000");
+				expect(
+					decodeFunctionData({ abi: parseAbi(["function deposit() payable"]), data: wrap.callData })
+						.functionName,
+				).toBe("deposit");
+			}
+		},
+	);
 
 	it("uses simulationBuyAmount as clearing price when it is lower than quoteBuyAmount", async () => {
 		const quoteBuyAmount = 1_000_000n;

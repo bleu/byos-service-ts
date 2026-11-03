@@ -92,9 +92,13 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 		chain?.cleanup();
 	});
 
-	it.each([false, true])(
-		"unwraps wrapped-native route output before native payout (partial=%s)",
-		async (partiallyFillable) => {
+	it.each(
+		[false, true].flatMap((partiallyFillable) =>
+			[false, true].map((nativeOutput) => ({ partiallyFillable, nativeOutput })),
+		),
+	)(
+		"settles native buys (partial=$partiallyFillable, native route output=$nativeOutput)",
+		async ({ partiallyFillable, nativeOutput }) => {
 			const publicClient = createPublicClient({ chain: foundry, transport: http(chain.rpcUrl) });
 			const user = privateKeyToAccount(chain.keys[4]!);
 			const subSolver = privateKeyToAccount(chain.keys[5]!);
@@ -113,7 +117,7 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 			const receiver = chain.accounts[6]!;
 			// The loaded state has historical timestamps; Anvil advances to wall
 			// clock time on the first transaction, so do not derive expiry from it.
-			const validTo = 0xffffffff;
+			const validTo = nativeOutput ? 0xfffffffe : 0xffffffff;
 			const wait = async (hash: Hex) => {
 				const receipt = await publicClient.waitForTransactionReceipt({ hash });
 				expect(receipt.status).toBe("success");
@@ -169,28 +173,41 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 					args: [uid, true],
 				}),
 			);
-			// The route returns the wrapped input to settlement. The simulation
-			// encoder must unwrap it before GPv2 pays the signed native buy token.
-			const route = [
-				{
-					target: WETH,
-					value: 0n,
-					callData: encodeFunctionData({
-						abi: Erc20Abi,
-						functionName: "transfer",
-						args: [GPV2_SETTLEMENT, fill],
-					}),
-				},
-			];
+			// Exercise both wrapped and native deliveries without changing the
+			// proposal after signing. Driver native management still expects WETH.
+			const route = nativeOutput
+				? [
+						{
+							target: WETH,
+							value: 0n,
+							callData: encodeFunctionData({
+								abi: parseAbi(["function withdraw(uint256)"]),
+								functionName: "withdraw",
+								args: [fill],
+							}),
+						},
+						{ target: GPV2_SETTLEMENT, value: fill, callData: "0x" as Hex },
+					]
+				: [
+						{
+							target: WETH,
+							value: 0n,
+							callData: encodeFunctionData({
+								abi: Erc20Abi,
+								functionName: "transfer",
+								args: [GPV2_SETTLEMENT, fill],
+							}),
+						},
+					];
 			const proposal = {
 				orderUidHash: keccak256(uid),
 				sellToken: WETH,
-				buyToken: WETH,
+				buyToken: nativeOutput ? (BUY_ETH_ADDRESS as Address) : WETH,
 				sellAmount: fill,
 				minBuyAmount: fill,
 				quoteBuyAmount: fill,
 				validUntil: BigInt(validTo),
-				nonce: partiallyFillable ? 102n : 101n,
+				nonce: (partiallyFillable ? 102n : 101n) + (nativeOutput ? 2n : 0n),
 			};
 			const signature = await subSolver.sign({
 				hash: hashProposalData(
@@ -220,6 +237,7 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 				signature,
 				[],
 				[],
+				WETH,
 			);
 			const before = await publicClient.getBalance({ address: receiver });
 			// Existing settlement buffers must not mask a missing unwrap.

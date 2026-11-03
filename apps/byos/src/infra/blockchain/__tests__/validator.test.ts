@@ -28,6 +28,7 @@ import {
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
 import { nativeBuyAuctionOrder } from "./fixtures/native-buy-order.js";
+import { nativeProposalAuctionOrder } from "./fixtures/native-proposal-order.js";
 
 const SETTLEMENT = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
 const ESCROW = "0x1111111111111111111111111111111111111234";
@@ -276,6 +277,65 @@ function validatorWith(record: OrderRecord, minScore: bigint): SimulationValidat
 // ── Profitability gate ───────────────────────────────────────────────────────
 
 describe("SimulationValidator native-buy settlement", () => {
+	it.each(
+		[false, true].flatMap((invalidUid) =>
+			[false, true].map((sentinelPrice) => ({ invalidUid, sentinelPrice })),
+		),
+	)(
+		"validates native output only for the signed native order (invalid UID=$invalidUid, sentinel price=$sentinelPrice)",
+		async ({ invalidUid, sentinelPrice }) => {
+			const record = auctionOrderToRecord(nativeProposalAuctionOrder);
+			if (invalidUid) record.order.buyAmount += 1n;
+			const proposal: Proposal = {
+				...submittedProposal(),
+				orderUid: nativeProposalAuctionOrder.uid,
+				sellToken: record.order.sellToken,
+				buyToken: BUY_ETH_ADDRESS as Address,
+				sellAmount: record.order.sellAmount,
+				minBuyAmount: record.order.buyAmount,
+				quoteBuyAmount: (record.order.buyAmount * 102n) / 100n,
+			};
+			_setLocalAuctionState({
+				auctionId: 1,
+				orders: new Map([[proposal.orderUid, record]]),
+				gasPrice: 0n,
+				prices: new Map([
+					[record.order.sellToken.toLowerCase(), ETHER],
+					[record.order.buyToken.toLowerCase(), ETHER],
+					...(sentinelPrice ? [[BUY_ETH_ADDRESS.toLowerCase(), ETHER] as [string, bigint]] : []),
+				]),
+			});
+			const node = fakeNode({ chainId: 56, delta: proposal.quoteBuyAmount });
+			const verdict = await validatorAt(node).validate(proposal);
+			if (invalidUid) {
+				expect(verdict).toEqual({ kind: "reject", reason: "TokenMismatch" });
+				expect(node.counts.simulateV1).toBe(0);
+				return;
+			}
+			expect(verdict).toMatchObject({
+				kind: "accept",
+				simulation: { buyToken: proposal.buyToken },
+			});
+			const request = node.simulateCalls[0] as {
+				params: [{ blockStateCalls: [{ calls: [{ data: Hex }] }] }];
+			};
+			const decoded = decodeFunctionData({
+				abi: GPv2SettlementAbi,
+				data: request.params[0].blockStateCalls[0].calls[0].data,
+			});
+			expect(decoded.args[0][1]!.toLowerCase()).toBe(BUY_ETH_ADDRESS.toLowerCase());
+			expect(decoded.args[3][1]).toHaveLength(4);
+			const execute = decodeFunctionData({
+				abi: TrampolineAbi,
+				data: decoded.args[3][1][1]!.callData,
+			});
+			expect(execute.args[0].buyToken.toLowerCase()).toBe(proposal.buyToken.toLowerCase());
+			expect(execute.args[2]).toBe(proposal.signature);
+			expect(decoded.args[3][1][2]!.target.toLowerCase()).toBe(record.order.buyToken.toLowerCase());
+			expect(decoded.args[3][1][2]!.value).toBe(proposal.quoteBuyAmount);
+		},
+	);
+
 	it("uses signed native tokens only in simulation and keeps wrapped tokens for scoring and results", async () => {
 		const record = auctionOrderToRecord(nativeBuyAuctionOrder);
 		const proposal: Proposal = {

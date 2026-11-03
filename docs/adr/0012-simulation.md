@@ -66,9 +66,11 @@ Once a production submitter address holds `SUBMITTER_ROLE` on-chain, both overri
 
 Validation now reads the auction state populated by `/solve` (the per-auction proposal model), rather than fetching orders from the orderbook. That avoids another network dependency during the auction window, but the driver may normalize the native buy token to its wrapped address. Routing fields therefore cannot always be copied verbatim into a signed settlement trade.
 
-For wrapped-native buys, local simulation tests the native-token candidate against the EIP-712 digest embedded in the order UID. Only an exact digest match restores the native sentinel in a temporary simulation order. This avoids confusing native buys with orders actually signed to buy the wrapped token, works independently of the signing scheme, and adds no IO. Envelope checks, pricing, proposal tokens, and persisted results retain the auction's routing addresses.
+For wrapped-native buys, local simulation tests the native-token candidate against the EIP-712 digest embedded in the order UID. Only an exact digest match restores the native sentinel in a temporary simulation order. This avoids confusing native buys with orders actually signed to buy the wrapped token, works independently of the signing scheme, and adds no IO. The envelope accepts either native or wrapped output only for that verified native order. Pricing uses auction routing addresses; proposal tokens and persisted results preserve the original signed execution assets, because substituting a token would invalidate the sub-solver's signature.
 
 The local `settle()` encoder also appends the wrapped-native withdrawal after the trampoline interactions and before payout. This mirrors the driver's default native-token management, which BYOS's standalone simulation bypasses. The `/solve` response leaves unwrap insertion to the driver; inserting it there as well could withdraw twice.
+
+When a proposal delivers native currency but the auction uses wrapped native, `/solve` inserts a deposit after trampoline execution so the driver's automatic withdrawal is funded. Simulation includes the same deposit followed by the driver's withdrawal, accounting for both operations in gas. When both the proposal and routing token are native, neither conversion is inserted. This avoids treating the native sentinel as a wrapped-token contract.
 
 ### Gas in scoring: simulated gas + 30k buffer
 

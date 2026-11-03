@@ -25,7 +25,7 @@ const orderTypes = {
  * auction. Restore it only when the candidate digest matches the UID, so orders
  * actually signed to buy the wrapped token remain unchanged. This uses no IO
  * and works for every signing scheme: the UID always embeds the EIP-712 digest.
- * Call only after the envelope check has established ERC20 balance sources.
+ * The caller must still enforce ERC20 balance sources before simulation.
  */
 export function simulationOrder(
 	order: CowOrder,

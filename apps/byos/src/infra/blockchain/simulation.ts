@@ -23,6 +23,8 @@ export interface SimulationParams {
 	escrow: Address;
 	trampoline: Address;
 	order: CowOrder;
+	/** Auction token used by driver native management; distinct from the signed proposal token. */
+	routingBuyToken?: Address;
 	proposal: ContractProposal;
 	route: readonly ContractInteraction[];
 	signature: Hex;
@@ -73,6 +75,7 @@ export function buildSimulation(
 		params.signature,
 		params.preInteractions,
 		params.postInteractions,
+		params.routingBuyToken,
 	);
 
 	const submitter = params.submitter ?? DUMMY_SUBMITTER;

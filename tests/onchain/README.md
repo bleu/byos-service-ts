@@ -10,7 +10,7 @@ contract.
 |------|--------|
 | Chain fixture boots with BYOS contracts | Implemented |
 | Partial fill settlement (50% + 30%) | Implemented |
-| Native-buy payout through trampoline and unwrap (full and partial fills) | Implemented |
+| Native-buy payout with native or wrapped route output (full and partial fills) | Implemented |
 | Hooks settlement via HooksTrampoline | Placeholder (TODO) |
 | Partial fills with hooks | Placeholder (TODO) |
 
