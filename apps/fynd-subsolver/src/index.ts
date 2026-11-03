@@ -3,6 +3,7 @@ import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
 import {
 	AwsOrderbookClient,
 	ByosClient,
+	createSolveApp,
 	FyndConfigurationError,
 	FyndProvider,
 	OrderbookClient,
@@ -18,7 +19,6 @@ import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { parseConfig } from "./config.js";
 import { FyndSubsolver } from "./fynd-subsolver.js";
-import { createSolveApp } from "./solve-app.js";
 
 const delay = (milliseconds: number) =>
 	new Promise<void>((resolve) => setTimeout(resolve, milliseconds));

@@ -1,6 +1,6 @@
-import type { SolveOrderbookClient } from "@byos/subsolver-core";
 import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
+import type { SolveOrderbookClient } from "./solve-orderbook-client.js";
 
 /** Authenticate auction pushes before they can replace discovery state. */
 export function createSolveApp(

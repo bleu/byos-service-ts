@@ -1,6 +1,6 @@
 import { byosDomain } from "@byos/common";
 import type { ByosClient, OrderbookOrder } from "@byos/subsolver-core";
-import { RequestBudget } from "@byos/subsolver-core";
+import { OrderFilter, RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import type { BinanceClient } from "./binance-client.js";
@@ -31,6 +31,7 @@ const config: Config = {
 	proposalRefreshIntervalSeconds: 15,
 	proposalTtlSeconds: 60,
 	pollIntervalSeconds: 2,
+	closeToExecutionTopN: 20,
 };
 
 function order(index: number): OrderbookOrder {
@@ -71,6 +72,7 @@ function subsolver(
 		async () => "0x" as `0x${string}`,
 		logger,
 		new RequestBudget(),
+		new OrderFilter({ closeToExecutionTopN: config.closeToExecutionTopN }),
 	);
 }
 

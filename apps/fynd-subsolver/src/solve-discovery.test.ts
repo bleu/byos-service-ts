@@ -2,6 +2,7 @@ import { byosDomain } from "@byos/common";
 import {
 	type ByosClient,
 	type CandidateOrder,
+	createSolveApp,
 	type FyndProvider,
 	OrderFilter,
 	RequestBudget,
@@ -11,7 +12,6 @@ import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig } from "./config.js";
 import { FyndSubsolver } from "./fynd-subsolver.js";
-import { createSolveApp } from "./solve-app.js";
 
 const factory = "0x0000000000000000000000000000000000000001";
 const sellToken = "0x0000000000000000000000000000000000000002";

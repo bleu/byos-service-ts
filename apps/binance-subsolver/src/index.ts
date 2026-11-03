@@ -3,9 +3,13 @@ import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
 import {
 	AwsOrderbookClient,
 	ByosClient,
+	createSolveApp,
 	OrderbookClient,
+	OrderFilter,
 	RequestBudget,
+	SolveOrderbookClient,
 } from "@byos/subsolver-core";
+import { serve } from "@hono/node-server";
 import pino from "pino";
 import type { Address } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -38,10 +42,23 @@ async function main() {
 		config.binanceSecretKey,
 		config.chainId,
 	);
-	const orderbook =
-		config.discoveryMethod === "aws"
-			? new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, { logger })
-			: new OrderbookClient(config.discoveryUrl);
+	const solveClient =
+		config.discoveryMethod === "solve" ? new SolveOrderbookClient(logger) : undefined;
+	let orderbook: { solvableOrders(): Promise<import("@byos/subsolver-core").OrderbookOrder[]> };
+	if (config.discoveryMethod === "aws") {
+		orderbook = new AwsOrderbookClient(config.discoveryUrl, publicClient, config.gpv2Settlement, {
+			logger,
+		});
+	} else if (solveClient) {
+		orderbook = solveClient;
+	} else {
+		orderbook = new OrderbookClient(config.discoveryUrl);
+	}
+
+	const orderFilter = new OrderFilter({
+		closeToExecutionTopN: config.closeToExecutionTopN,
+	});
+
 	const subsolver = new BinanceSubsolver(
 		config,
 		orderbook,
@@ -52,8 +69,28 @@ async function main() {
 		signFn,
 		logger,
 		new RequestBudget(config.byosRequestsPerMinute, config.byosReadReserve),
+		orderFilter,
 	);
 	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
+	if (config.discoveryMethod === "solve" && solveClient) {
+		const app = createSolveApp(solveClient, config.subsolverBearer, async () => {
+			try {
+				await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
+			} catch (error) {
+				logger.warn({ err: error }, "solve cycle failed");
+			}
+		});
+		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
+			logger.info({ port: info.port }, "solve discovery listener started");
+		});
+		const shutdown = () => {
+			logger.info("shutting down");
+			process.exit(0);
+		};
+		process.on("SIGTERM", shutdown);
+		process.on("SIGINT", shutdown);
+		return;
+	}
 	const tick = async () => {
 		try {
 			await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
