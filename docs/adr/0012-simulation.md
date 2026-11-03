@@ -62,9 +62,13 @@ The encoder sets `executedAmount` to the proposal's fill amount and `clearingPri
 
 Once a production submitter address holds `SUBMITTER_ROLE` on-chain, both overrides become unnecessary.
 
-### Order data: fetched from the orderbook, cached forever
+### Order data: auction routing fields versus signed trade fields
 
-Orders are immutable once placed, so fetches are cached for the process lifetime. `POST /proposals` does NOT carry token addresses. Known staleness: an off-chain soft-cancel is invisible, but `validUntil` bounds the window and the driver re-validates at settlement time.
+Validation now reads the auction state populated by `/solve` (the per-auction proposal model), rather than fetching orders from the orderbook. That avoids another network dependency during the auction window, but the driver may normalize the native buy token to its wrapped address. Routing fields therefore cannot always be copied verbatim into a signed settlement trade.
+
+For wrapped-native buys, local simulation tests the native-token candidate against the EIP-712 digest embedded in the order UID. Only an exact digest match restores the native sentinel in a temporary simulation order. This avoids confusing native buys with orders actually signed to buy the wrapped token, works independently of the signing scheme, and adds no IO. Envelope checks, pricing, proposal tokens, and persisted results retain the auction's routing addresses.
+
+The local `settle()` encoder also appends the wrapped-native withdrawal after the trampoline interactions and before payout. This mirrors the driver's default native-token management, which BYOS's standalone simulation bypasses. The `/solve` response leaves unwrap insertion to the driver; inserting it there as well could withdraw twice.
 
 ### Gas in scoring: simulated gas + 30k buffer
 

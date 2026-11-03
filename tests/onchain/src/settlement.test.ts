@@ -17,15 +17,28 @@
  * infrastructure. Set RUN_ONCHAIN_TESTS=1 to enable them.
  */
 
-import { GPv2SettlementAbi } from "@byos/common";
+import {
+	BUY_ETH_ADDRESS,
+	byosDomain,
+	computeInteractionsHash,
+	Erc20Abi,
+	encodeSettle,
+	GPv2SettlementAbi,
+	hashProposalData,
+	OrderKind,
+	SigningScheme,
+	TrampolineFactoryAbi,
+} from "@byos/common";
 import {
 	type Address,
 	createPublicClient,
 	createWalletClient,
+	decodeFunctionData,
 	encodeFunctionData,
 	type Hex,
 	http,
 	keccak256,
+	parseAbi,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
@@ -78,6 +91,159 @@ describe.skipIf(!ENABLED)("on-chain settlement", () => {
 	afterAll(() => {
 		chain?.cleanup();
 	});
+
+	it.each([false, true])(
+		"unwraps wrapped-native route output before native payout (partial=%s)",
+		async (partiallyFillable) => {
+			const publicClient = createPublicClient({ chain: foundry, transport: http(chain.rpcUrl) });
+			const user = privateKeyToAccount(chain.keys[4]!);
+			const subSolver = privateKeyToAccount(chain.keys[5]!);
+			const userWallet = createWalletClient({
+				chain: foundry,
+				transport: http(chain.rpcUrl),
+				account: user,
+			});
+			const solverWallet = createWalletClient({
+				chain: foundry,
+				transport: http(chain.rpcUrl),
+				account: privateKeyToAccount(chain.keys[0]!),
+			});
+			const sellAmount = 10n ** 18n;
+			const fill = partiallyFillable ? sellAmount / 2n : sellAmount;
+			const receiver = chain.accounts[6]!;
+			// The loaded state has historical timestamps; Anvil advances to wall
+			// clock time on the first transaction, so do not derive expiry from it.
+			const validTo = 0xffffffff;
+			const wait = async (hash: Hex) => {
+				const receipt = await publicClient.waitForTransactionReceipt({ hash });
+				expect(receipt.status).toBe("success");
+			};
+			await wait(
+				await userWallet.sendTransaction({ to: WETH, value: sellAmount, data: "0xd0e30db0" }),
+			);
+			await wait(
+				await userWallet.writeContract({
+					address: WETH,
+					abi: Erc20Abi,
+					functionName: "approve",
+					args: [VAULT_RELAYER, sellAmount],
+				}),
+			);
+			await wait(
+				await solverWallet.writeContract({
+					address: chain.trampolineFactory,
+					abi: TrampolineFactoryAbi,
+					functionName: "ensureDeployed",
+					args: [subSolver.address],
+				}),
+			);
+			const trampoline = await publicClient.readContract({
+				address: chain.trampolineFactory,
+				abi: TrampolineFactoryAbi,
+				functionName: "addressOf",
+				args: [subSolver.address],
+			});
+			const domainSeparator = await publicClient.readContract({
+				address: GPV2_SETTLEMENT,
+				abi: parseAbi(["function domainSeparator() view returns (bytes32)"]),
+				functionName: "domainSeparator",
+			});
+			const digest = eip712Digest(
+				domainSeparator,
+				buildGpv2StructHash({
+					sellToken: WETH,
+					buyToken: BUY_ETH_ADDRESS as Address,
+					receiver,
+					sellAmount,
+					buyAmount: sellAmount,
+					validTo,
+					partiallyFillable,
+				}),
+			);
+			const uid = buildOrderUid(digest, user.address, validTo);
+			await wait(
+				await userWallet.writeContract({
+					address: GPV2_SETTLEMENT,
+					abi: parseAbi(["function setPreSignature(bytes orderUid, bool signed)"]),
+					functionName: "setPreSignature",
+					args: [uid, true],
+				}),
+			);
+			// The route returns the wrapped input to settlement. The simulation
+			// encoder must unwrap it before GPv2 pays the signed native buy token.
+			const route = [
+				{
+					target: WETH,
+					value: 0n,
+					callData: encodeFunctionData({
+						abi: Erc20Abi,
+						functionName: "transfer",
+						args: [GPV2_SETTLEMENT, fill],
+					}),
+				},
+			];
+			const proposal = {
+				orderUidHash: keccak256(uid),
+				sellToken: WETH,
+				buyToken: WETH,
+				sellAmount: fill,
+				minBuyAmount: fill,
+				quoteBuyAmount: fill,
+				validUntil: BigInt(validTo),
+				nonce: partiallyFillable ? 102n : 101n,
+			};
+			const signature = await subSolver.sign({
+				hash: hashProposalData(
+					byosDomain(foundry.id, chain.trampolineFactory),
+					proposal,
+					computeInteractionsHash(route),
+				),
+			});
+			const calldata = encodeSettle(
+				{
+					sellToken: WETH,
+					buyToken: BUY_ETH_ADDRESS as Address,
+					receiver,
+					sellAmount,
+					buyAmount: sellAmount,
+					validTo,
+					appData: `0x${"00".repeat(32)}`,
+					feeAmount: 0n,
+					kind: OrderKind.SELL,
+					partiallyFillable,
+					signingScheme: SigningScheme.PreSign,
+					signature: user.address,
+				},
+				proposal,
+				trampoline,
+				route,
+				signature,
+				[],
+				[],
+			);
+			const before = await publicClient.getBalance({ address: receiver });
+			// Existing settlement buffers must not mask a missing unwrap.
+			await publicClient.request({
+				method: "anvil_setBalance" as never,
+				params: [GPV2_SETTLEMENT, "0x0"] as never,
+			});
+			const { args } = decodeFunctionData({ abi: GPv2SettlementAbi, data: calldata });
+			const withoutUnwrap = encodeFunctionData({
+				abi: GPv2SettlementAbi,
+				functionName: "settle",
+				args: [args[0], args[1], args[2], [args[3][0], args[3][1].slice(0, -1), args[3][2]]],
+			});
+			await expect(
+				publicClient.call({
+					account: solverWallet.account,
+					to: GPV2_SETTLEMENT,
+					data: withoutUnwrap,
+				}),
+			).rejects.toThrow();
+			await wait(await solverWallet.sendTransaction({ to: GPV2_SETTLEMENT, data: calldata }));
+			expect(await publicClient.getBalance({ address: receiver })).toBe(before + fill);
+		},
+	);
 
 	// -----------------------------------------------------------------------
 	// 1. Chain fixture smoke test

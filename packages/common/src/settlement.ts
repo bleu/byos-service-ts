@@ -1,6 +1,7 @@
-import { OrderKind } from "@cowprotocol/cow-sdk";
+import { BUY_ETH_ADDRESS, OrderKind } from "@cowprotocol/cow-sdk";
 import { type Address, encodeFunctionData, type Hex } from "viem";
 import { GPv2SettlementAbi } from "./abis/gpv2-settlement.js";
+import { WrappedNativeAbi } from "./abis/wrapped-native.js";
 import type { SettlementInteraction } from "./trampoline.js";
 import { encodeTrampolineInteractions } from "./trampoline.js";
 import type { ContractInteraction, Proposal } from "./types.js";
@@ -110,6 +111,22 @@ export function encodeSettle(
 		route,
 		proposalSignature,
 	);
+	const intraInteractions: SettlementInteraction[] = [transferIntra, executeIntra];
+	if (order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()) {
+		// The driver appends this in real settlements. Local simulation bypasses
+		// that encoder, so reproduce the unwrap after the route, before payout.
+		// These clearing prices pay quoteBuyAmount for both sell and buy orders,
+		// including partial fills (executedAmount is already the proposal fill).
+		intraInteractions.push({
+			target: proposal.buyToken,
+			value: 0n,
+			callData: encodeFunctionData({
+				abi: WrappedNativeAbi,
+				functionName: "withdraw",
+				args: [proposal.quoteBuyAmount],
+			}),
+		});
+	}
 
 	return encodeFunctionData({
 		abi: GPv2SettlementAbi,
@@ -120,7 +137,7 @@ export function encodeSettle(
 			[trade],
 			[
 				toInteractionTuples(preInteractions),
-				toInteractionTuples([transferIntra, executeIntra]),
+				toInteractionTuples(intraInteractions),
 				toInteractionTuples(postInteractions),
 			],
 		],

@@ -1,6 +1,8 @@
 import {
+	BUY_ETH_ADDRESS,
 	type CowOrder,
 	encodeSettle,
+	GPv2SettlementAbi,
 	OrderKind,
 	OrderStatus,
 	SigningScheme,
@@ -8,6 +10,7 @@ import {
 } from "@byos/common";
 import {
 	type Address,
+	decodeFunctionData,
 	encodeAbiParameters,
 	encodeEventTopics,
 	type Hex,
@@ -20,9 +23,11 @@ import {
 	_clearLocalAuctionState,
 	_patchLocalGasPrice,
 	_setLocalAuctionState,
+	auctionOrderToRecord,
 } from "../../auction-state.js";
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
+import { nativeBuyAuctionOrder } from "./fixtures/native-buy-order.js";
 
 const SETTLEMENT = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
 const ESCROW = "0x1111111111111111111111111111111111111234";
@@ -189,6 +194,7 @@ interface FakeNode {
  * inject custom results or errors.
  */
 function fakeNode(opts?: {
+	chainId?: number;
 	simulateV1?: () => Promise<SimulateV1CallResult>;
 	addressOf?: () => Promise<string>;
 	authenticator?: () => Promise<string>;
@@ -200,6 +206,7 @@ function fakeNode(opts?: {
 	const defaultDelta = opts?.delta ?? submittedProposal().quoteBuyAmount;
 
 	const client = {
+		chain: opts?.chainId === undefined ? undefined : { id: opts.chainId },
 		readContract: async (args: { functionName: string }) => {
 			if (args.functionName === "addressOf") {
 				counts.addressOf += 1;
@@ -267,6 +274,48 @@ function validatorWith(record: OrderRecord, minScore: bigint): SimulationValidat
 }
 
 // ── Profitability gate ───────────────────────────────────────────────────────
+
+describe("SimulationValidator native-buy settlement", () => {
+	it("uses signed native tokens only in simulation and keeps wrapped tokens for scoring and results", async () => {
+		const record = auctionOrderToRecord(nativeBuyAuctionOrder);
+		const proposal: Proposal = {
+			...submittedProposal(),
+			orderUid: nativeBuyAuctionOrder.uid,
+			sellToken: record.order.sellToken,
+			buyToken: record.order.buyToken,
+			sellAmount: record.order.sellAmount,
+			minBuyAmount: record.order.buyAmount,
+			quoteBuyAmount: (record.order.buyAmount * 102n) / 100n,
+		};
+		_setLocalAuctionState({
+			auctionId: 1,
+			orders: new Map([[proposal.orderUid, record]]),
+			prices: new Map([
+				[proposal.sellToken.toLowerCase(), ETHER],
+				[proposal.buyToken.toLowerCase(), ETHER],
+			]),
+			gasPrice: 0n,
+		});
+		const node = fakeNode({ chainId: 56, delta: proposal.quoteBuyAmount });
+		const verdict = await validatorAt(node).validate(proposal);
+		expect(verdict).toMatchObject({
+			kind: "accept",
+			simulation: { buyToken: record.order.buyToken },
+		});
+		const request = node.simulateCalls[0] as {
+			params: [{ blockStateCalls: [{ calls: [{ data: Hex }] }] }];
+		};
+		const decoded = decodeFunctionData({
+			abi: GPv2SettlementAbi,
+			data: request.params[0].blockStateCalls[0].calls[0].data,
+		});
+		expect(decoded.args[0][1]!.toLowerCase()).toBe(BUY_ETH_ADDRESS.toLowerCase());
+		expect(decoded.args[2][0]!.signature).toBe(record.order.signature);
+		expect(decoded.args[3][1]).toHaveLength(3);
+		expect(decoded.args[3][1][2]!.target.toLowerCase()).toBe(proposal.buyToken.toLowerCase());
+		expect(record.order.buyToken.toLowerCase()).toBe(nativeBuyAuctionOrder.buyToken.toLowerCase());
+	});
+});
 
 describe("SimulationValidator profitability gate", () => {
 	it("zero-surplus first simulation rejects as unprofitable", async () => {
