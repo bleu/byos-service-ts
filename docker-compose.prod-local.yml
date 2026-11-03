@@ -143,6 +143,8 @@ services:
       env_file: .env.binance-subsolver
       environment:
         BYOS_URL: http://byos:9585
+      ports:
+        - "${BINANCE_SUBSOLVER_HOST_PORT:-53003}:3002"
       deploy:
         resources:
           limits:
