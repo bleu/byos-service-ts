@@ -1,6 +1,6 @@
-import { SolveOrderbookClient } from "@byos/subsolver-core";
 import { describe, expect, it, vi } from "vitest";
-import { createSolveApp } from "./solve-app.js";
+import { createSolveApp } from "../solve-app.js";
+import { SolveOrderbookClient } from "../solve-orderbook-client.js";
 
 describe("solve discovery authentication", () => {
 	it.each([

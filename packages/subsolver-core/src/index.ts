@@ -29,4 +29,5 @@ export {
 	type RouteProvider,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
+export { createSolveApp } from "./solve-app.js";
 export { SolveOrderbookClient } from "./solve-orderbook-client.js";

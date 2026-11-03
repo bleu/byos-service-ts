@@ -5,6 +5,7 @@ import {
 	buildProposalFromRoute,
 	type CandidateOrder,
 	type OrderbookOrder,
+	type OrderFilter,
 	type ProviderRoute,
 	prioritizeCandidates,
 	quoteBatch,
@@ -132,6 +133,7 @@ export class BinanceSubsolver {
 		private readonly signFn: (params: unknown) => Promise<`0x${string}`>,
 		private readonly logger: pino.Logger,
 		private readonly budget: RequestBudget,
+		private readonly orderFilter: OrderFilter,
 	) {
 		this.provider = new BinanceProvider(
 			binanceClient,
@@ -167,6 +169,14 @@ export class BinanceSubsolver {
 	}
 
 	async pollOnce(now: bigint): Promise<void> {
+		let orders: OrderbookOrder[];
+		try {
+			const raw = await this.orderbook.solvableOrders();
+			orders = this.orderFilter.filter(raw);
+		} catch (error) {
+			this.logger.error({ err: error }, "failed to fetch solvable orders");
+			return;
+		}
 		if (Date.now() < this.retryAtMs) return;
 		if (!this.hasSynchronized) {
 			if (!(await this.synchronize(now))) return;
@@ -174,13 +184,6 @@ export class BinanceSubsolver {
 			await this.synchronize(now);
 		}
 		for (const [uid, live] of this.live) if (live.validUntil < now) this.live.delete(uid);
-		let orders: OrderbookOrder[];
-		try {
-			orders = (await this.orderbook.solvableOrders()).filter((order) => order.kind === "sell");
-		} catch (error) {
-			this.logger.error({ err: error }, "failed to fetch solvable orders");
-			return;
-		}
 		this.logger.debug(
 			{ count: orders.length, liveProposals: this.live.size },
 			"fetched solvable sell orders",
