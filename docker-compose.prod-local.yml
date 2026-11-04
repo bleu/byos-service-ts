@@ -94,8 +94,7 @@ services:
       image: ghcr.io/propeller-heads/fynd:0.114.4
       restart: unless-stopped
       command: ["serve", "--chain", "bsc", "--tycho-url", "tycho-fynd-bsc.propellerheads.xyz"]
-      environment:
-        TYCHO_API_KEY: ${TYCHO_API_KEY}
+      env_file: .env.fynd
       ports:
         - "${FYND_HOST_PORT:-53000}:3000"
       deploy:
