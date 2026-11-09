@@ -6,6 +6,7 @@ import { createTestDb, type TestContext } from "../../../../test/setup.js";
 import {
 	debitOperations,
 	proposals,
+	proposalsLog,
 	settlementAttempts,
 	settlementNotifications,
 } from "../../../db/schema.js";
@@ -151,8 +152,8 @@ describe("non-settlement authorization", () => {
 	it("charges a confirmed abandonment exactly once using the snapshotted cap", async () => {
 		const id = await bid();
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
+		await notify(id, "cancelled");
 		const w = await debit();
 		expect(w.sign).toHaveBeenCalledExactlyOnceWith(subSolver, cap / 10n, expect.any(String));
 		await runNonSettlementDebits({ ...w.config, workerId: "successor" }, new Map());
@@ -169,7 +170,7 @@ describe("non-settlement authorization", () => {
 		async (kind) => {
 			const id = await bid();
 			await notify(id, "settlementStarted");
-			await notify(id, "fail");
+			await notify(id, "cancelled");
 			await notify(id, kind);
 			expect((await debit()).sign).not.toHaveBeenCalled();
 		},
@@ -177,14 +178,14 @@ describe("non-settlement authorization", () => {
 	it("does not join start evidence from a different auction", async () => {
 		const id = await bid();
 		await notify(id, "settlementStarted", "43");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).not.toHaveBeenCalled();
 	});
 	it("does not charge an abandonment with no cap snapshot", async () => {
 		const id = await bid();
 		await ctx.db.update(proposals).set({ settlementPenaltyCap: null }).where(eq(proposals.id, id));
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).not.toHaveBeenCalled();
 	});
 });
@@ -220,7 +221,7 @@ describe("durable non-settlement execution", () => {
 	it("recovers signed bytes on restart without repricing or signing again", async () => {
 		const id = await bid();
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		const w = worker();
 		w.config.operator.debitOutcome = async () => null;
 		await runNonSettlementDebits(w.config, new Map());
@@ -238,7 +239,7 @@ describe("durable non-settlement execution", () => {
 		async (landed) => {
 			const id = await bid();
 			await notify(id, "settlementStarted");
-			await notify(id, "fail");
+			await notify(id, "cancelled");
 			const w = worker();
 			if (!landed) w.config.operator.debitOutcome = async () => null;
 			await runNonSettlementDebits(w.config, new Map());
@@ -284,7 +285,7 @@ describe("durable non-settlement execution", () => {
 	it("does not partially attribute a notification with an unknown member", async () => {
 		const id = await bid();
 		await notify([id, 999999], "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).not.toHaveBeenCalled();
 	});
 	it("uses the bid's cap snapshot even if a later price or config differs", async () => {
@@ -294,7 +295,7 @@ describe("durable non-settlement execution", () => {
 			.update(proposals)
 			.set({ settlementPenaltyCap: "999999999" })
 			.where(eq(proposals.id, id));
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).toHaveBeenCalledExactlyOnceWith(
 			subSolver,
 			cap / 10n,
@@ -307,7 +308,7 @@ describe("non-settlement finalization and legacy protection", () => {
 	it("recovers a landed debit after financial finalization rolls back", async () => {
 		const id = await bid();
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		await ctx.db.execute(
 			sql`CREATE FUNCTION reject_penalty_finalization() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected finalization failure'; END $$`,
 		);
@@ -344,7 +345,7 @@ describe("non-settlement finalization and legacy protection", () => {
 		const id = await bid();
 		await ctx.db.update(proposals).set({ penaltyTxHash: hash }).where(eq(proposals.id, id));
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).not.toHaveBeenCalled();
 		expect((await attemptFor(id)).reconciliationReason).toContain("Legacy");
 	});
@@ -361,14 +362,14 @@ describe("non-settlement finalization and legacy protection", () => {
 		await store.claimDebitOperation(ctx.db, operation.id, "legacy", 60);
 		await store.persistSignedDebit(ctx.db, operation.id, "legacy", "0xab", hash);
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		expect((await debit()).sign).not.toHaveBeenCalled();
 		expect((await attemptFor(id)).reconciliationReason).toContain("Legacy");
 	});
 	it("serializes an outcome correction with an in-flight debit", async () => {
 		const id = await bid();
 		await notify(id, "settlementStarted");
-		await notify(id, "fail");
+		await notify(id, "cancelled");
 		let release!: () => void;
 		let entered!: () => void;
 		const gate = new Promise<void>((resolve) => {
@@ -407,24 +408,34 @@ it.each(["success", "revert"])(
 	},
 );
 
-it("does not charge a revert while a signed abandonment debit needs reconciliation", async () => {
-	const id = await bid();
-	await notify(id, "settlementStarted");
-	await notify(id, "fail");
-	const first = worker();
-	first.config.operator.debitOutcome = async () => null;
-	await runNonSettlementDebits(first.config, new Map());
-	expect(first.sign).toHaveBeenCalledTimes(1);
-	await notify(id, "revert");
-	const second = worker();
-	await runRevertDebits(second.config, new Map());
-	expect(second.sign).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+	"does not charge a revert conflicting with an abandonment debit (landed: %s)",
+	async (landed) => {
+		const id = await bid();
+		await notify(id, "settlementStarted");
+		await notify(id, "cancelled");
+		const first = worker();
+		if (!landed) first.config.operator.debitOutcome = async () => null;
+		await runNonSettlementDebits(first.config, new Map());
+		expect(first.sign).toHaveBeenCalledTimes(1);
+		await notify(id, "revert");
+		expect(await store.getIncludingLog(ctx.db, id)).toMatchObject({
+			status: "settleFailed",
+			rejectionReason: "SettlementReverted",
+			settlementTxHash: hash,
+			penaltyTxHash: landed ? hash : null,
+		});
+		const second = worker();
+		await runRevertDebits(second.config, new Map());
+		expect(second.sign).not.toHaveBeenCalled();
+		expect((await attemptFor(id)).status).toBe("needs_reconciliation");
+	},
+);
 
 it("charges the revert instead when the abandonment debit was never signed", async () => {
 	const id = await bid();
 	await notify(id, "settlementStarted");
-	await notify(id, "fail");
+	await notify(id, "cancelled");
 	await notify(id, "revert");
 	const w = worker();
 	await runNonSettlementDebits(w.config, new Map());
@@ -449,7 +460,7 @@ it("preserves a landed debit hash if the live proposal is transitioned afterward
 it("resumes an exhausted attempt only while its abandonment evidence remains valid", async () => {
 	const id = await bid();
 	await notify(id, "settlementStarted");
-	await notify(id, "fail");
+	await notify(id, "cancelled");
 	const w = worker();
 	w.sign.mockRejectedValue(new Error("RPC unavailable"));
 	for (let i = 0; i < 10; i++) await runNonSettlementDebits(w.config, new Map());
@@ -465,4 +476,96 @@ it("resumes an exhausted attempt only while its abandonment evidence remains val
 	await notify(id, "success");
 	expect(await store.resumeDebitOperation(ctx.db, operation.id)).toBe(false);
 	expect((await debit()).sign).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+	"charges cancellation once with either arrival order (start first: %s)",
+	async (startFirst) => {
+		const id = await bid();
+		if (startFirst) await notify(id, "settlementStarted");
+		await notify(id, "cancelled");
+		const w = worker();
+		await runRevertDebits(w.config, new Map());
+		expect(w.sign).not.toHaveBeenCalled();
+		if (!startFirst) {
+			await runNonSettlementDebits(w.config, new Map());
+			expect(w.sign).not.toHaveBeenCalled();
+			await notify(id, "settlementStarted");
+		}
+		await notify(id, "cancelled");
+		await runNonSettlementDebits(w.config, new Map());
+		await runNonSettlementDebits(w.config, new Map());
+		await runRevertDebits(w.config, new Map());
+		expect(w.sign).toHaveBeenCalledExactlyOnceWith(subSolver, cap / 10n, expect.any(String));
+		expect(await store.getIncludingLog(ctx.db, id)).toMatchObject({
+			status: "settleFailed",
+			rejectionReason: "DriverCancelled",
+			penaltyTxHash: hash,
+			settlementTxHash: null,
+		});
+	},
+);
+
+it.each(["UnknownOutput", "SolverOutbid"] as const)(
+	"corrects a log-only %s loss on cancellation",
+	async (reason) => {
+		const id = await bid();
+		await notify(id, "settlementStarted");
+		await store.applyLostOutcome(ctx.db, id, reason);
+		await notify(id, "cancelled");
+		expect(await store.getIncludingLog(ctx.db, id)).toMatchObject({
+			status: "settleFailed",
+			rejectionReason: "DriverCancelled",
+			settlementTxHash: null,
+		});
+		expect((await debit()).sign).toHaveBeenCalledExactlyOnceWith(
+			subSolver,
+			cap / 10n,
+			expect.any(String),
+		);
+	},
+);
+
+it.each(["success", "revert"])(
+	"keeps a confirmed %s when cancellation arrives afterwards",
+	async (kind) => {
+		const id = await bid();
+		await notify(id, kind);
+		await notify(id, "cancelled");
+		expect(await store.getIncludingLog(ctx.db, id)).toMatchObject({
+			status: kind === "success" ? "settled" : "settleFailed",
+			rejectionReason: kind === "success" ? null : "SettlementReverted",
+			settlementTxHash: hash,
+		});
+		expect((await debit()).sign).not.toHaveBeenCalled();
+	},
+);
+
+it("retains pending legacy revert debits without reclassifying historical losses", async () => {
+	const reverted = await bid();
+	await notify(reverted, "revert");
+	await ctx.db
+		.update(proposalsLog)
+		.set({ rejectionReason: null })
+		.where(eq(proposalsLog.id, reverted));
+	const lost = await bid();
+	await store.applyLostOutcome(ctx.db, lost, "UnknownOutput");
+	const w = worker();
+	await runRevertDebits(w.config, new Map());
+	await runRevertDebits(w.config, new Map());
+	expect(w.sign).toHaveBeenCalledExactlyOnceWith(subSolver, cap, hash);
+	expect(await store.getIncludingLog(ctx.db, lost)).toMatchObject({
+		status: "lost",
+		rejectionReason: "UnknownOutput",
+	});
+});
+
+it("excludes cancelled rows from revert debits even if a transaction hash is present", async () => {
+	const id = await bid();
+	await notify(id, "cancelled");
+	await ctx.db.update(proposalsLog).set({ settlementTxHash: hash }).where(eq(proposalsLog.id, id));
+	expect(await store.snapshotSettleFailedFromLog(ctx.db)).toEqual([]);
+	const w = worker();
+	await runRevertDebits(w.config, new Map());
+	expect(w.sign).not.toHaveBeenCalled();
 });

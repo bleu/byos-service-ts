@@ -58,7 +58,15 @@ policy first.
 ## Consequences
 
 - Outcome reconciliation remains observational and cannot create liability.
-- Existing proposal statuses and public response fields stay unchanged.
+- Revised by COW-1318: known driver cancellations use `settleFailed` with
+  `DriverCancelled`; mined reverts use `SettlementReverted`. Reusing the status
+  makes the known failure visible without coupling display to financial policy.
+  The existing `rejectionReason` field carries both reasons; no new field is needed.
+  Revert selection requires the revert reason (or a legacy null reason) and a
+  settlement hash. Cancellation remains subject to separate attempt evidence.
+  Late confirmed outcomes can correct a cancellation while retaining signed/landed
+  debit reconciliation and existing penalty hashes. Historical rows are not
+  reclassified or used to create new liabilities.
 - Migration 0016 does not backfill liabilities from historical losses. It parks
   unfinished legacy non-settlement operations, preserving signed bytes and evidence.
 - Legacy charges already recorded, or signed legacy debits for the same sub-solver

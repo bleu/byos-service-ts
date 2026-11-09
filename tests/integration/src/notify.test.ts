@@ -1,4 +1,6 @@
+import { proposals } from "@byos/byos/src/db/schema.js";
 import * as store from "@byos/byos/src/infra/storage.js";
+import { eq } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -242,9 +244,8 @@ describe("/notify settlement outcomes", () => {
 		expect(updated?.status).toBe("submitted");
 	});
 
-	// cancelled/expired/fail mean no tx landed — in the new state machine the
-	// proposal transitions to "lost" (deleted from proposals, kept in proposals_log).
-	it("abandoned submission marks the proposal lost", async () => {
+	// Driver cancellations expose a known failure; expired/fail keep loss behavior.
+	it("abandoned submission records the appropriate terminal status", async () => {
 		const cases = [
 			{ kind: "cancelled", auctionId: 111, uidByte: "c2" },
 			{ kind: "expired", auctionId: 112, uidByte: "c3" },
@@ -264,7 +265,8 @@ describe("/notify settlement outcomes", () => {
 			const live = await store.get(app.ctx.db, id);
 			expect(live, `${kind}: row must be removed from proposals`).toBeNull();
 			const log = await store.getIncludingLog(app.ctx.db, id);
-			expect(log?.status, `${kind} must mark the proposal lost`).toBe("lost");
+			expect(log?.status).toBe(kind === "cancelled" ? "settleFailed" : "lost");
+			expect(log?.rejectionReason).toBe(kind === "cancelled" ? "DriverCancelled" : "UnknownOutput");
 		}
 	});
 
@@ -331,5 +333,56 @@ describe("/notify settlement outcomes", () => {
 		const body = await resp.json();
 		expect(body.status).toBe("settled");
 		expect(body.settlementTxHash).toBe(tx);
+	});
+});
+
+describe("owner-visible settlement failure reasons", () => {
+	it.each(["submitted", "UnknownOutput", "SolverOutbid"] as const)(
+		"shows cancellation after %s and preserves an existing penalty hash",
+		async (state) => {
+			const id = await seedProposal(app.ctx.db, {
+				status: "submitted",
+				auctionId: 1318,
+				orderUid: `0x${(state === "submitted" ? "70" : state === "UnknownOutput" ? "71" : "72").repeat(56)}`,
+				subSolver: SIGNER_ACCOUNT.address,
+			});
+			const penaltyTxHash = `0x${"55".repeat(32)}` as Hex;
+			// Model a debit finalized before the independent lifecycle transition.
+			await app.ctx.db.update(proposals).set({ penaltyTxHash }).where(eq(proposals.id, id));
+			if (state !== "submitted") await store.applyLostOutcome(app.ctx.db, id, state);
+			await postNotify({ auctionId: "1318", solutionId: id, kind: "cancelled" });
+			await postNotify({ auctionId: "1318", solutionId: id, kind: "cancelled" });
+			const response = await app.publicApp.request(`/proposal/${id}`, {
+				headers: { "X-Signature": await readAuthHeader() },
+			});
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				status: "settleFailed",
+				rejectionReason: "DriverCancelled",
+				penaltyTxHash,
+			});
+			expect((await store.getIncludingLog(app.ctx.db, id))?.settlementTxHash).toBeNull();
+		},
+	);
+	it.each([false, true])("shows a revert reason through owner reads (late: %s)", async (late) => {
+		const id = await seedProposal(app.ctx.db, {
+			status: "submitted",
+			auctionId: 1319,
+			orderUid: `0x${(late ? "73" : "74").repeat(56)}`,
+			subSolver: SIGNER_ACCOUNT.address,
+		});
+		if (late) await store.applyLostOutcome(app.ctx.db, id, "UnknownOutput");
+		const tx = `0x${"66".repeat(32)}`;
+		await postNotify({ auctionId: "1319", solutionId: id, kind: "revert", transaction: tx });
+		await postNotify({ auctionId: "1319", solutionId: id, kind: "cancelled" });
+		const response = await app.publicApp.request(`/proposal/${id}`, {
+			headers: { "X-Signature": await readAuthHeader() },
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			status: "settleFailed",
+			rejectionReason: "SettlementReverted",
+			settlementTxHash: tx,
+		});
 	});
 });
