@@ -53,11 +53,12 @@ info:
     non-selected candidates are written directly to the log as
     `SubsolverOutbid` or `AuctionClosed`.
 
-    The driver's outcome resolves a submitted proposal: `settled` (tx landed)
-    or `settleFailed` (tx reverted), each recording `settlementTxHash`. A
-    `settleFailed` proposal later becomes `penalized` once the service has
-    debited the sub-solver's escrow. If the outcome is not received within the
-    observation window, the outcome worker marks the proposal `lost` with a
+    The driver's outcome resolves a submitted proposal: `settled` (tx landed),
+    or `settleFailed` with `SettlementReverted` (tx reverted) or
+    `DriverCancelled` (driver cancellation). Only confirmed success or revert
+    records `settlementTxHash`. An escrow debit records `penaltyTxHash` while
+    preserving the outcome status; `penalized` is a legacy status. If the
+    outcome is not received within the observation window, the outcome worker marks the proposal `lost` with a
     sub-reason (`SolverOutbid` if an on-chain Trade event was found for the
     order, `UnknownOutput` otherwise).
 
@@ -522,7 +523,8 @@ components:
           Status alone does not authorize an escrow debit. Reverts use the
           existing gas + c_l policy; cancellations require matching start and
           abandonment evidence and use 10% of the snapshotted c_l.
-        - `penalized` — that debit landed; see `penaltyTxHash`.
+        - `penalized` — legacy status for an escrow debit. Current writers
+          preserve the outcome status and record `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
         - `cancelled` — cancelled by a signed `DELETE` while still a
           candidate, or flushed from memory at auction close

@@ -150,6 +150,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 					log?.error({ id: proposal.id, kind }, "late outcome correction not recorded");
 					continue;
 				}
+				if (!lateCorrection.auditEvent) continue;
 				config.onAuditEvent(lateCorrection.auditEvent);
 				log?.info(
 					{ id: proposal.id, subSolver: proposal.subSolver, outcome: outcome.kind },
@@ -166,6 +167,7 @@ export function createNotifyRoute(config: NotifyConfig) {
 				if (result.kind === "notFound" && canCorrectLog) {
 					const correction = await store.applyLateLostCorrection(config.db, proposal.id, outcome);
 					if ("auditEvent" in correction) {
+						if (!correction.auditEvent) continue;
 						config.onAuditEvent(correction.auditEvent);
 						log?.info(
 							{ id: proposal.id, outcome: outcome.kind },

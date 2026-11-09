@@ -1050,13 +1050,21 @@ export async function applyLateLostCorrection(
 	db: Db,
 	proposalId: number,
 	outcome: Extract<SettlementOutcome, { kind: "succeeded" | "reverted" | "cancelled" }>,
-): Promise<{ auditEvent: AuditEvent } | StoreError> {
+): Promise<{ auditEvent: AuditEvent | null } | StoreError> {
 	return db.transaction(async (tx) => {
 		const [row] = await tx
 			.select()
 			.from(proposalsLog)
 			.where(eq(proposalsLog.id, proposalId))
 			.for("update");
+		// Recognize duplicates under the lock, including concurrent notifications
+		// that both read the live submitted row before the first cancellation.
+		if (
+			outcome.kind === "cancelled" &&
+			row?.status === "settleFailed" &&
+			row.rejectionReason === "DriverCancelled"
+		)
+			return { auditEvent: null };
 		const correctable =
 			row &&
 			(row.status === "lost" ||

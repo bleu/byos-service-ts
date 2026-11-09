@@ -569,3 +569,42 @@ it("excludes cancelled rows from revert debits even if a transaction hash is pre
 	await runRevertDebits(w.config, new Map());
 	expect(w.sign).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+	"treats duplicate cancellations as successful no-ops (concurrent: %s)",
+	async (concurrent) => {
+		const id = await bid();
+		const errors: string[] = [];
+		const onAuditEvent = vi.fn();
+		const route = createNotifyRoute({
+			db: ctx.db,
+			logger: pino(
+				{ level: "error" },
+				{
+					write: (chunk) => {
+						errors.push(chunk);
+					},
+				},
+			),
+			onAuditEvent,
+		});
+		const cancel = () =>
+			route.request("/notify", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ auctionId: "42", solutionId: id, kind: "cancelled" }),
+			});
+		const responses = concurrent
+			? await Promise.all([cancel(), cancel()])
+			: [await cancel(), await cancel()];
+		expect(responses.map((response) => response.status)).toEqual([200, 200]);
+		expect(errors).toEqual([]);
+		expect(onAuditEvent).toHaveBeenCalledTimes(1);
+		expect(await store.getIncludingLog(ctx.db, id)).toMatchObject({
+			status: "settleFailed",
+			rejectionReason: "DriverCancelled",
+			settlementTxHash: null,
+		});
+		expect(await ctx.db.select().from(settlementNotifications)).toHaveLength(1);
+	},
+);
