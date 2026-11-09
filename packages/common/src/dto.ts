@@ -131,6 +131,10 @@ export const RejectionReason = {
 	/** Proposal was submitted to the driver but the settlement outcome is unknown
 	 * (abandoned, not settled within the observation window). */
 	UnknownOutput: "UnknownOutput",
+	/** The driver cancelled this settlement; no settlement transaction hash is implied. */
+	DriverCancelled: "DriverCancelled",
+	/** The settlement transaction reverted on-chain. */
+	SettlementReverted: "SettlementReverted",
 } as const;
 
 export type RejectionReason = (typeof RejectionReason)[keyof typeof RejectionReason];
@@ -152,6 +156,8 @@ export const rejectionReasonSchema = z.enum([
 	RejectionReason.InflightPriceUnavailable,
 	RejectionReason.AuctionClosed,
 	RejectionReason.UnknownOutput,
+	RejectionReason.DriverCancelled,
+	RejectionReason.SettlementReverted,
 ]);
 
 // --- Proposal Metadata ---

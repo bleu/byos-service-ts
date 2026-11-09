@@ -37,6 +37,7 @@ function outcomeOf(notification: Notification): SettlementOutcome | null {
 			if (!notification.transaction) return null;
 			return { kind: "reverted", txHash: notification.transaction as Hex };
 		case "cancelled":
+			return { kind: "cancelled" };
 		case "expired":
 		case "fail":
 			return { kind: "abandoned" };
@@ -134,30 +135,26 @@ export function createNotifyRoute(config: NotifyConfig) {
 		}
 
 		for (const proposal of proposals) {
-			// If the live row was deleted by the outcome worker (proposal.status ===
-			// "lost" means it came from proposals_log), a late success or revert
-			// must be written directly to the log rather than through the live table.
-			const isLogOnly = proposal.status === "lost";
+			const canCorrectLog =
+				outcome.kind === "succeeded" || outcome.kind === "reverted" || outcome.kind === "cancelled";
+			const isLogOnly =
+				proposal.status === "lost" ||
+				(proposal.status === "settleFailed" && proposal.rejectionReason === "DriverCancelled");
 			const lateCorrection =
-				isLogOnly && (outcome.kind === "succeeded" || outcome.kind === "reverted")
-					? await store.applyLateLostCorrection(
-							config.db,
-							proposal.id,
-							outcome as
-								| { kind: "succeeded"; txHash: `0x${string}` }
-								| { kind: "reverted"; txHash: `0x${string}` },
-						)
+				isLogOnly && canCorrectLog
+					? await store.applyLateLostCorrection(config.db, proposal.id, outcome)
 					: null;
 
 			if (lateCorrection !== null) {
 				if ("kind" in lateCorrection) {
-					log?.error({ id: proposal.id, kind }, "late lost correction not recorded");
+					log?.error({ id: proposal.id, kind }, "late outcome correction not recorded");
 					continue;
 				}
+				if (!lateCorrection.auditEvent) continue;
 				config.onAuditEvent(lateCorrection.auditEvent);
 				log?.info(
 					{ id: proposal.id, subSolver: proposal.subSolver, outcome: outcome.kind },
-					"late settlement outcome corrected lost proposal in log",
+					"late settlement outcome corrected proposal in log",
 				);
 				continue;
 			}
@@ -167,16 +164,14 @@ export function createNotifyRoute(config: NotifyConfig) {
 				// An abandonment can delete the live row after this request read it.
 				// Retry the guarded log correction so a concurrent terminal notification
 				// still drives settlement accounting rather than being lost to that race.
-				if (
-					result.kind === "notFound" &&
-					(outcome.kind === "succeeded" || outcome.kind === "reverted")
-				) {
+				if (result.kind === "notFound" && canCorrectLog) {
 					const correction = await store.applyLateLostCorrection(config.db, proposal.id, outcome);
 					if ("auditEvent" in correction) {
+						if (!correction.auditEvent) continue;
 						config.onAuditEvent(correction.auditEvent);
 						log?.info(
 							{ id: proposal.id, outcome: outcome.kind },
-							"concurrent settlement outcome corrected lost proposal",
+							"concurrent settlement outcome corrected proposal",
 						);
 						continue;
 					}

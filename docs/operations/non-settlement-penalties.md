@@ -52,3 +52,17 @@ exhausted, the existing `resume-debit` command rechecks the stored start and
 abandonment evidence and atomically resumes both attempt and operation. It refuses
 legacy operations and attempts with a conflicting outcome or other reconciliation
 reason. It always preserves previously signed transaction bytes.
+
+## Failure reasons (COW-1318)
+
+Driver cancellations now appear as `settleFailed` / `DriverCancelled`, even when
+there was no start notification and no penalty is eligible. Reverts appear as
+`settleFailed` / `SettlementReverted`. `penaltyTxHash` remains the escrow debit
+hash; a cancellation supplies no settlement transaction hash.
+
+Deploy all notification writers and penalty workers together: older revert workers
+select by status alone and cannot safely process the new cancellation rows.
+No schema migration or historical repair is required. Pending legacy revert rows
+with a null reason and a settlement hash remain eligible for the existing revert
+worker. Historical losses stay unchanged; future repair must use retained driver
+evidence and a separately reviewed financial policy.

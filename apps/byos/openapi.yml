@@ -53,11 +53,12 @@ info:
     non-selected candidates are written directly to the log as
     `SubsolverOutbid` or `AuctionClosed`.
 
-    The driver's outcome resolves a submitted proposal: `settled` (tx landed)
-    or `settleFailed` (tx reverted), each recording `settlementTxHash`. A
-    `settleFailed` proposal later becomes `penalized` once the service has
-    debited the sub-solver's escrow. If the outcome is not received within the
-    observation window, the outcome worker marks the proposal `lost` with a
+    The driver's outcome resolves a submitted proposal: `settled` (tx landed),
+    or `settleFailed` with `SettlementReverted` (tx reverted) or
+    `DriverCancelled` (driver cancellation). Only confirmed success or revert
+    records `settlementTxHash`. An escrow debit records `penaltyTxHash` while
+    preserving the outcome status; `penalized` is a legacy status. If the
+    outcome is not received within the observation window, the outcome worker marks the proposal `lost` with a
     sub-reason (`SolverOutbid` if an on-chain Trade event was found for the
     order, `UnknownOutput` otherwise).
 
@@ -516,18 +517,25 @@ components:
         - `expired` — `validUntil` passed before selection.
         - `settled` — the settlement landed on-chain; see
           `settlementTxHash`.
-        - `settleFailed` — the settlement reverted on-chain (see
-          `settlementTxHash`); the escrow debit for it follows.
-        - `penalized` — that debit landed; see `penaltyTxHash`.
+        - `settleFailed` — known settlement failure; `rejectionReason` is
+          `DriverCancelled` for a driver cancellation or `SettlementReverted`
+          for an on-chain revert. Only reverts carry `settlementTxHash`.
+          Status alone does not authorize an escrow debit. Reverts use the
+          existing gas + c_l policy; cancellations require matching start and
+          abandonment evidence and use 10% of the snapshotted c_l.
+        - `penalized` — legacy status for an escrow debit. Current writers
+          preserve the outcome status and record `penaltyTxHash`.
         - `simFailed` — the settlement simulation reverted.
         - `cancelled` — cancelled by a signed `DELETE` while still a
           candidate, or flushed from memory at auction close
           (`SubsolverOutbid` / `AuctionClosed` in `rejectionReason`).
         - `lost` — outcome not observed within the detection window; see
           `rejectionReason` for `SolverOutbid` vs `UnknownOutput`. A late
-          `/notify` success or revert corrects it in `proposals_log`.
+          `/notify` success, revert, or cancellation corrects it in `proposals_log`.
 
-        All states except `candidate` and `submitted` are terminal.
+        All states except `candidate` and `submitted` are terminal for bidding.
+        A confirmed late success or revert can correct `DriverCancelled`;
+        existing penalty hashes and financial reconciliation are preserved.
       type: string
       enum:
         - candidate
@@ -542,7 +550,7 @@ components:
         - lost
     RejectionReason:
       description: |
-        Why the background validator rejected a proposal:
+        Why a proposal was rejected, lost, or failed settlement:
 
         - `InsufficientEscrow` — the sub-solver's escrow balance is below
           the required minimum. Fix: deposit escrow and resubmit.
@@ -570,6 +578,10 @@ components:
           the former trade-value guard; no longer emitted by validation.
         - `InflightPriceUnavailable` — deprecated historical response value;
           pending siblings no longer cause this rejection.
+        - `DriverCancelled` — an attributable driver cancellation. Does not
+          imply a cancellation transaction exists or authorize a debit alone.
+        - `SettlementReverted` — an attributable revert with a settlement
+          transaction hash. Older revert rows may have no reason.
       type: string
       enum:
         - InsufficientEscrow
@@ -586,6 +598,8 @@ components:
         - AuctionClosed
         - SolverOutbid
         - UnknownOutput
+        - DriverCancelled
+        - SettlementReverted
         - ProposedSlippageOutrange
         - SimulationMissingExecutedEvent
     Interaction:

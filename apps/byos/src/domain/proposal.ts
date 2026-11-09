@@ -69,11 +69,14 @@ export type SettlementOutcome =
 	| { kind: "started" }
 	| { kind: "succeeded"; txHash: Hex }
 	| { kind: "reverted"; txHash: Hex }
+	| { kind: "cancelled" }
 	| { kind: "abandoned" };
 
 /** Whether this outcome should trigger an escrow charge. */
 export function isChargeable(outcome: SettlementOutcome): boolean {
-	return outcome.kind === "reverted" || outcome.kind === "abandoned";
+	return (
+		outcome.kind === "reverted" || outcome.kind === "abandoned" || outcome.kind === "cancelled"
+	);
 }
 
 /** Parse and validate a 56-byte order UID hex string. */

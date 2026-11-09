@@ -178,6 +178,10 @@ export async function runRevertDebits(
 	}
 
 	for (const proposal of pending) {
+		// Defense in depth: only confirmed reverts (including legacy null reasons)
+		// enter this path. Driver cancellations use evidence-backed attempts.
+		if (proposal.rejectionReason !== null && proposal.rejectionReason !== "SettlementReverted")
+			continue;
 		if ((attempts.get(proposal.id) ?? 0) >= MAX_DEBIT_ATTEMPTS) continue;
 
 		if (!proposal.settlementTxHash) {

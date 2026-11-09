@@ -590,6 +590,9 @@ export async function applySettlementOutcome(
 					txHash = outcome.txHash;
 				}
 				break;
+			case "cancelled":
+				if (from === "submitted") toStatus = "settleFailed";
+				break;
 			case "abandoned":
 				if (from === "submitted") {
 					toStatus = "lost";
@@ -601,6 +604,15 @@ export async function applySettlementOutcome(
 			return { auditEvent: null, cancelledAuditEvents: [] };
 		}
 
+		const rejectionReason: RejectionReason | null =
+			outcome.kind === "reverted"
+				? "SettlementReverted"
+				: outcome.kind === "cancelled"
+					? "DriverCancelled"
+					: toStatus === "lost"
+						? "UnknownOutput"
+						: null;
+
 		await tx
 			.update(proposals)
 			.set({
@@ -609,9 +621,9 @@ export async function applySettlementOutcome(
 				...(outcome.kind === "reverted"
 					? { settlementPenaltyCap: proposal.settlementPenaltyCap?.toString() ?? null }
 					: {}),
-				// Abandonment is an operational loss. Financial eligibility lives in
-				// settlement_attempts and requires separate driver evidence.
-				...(toStatus === "lost" ? { rejectionReason: "UnknownOutput" } : {}),
+				// Displayed failure reasons never authorize a debit: financial eligibility
+				// requires separate settlement-attempt evidence.
+				rejectionReason,
 				statusChangedAt: sql`now()`,
 			})
 			.where(eq(proposals.id, proposal.id));
@@ -662,7 +674,7 @@ export async function applySettlementOutcome(
 				orderUid: proposal.orderUid,
 				from,
 				to: toStatus,
-				rejectionReason: null,
+				rejectionReason,
 				settlementTxHash: txHash,
 			},
 		};
@@ -704,6 +716,11 @@ export async function recordPenalty(
 			and(
 				eq(proposalsLog.id, proposal.id),
 				eq(proposalsLog.status, "settleFailed"),
+				// Null reasons are legacy genuine reverts; never reclassify old losses.
+				or(
+					eq(proposalsLog.rejectionReason, "SettlementReverted"),
+					sql`${proposalsLog.rejectionReason} IS NULL`,
+				),
 				sql`${proposalsLog.penaltyTxHash} IS NULL`,
 			),
 		)
@@ -1036,56 +1053,75 @@ export async function applyLostOutcome(
 }
 
 /**
- * Late correction: a `/notify` success or revert arrived after the outcome
- * worker already marked the proposal `lost` and deleted the live row.
- * Updates proposals_log in place; the penalty worker will pick up settleFailed
- * rows with penalty_tx_hash IS NULL on its next tick.
+ * Correct an unknown loss or driver cancellation when a late notification arrives.
+ * Confirmed chain outcomes supersede cancellation; cancellation only replaces lost.
+ * Preserve penalty hashes so signed/landed abandonment conflicts stay quarantined
+ * by settlement-attempt reconciliation rather than authorizing a second charge.
  */
 export async function applyLateLostCorrection(
 	db: Db,
 	proposalId: number,
-	outcome: { kind: "succeeded"; txHash: Hex } | { kind: "reverted"; txHash: Hex },
-): Promise<{ auditEvent: AuditEvent } | StoreError> {
-	const toStatus =
-		outcome.kind === "succeeded" ? ("settled" as Status) : ("settleFailed" as Status);
-
+	outcome: Extract<SettlementOutcome, { kind: "succeeded" | "reverted" | "cancelled" }>,
+): Promise<{ auditEvent: AuditEvent | null } | StoreError> {
 	return db.transaction(async (tx) => {
-		const result = await tx
-			.update(proposalsLog)
-			.set({
-				status: toStatus,
-				settlementTxHash: outcome.txHash.toLowerCase(),
-				statusChangedAt: sql`now()`,
-			})
-			.where(and(eq(proposalsLog.id, proposalId), eq(proposalsLog.status, "lost")))
-			.returning({ subSolver: proposalsLog.subSolver, orderUid: proposalsLog.orderUid });
-
-		if (result.length === 0) {
+		const [row] = await tx
+			.select()
+			.from(proposalsLog)
+			.where(eq(proposalsLog.id, proposalId))
+			.for("update");
+		// Recognize duplicates under the lock, including concurrent notifications
+		// that both read the live submitted row before the first cancellation.
+		if (
+			outcome.kind === "cancelled" &&
+			row?.status === "settleFailed" &&
+			row.rejectionReason === "DriverCancelled"
+		)
+			return { auditEvent: null };
+		const correctable =
+			row &&
+			(row.status === "lost" ||
+				(outcome.kind !== "cancelled" &&
+					row.status === "settleFailed" &&
+					row.rejectionReason === "DriverCancelled"));
+		if (!correctable)
 			return {
 				kind: "staleTransition" as const,
 				id: proposalId,
-				expected: "lost",
-				actual: null,
+				expected: "lost or driver-cancelled",
+				actual: row?.status ?? null,
 			};
-		}
-
-		// result.length === 0 is already handled above, so result[0] is always defined
-		const row = result[0] as NonNullable<(typeof result)[0]>;
-
-		const auditEvent: AuditEvent = {
-			occurredAt: new Date(),
-			kind: {
-				type: "statusChanged",
-				proposalId,
-				subSolver: row.subSolver as Address,
-				orderUid: row.orderUid,
-				from: "lost",
-				to: toStatus,
-				rejectionReason: null,
-				settlementTxHash: outcome.txHash,
+		const toStatus: Status = outcome.kind === "succeeded" ? "settled" : "settleFailed";
+		const rejectionReason =
+			outcome.kind === "reverted"
+				? "SettlementReverted"
+				: outcome.kind === "cancelled"
+					? "DriverCancelled"
+					: null;
+		const txHash = "txHash" in outcome ? (outcome.txHash.toLowerCase() as Hex) : null;
+		await tx
+			.update(proposalsLog)
+			.set({
+				status: toStatus,
+				rejectionReason,
+				...(txHash ? { settlementTxHash: txHash } : {}),
+				statusChangedAt: sql`now()`,
+			})
+			.where(eq(proposalsLog.id, proposalId));
+		return {
+			auditEvent: {
+				occurredAt: new Date(),
+				kind: {
+					type: "statusChanged",
+					proposalId,
+					subSolver: row.subSolver as Address,
+					orderUid: row.orderUid,
+					from: row.status as Status,
+					to: toStatus,
+					rejectionReason,
+					settlementTxHash: txHash,
+				},
 			},
 		};
-		return { auditEvent };
 	});
 }
 
@@ -1100,6 +1136,11 @@ export async function snapshotSettleFailedFromLog(db: Db): Promise<Proposal[]> {
 		.where(
 			and(
 				eq(proposalsLog.status, "settleFailed"),
+				// Null reasons are legacy genuine reverts; never reclassify old losses.
+				or(
+					eq(proposalsLog.rejectionReason, "SettlementReverted"),
+					sql`${proposalsLog.rejectionReason} IS NULL`,
+				),
 				sql`${proposalsLog.penaltyTxHash} IS NULL`,
 				notExists(
 					db
