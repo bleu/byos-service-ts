@@ -1,5 +1,5 @@
 import { BUY_ETH_ADDRESS } from "@byos/common";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FyndConfigurationError, FyndProvider } from "../fynd-provider.js";
 
 const router = "0x0000000000000000000000000000000000000003" as const;
@@ -23,29 +23,42 @@ const client = {
 };
 
 describe("FyndProvider", () => {
-	it("builds exact approval and router interactions for an eligible BSC sell order", async () => {
-		const provider = new FyndProvider({
-			client,
-			chainId: 56,
-			trampoline: "0x0000000000000000000000000000000000000005",
-			settlement: "0x0000000000000000000000000000000000000004",
-			now: () => 105,
-		});
-		const route = await provider.quote({
-			uid: "0x01",
-			chainId: 56,
-			sellToken: "0x0000000000000000000000000000000000000001",
-			buyToken: "0x0000000000000000000000000000000000000002",
-			remainingSell: 100n,
-			scaledLimitBuy: 100n,
-		});
-		expect(route?.minBuyAmount).toBe(110n);
-		expect(route?.interactions).toHaveLength(2);
-		expect(route?.interactions[0]?.target).toBe("0x0000000000000000000000000000000000000001");
-		expect(route?.interactions[0]?.callData).toBe(
-			"0x095ea7b300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000064",
-		);
-	});
+	it.each([0, 50, 100, 10_000])(
+		"uses the guaranteed minimum for both proposal amounts with %i bps slippage",
+		async (slippageBps) => {
+			const quote = vi.fn(client.quote);
+			const provider = new FyndProvider({
+				client: { ...client, quote },
+				slippageBps,
+				chainId: 56,
+				trampoline: "0x0000000000000000000000000000000000000005",
+				settlement: "0x0000000000000000000000000000000000000004",
+				now: () => 105,
+			});
+			const route = await provider.quote({
+				uid: "0x01",
+				chainId: 56,
+				sellToken: "0x0000000000000000000000000000000000000001",
+				buyToken: "0x0000000000000000000000000000000000000002",
+				remainingSell: 100n,
+				scaledLimitBuy: 100n,
+			});
+			expect(quote).toHaveBeenCalledWith(
+				expect.objectContaining({
+					options: {
+						timeoutMs: 5000,
+						encodingOptions: { slippage: slippageBps / 10_000, transferType: "transfer_from" },
+					},
+				}),
+			);
+			expect(route).toMatchObject({ quoteBuyAmount: 110n, minBuyAmount: 110n });
+			expect(route?.interactions).toHaveLength(2);
+			expect(route?.interactions[0]?.target).toBe("0x0000000000000000000000000000000000000001");
+			expect(route?.interactions[0]?.callData).toBe(
+				"0x095ea7b300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000064",
+			);
+		},
+	);
 
 	it("caches validated sidecar info across readiness checks and quotes", async () => {
 		let infoCalls = 0;
