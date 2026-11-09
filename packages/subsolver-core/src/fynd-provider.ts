@@ -116,7 +116,8 @@ export class FyndProvider implements RouteProvider {
 		if (quote.tokenOut.toLowerCase() !== order.buyToken.toLowerCase()) return null;
 		if (this.now() - quote.block.timestamp > this.maxQuoteAgeSeconds) return null;
 		return {
-			quoteBuyAmount: quote.amountOut,
+			// Commit to the guaranteed output, matching the Binance provider.
+			quoteBuyAmount: quote.feeBreakdown.minAmountReceived,
 			minBuyAmount: quote.feeBreakdown.minAmountReceived,
 			interactions: [
 				{
