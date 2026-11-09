@@ -779,9 +779,13 @@ components:
           example: "0x7b1f3a9c5d8e2f4a6b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a"
         simulationFailureParams:
           description: |
-            Debug parameters captured when the simulation reverted. Set only
-            during `simFailed` transitions, so in practice this field is
-            present only when `status` is `simFailed`.
+            Simulation replay parameters captured on failure or retained when
+            a proposal is selected and sent to the driver (`submitted`).
+            Preserved through settlement outcomes, including reverts. Includes
+            chainId, blockNumber (the simulation base block), timestamp, from,
+            to, calldata, and stateOverrides when available. The legacy field
+            name also applies to successful simulations. Bulk diagnostics are
+            redacted after LOG_REDACTION_AFTER_SECS (default seven days).
           type: object
           additionalProperties: true
         sellTokenRefPrice:

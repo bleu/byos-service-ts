@@ -493,6 +493,7 @@ export async function insertAsSubmitted(
 		validUntil: candidate.validUntil.toString(),
 		nonce: candidate.nonce.toString(),
 		signature: candidate.signature.toLowerCase(),
+		simulationFailureParams: candidate.simulationParams ?? null,
 		status: "submitted",
 		rejectionReason: null,
 		gasUsed: Number(candidate.gasUsed),
@@ -739,24 +740,35 @@ export async function recordPenalty(
  * whose `created_at` is older than `olderThanSecs`. The rest of the row (amounts,
  * tokens, status, rejection reason, tx hashes, gas) is preserved forever.
  *
- * Returns the number of rows updated.
+ * Also clears expired diagnostics on live rows so future mirror updates cannot
+ * restore them. Returns the number of distinct proposals redacted.
  */
 export async function redactOldLogEntries(db: Db, olderThanSecs: number): Promise<number> {
-	const result = await db
-		.update(proposalsLog)
-		.set({
-			interactions: sql`'[]'::jsonb`,
-			simulationFailureParams: null,
-		})
-		.where(
-			and(
-				sql`created_at < now() - make_interval(secs => ${olderThanSecs})`,
-				or(sql`jsonb_array_length(interactions) > 0`, sql`simulation_failure_params is not null`),
-			),
-		)
-		.returning({ id: proposalsLog.id });
-
-	return result.length;
+	return db.transaction(async (tx) => {
+		// Clear the live copy first: its mirror trigger must not restore expired
+		// diagnostics during a later status transition. Keep live interactions.
+		const liveRows = await tx
+			.update(proposals)
+			.set({ simulationFailureParams: null })
+			.where(
+				and(
+					sql`created_at < now() - make_interval(secs => ${olderThanSecs})`,
+					sql`simulation_failure_params is not null`,
+				),
+			)
+			.returning({ id: proposals.id });
+		const result = await tx
+			.update(proposalsLog)
+			.set({ interactions: sql`'[]'::jsonb`, simulationFailureParams: null })
+			.where(
+				and(
+					sql`created_at < now() - make_interval(secs => ${olderThanSecs})`,
+					or(sql`jsonb_array_length(interactions) > 0`, sql`simulation_failure_params is not null`),
+				),
+			)
+			.returning({ id: proposalsLog.id });
+		return new Set([...liveRows, ...result].map((row) => row.id)).size;
+	});
 }
 
 /**

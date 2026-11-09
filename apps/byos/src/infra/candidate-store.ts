@@ -2,6 +2,7 @@ import type { ContractInteraction } from "@byos/common";
 import { sql } from "drizzle-orm";
 import type { Address, Hex } from "viem";
 import type { Db } from "../db/index.js";
+import type { SimulationFailureParams } from "../domain/validator.js";
 
 /** A validated proposal held in application memory, awaiting /solve selection. */
 export interface Candidate {
@@ -24,6 +25,8 @@ export interface Candidate {
 	gasUsed: bigint;
 	trampoline: Address;
 	simulationBuyAmount: bigint | null;
+	/** Kept in memory until /solve selects this candidate for the driver. */
+	simulationParams?: SimulationFailureParams;
 	/** Sell token ref price at validation time — used for CIP-87 exposure. */
 	sellTokenRefPrice: string;
 	createdAt: Date;
