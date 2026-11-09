@@ -76,6 +76,7 @@ it("admits pending siblings independently using persisted active exposure", asyn
 			signature: "0x",
 		};
 		const client = {
+			getBlockNumber: async () => 1000n,
 			multicall: async () => [{ status: "success", result: 500_000_000_000_000n }],
 			readContract: async () => ADDRESS,
 			request: async () => [

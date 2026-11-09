@@ -349,6 +349,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			auctionId,
 			gasUsed: sim.gasUsed,
 			trampoline: sim.trampoline,
+			simulationParams: sim.simulationParams,
 			simulationBuyAmount: sim.simulationBuyAmount,
 			sellTokenRefPrice: sim.sellTokenRefPrice.toString(),
 			createdAt: new Date(),

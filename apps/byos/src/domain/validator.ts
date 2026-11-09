@@ -4,6 +4,8 @@ import type { Proposal } from "./proposal.js";
 
 /** Results of a successful settlement simulation. */
 export interface SimulationOutcome {
+	/** Replay context retained only if this candidate is sent to the driver. */
+	simulationParams?: SimulationFailureParams;
 	gasUsed: bigint;
 	trampoline: Address;
 	sellToken: Address;
@@ -16,7 +18,7 @@ export interface SimulationOutcome {
 	sellTokenRefPrice: bigint;
 }
 
-/** Parameters captured at simulation revert time — stored for permanent debug access. */
+/** Simulation replay context. The legacy name is kept for wire compatibility. */
 export interface SimulationFailureParams {
 	chainId: number;
 	blockNumber: string;
@@ -24,6 +26,8 @@ export interface SimulationFailureParams {
 	from: string;
 	to: string;
 	calldata: string;
+	/** Overrides used by eth_simulateV1; absent on older diagnostic records. */
+	stateOverrides?: Record<string, { code?: string; stateDiff?: Record<string, string> }>;
 }
 
 /** Outcome of validating a single proposal. */

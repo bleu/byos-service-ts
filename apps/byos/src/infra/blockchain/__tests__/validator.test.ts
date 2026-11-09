@@ -376,7 +376,7 @@ describe("SimulationValidator", () => {
 			params: [Record<string, unknown>, string];
 		};
 		expect(args.method).toBe("eth_simulateV1");
-		expect(args.params[1]).toBe("latest");
+		expect(args.params[1]).toBe("0x3e8");
 
 		const blockStateCall = (
 			args.params[0] as {
@@ -538,6 +538,45 @@ describe("SimulationValidator", () => {
 
 		const verdict = await validatorAt(fakeNode()).validate(submittedProposal());
 		expect(verdict).toEqual({ kind: "reject", reason: "UnsupportedOrder" });
+	});
+
+	it.each([false, true])("retains replay parameters for simulation failure=%s", async (failed) => {
+		const node = fakeNode({
+			chainId: 1,
+			...(failed ? { simulateV1: async () => simulateRevert() } : {}),
+		});
+		setupAuctionState(
+			sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount - 10_000n })),
+		);
+		const verdict = await validatorAt(node).validate(submittedProposal());
+		const params =
+			verdict?.kind === "accept"
+				? verdict.simulation?.simulationParams
+				: verdict?.kind === "simFailed"
+					? verdict.simulationFailureParams
+					: undefined;
+		const request = node.simulateCalls[0] as {
+			params: [
+				{
+					blockStateCalls: [
+						{ calls: [{ from: string; to: string; data: string }]; stateOverrides: unknown },
+					];
+				},
+				string,
+			];
+		};
+		const block = request.params[0].blockStateCalls[0];
+		expect(params).toEqual({
+			chainId: 1,
+			blockNumber: "1000",
+			timestamp: expect.any(Number),
+			from: block.calls[0].from,
+			to: block.calls[0].to,
+			calldata: block.calls[0].data,
+			stateOverrides: block.stateOverrides,
+		});
+		expect(request.params[1]).toBe("0x3e8");
+		expect(Object.keys(params?.stateOverrides ?? {})).toHaveLength(2);
 	});
 
 	it("simulation transport error defers judgment", async () => {

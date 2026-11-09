@@ -170,6 +170,45 @@ curl http://localhost:59585/healthz
 
 A `200 OK` response confirms the service is running and the database connection is healthy.
 
+## Investigating proposal reverts
+
+For proposals selected by BYOS and sent to the driver, simulation replay data
+is available in the existing `simulationFailureParams` field. The legacy name
+also covers successful simulations. A validated candidate that was never sent
+to the driver does not persist successful simulation data. Existing simulation
+failure diagnostics remain available.
+
+Open the proposal detail in the admin dashboard, or use the owner-authenticated
+`GET /proposal/:id`. The proposal ID is also the driver's solution ID. The
+`proposals_log` row links it to the order UID, auction ID, and settlement
+transaction hash, including after a revert removes the live proposal row.
+
+The payload includes calldata, sender, destination, chain ID, simulation time,
+the pinned base block number, and the exact state overrides. For an RPC replay,
+use `eth_simulateV1` with that block number as the base block, the retained call
+in `blockStateCalls[0].calls`, and the retained `stateOverrides` in the same block
+entry. An archive RPC may be required for older blocks. The Tenderly shortcut
+prefills the call; apply the retained overrides separately. This reproduces
+BYOS's validation call, whose encoding can differ from the driver's landed
+transaction.
+
+Replay payloads use the existing Postgres JSONB columns on `proposals` and its
+`proposals_log` mirror, without a separate storage service, payload truncation,
+or an application-level size cap. Successful replay payloads are not copied into
+operational log entries or audit events. Postgres handles compression of large
+values.
+
+`LOG_REDACTION_AFTER_SECS` controls bulk diagnostic retention (default 604800,
+seven days from proposal creation). The BullMQ retention sweep runs every
+`RETENTION_SWEEP_INTERVAL_SECS` (default 300, five minutes), clears expired
+simulation data from both copies, and redacts log interactions. Proposal
+metadata, amounts, statuses, and transaction hashes remain. A later status
+update cannot restore expired simulation data. The worker logs the number of
+proposals redacted or a cleanup error; failed cleanup retries on the next tick.
+Export the payload before this window expires if an investigation needs it
+longer. Rows created before this feature have no successful simulation payload,
+and clients without chain metadata emit a warning when capture is unavailable.
+
 ## Redis memory and job history
 
 The prod-local Redis container has a 1 GiB memory limit and a 512 MiB Redis

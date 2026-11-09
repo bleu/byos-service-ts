@@ -18,6 +18,7 @@ import {
 	createTestApp,
 	DOMAIN,
 	OTHER_SIGN_FN,
+	readAuthHeader,
 	signAndSubmitProposal,
 	type TestApp,
 } from "./helpers.js";
@@ -259,10 +260,19 @@ describe("SolverOutbid", () => {
 
 	it("simFailed + other revert reason → 400 SimFailed (not SolverOutbid)", async () => {
 		const orderUid = `0x${"f2".repeat(56)}` as const;
+		const params = {
+			chainId: 1,
+			blockNumber: "1000",
+			timestamp: 1700000000,
+			from: "0x0000000000000000000000000000000000000001",
+			to: "0x0000000000000000000000000000000000000002",
+			calldata: "0xdeadbeef",
+		};
 		const simFailApp = await createTestApp({
 			validator: {
 				validate: async () => ({
 					kind: "simFailed" as const,
+					simulationFailureParams: params,
 					revertReason: "ERC20: insufficient allowance",
 				}),
 			},
@@ -275,6 +285,21 @@ describe("SolverOutbid", () => {
 			expect(response.status).toBe(400);
 			const body = await response.json();
 			expect(body.description).toBe("SimFailed");
+			const headers = { "X-Signature": await readAuthHeader() };
+			const list = await simFailApp.publicApp.request(
+				`/proposals/${orderUid}?includeArchived=true`,
+				{ headers },
+			);
+			const { proposals } = await list.json();
+			expect(proposals).toHaveLength(1);
+			const detail = await simFailApp.publicApp.request(`/proposal/${proposals[0].id}`, {
+				headers,
+			});
+			expect(detail.status).toBe(200);
+			expect(await detail.json()).toMatchObject({
+				status: "simFailed",
+				simulationFailureParams: params,
+			});
 		} finally {
 			await simFailApp.ctx.cleanup();
 		}

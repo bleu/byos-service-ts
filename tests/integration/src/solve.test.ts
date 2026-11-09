@@ -1,8 +1,15 @@
+import { acceptAll } from "@byos/byos/src/domain/validator.js";
 import type { Auction, SolveResponse } from "@byos/byos/src/infra/api/types.js";
 import * as store from "@byos/byos/src/infra/storage.js";
 import type { Address } from "viem";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestApp, seedCandidate, type TestApp } from "./helpers.js";
+import {
+	createTestApp,
+	readAuthHeader,
+	seedCandidate,
+	signAndSubmitProposal,
+	type TestApp,
+} from "./helpers.js";
 
 let app: TestApp;
 
@@ -25,8 +32,11 @@ function emptyAuction(overrides?: Partial<Auction>): Auction {
 	};
 }
 
-async function postSolve(auction: Auction): Promise<{ status: number; body: SolveResponse }> {
-	const resp = await app.internalApp.request("/solve", {
+async function postSolve(
+	auction: Auction,
+	testApp = app,
+): Promise<{ status: number; body: SolveResponse }> {
+	const resp = await testApp.internalApp.request("/solve", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(auction),
@@ -99,6 +109,84 @@ async function seedSimulatedProposal(
 }
 
 describe("/solve", () => {
+	it("retains successful diagnostics only for driver submissions and preserves them after a revert", async () => {
+		const params = {
+			chainId: 1,
+			blockNumber: "1000",
+			timestamp: 1700000000,
+			from: "0x0000000000000000000000000000000000000001",
+			to: "0x0000000000000000000000000000000000000002",
+			calldata: `0x${"ab".repeat(100_000)}`,
+			stateOverrides: {},
+		};
+		const isolated = await createTestApp({
+			validator: {
+				async validate(proposal) {
+					const verdict = await acceptAll.validate(proposal);
+					if (verdict?.kind !== "accept" || !verdict.simulation)
+						throw new Error("expected simulation");
+					return {
+						kind: "accept",
+						simulation: { ...verdict.simulation, simulationParams: params },
+					};
+				},
+			},
+		});
+		try {
+			const uid = `0x${"81".repeat(56)}` as const;
+			const submit = async (quote: bigint) => {
+				const { response } = await signAndSubmitProposal(isolated.publicApp, {
+					orderUid: uid,
+					sellToken: SELL_TOKEN as Address,
+					buyToken: BUY_TOKEN as Address,
+					sellAmount: 10n ** 18n,
+					minBuyAmount: quote,
+					quoteBuyAmount: quote,
+				});
+				expect(response.status).toBe(200);
+				return (await response.json()).id as number;
+			};
+			const winner = await submit(3n * 10n ** 18n);
+			const loser = await submit(2n * 10n ** 18n);
+			expect(await store.getIncludingLog(isolated.ctx.db, winner)).toBeNull();
+			expect(isolated.candidateStore.get(winner)?.simulationParams).toEqual(params);
+			const { body } = await postSolve(solvableAuction(uid), isolated);
+			expect(body.solutions.map((s) => s.id)).toEqual([winner]);
+			expect(
+				(await store.getIncludingLog(isolated.ctx.db, winner))?.simulationFailureParams,
+			).toEqual(params);
+			expect(
+				(await store.getIncludingLog(isolated.ctx.db, loser))?.simulationFailureParams,
+			).toBeNull();
+
+			const txHash = `0x${"cc".repeat(32)}`;
+			const notify = await isolated.internalApp.request("/notify", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					auctionId: "1",
+					solutionId: winner,
+					kind: "revert",
+					transaction: txHash,
+				}),
+			});
+			expect(notify.status).toBe(200);
+			const response = await isolated.publicApp.request(`/proposal/${winner}`, {
+				headers: { "X-Signature": await readAuthHeader() },
+			});
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				id: winner,
+				orderUid: uid,
+				status: "settleFailed",
+				settlementTxHash: txHash,
+				simulationFailureParams: params,
+			});
+		} finally {
+			await isolated.ctx.cleanup();
+		}
+	});
+
 	it("waits for competition until 200 ms before the deadline despite full coverage", async () => {
 		const uid = `0x${"71".repeat(56)}` as const;
 		await seedSimulatedProposal(710n, uid);

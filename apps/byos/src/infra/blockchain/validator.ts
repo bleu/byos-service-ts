@@ -1,7 +1,7 @@
 import { OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
-import { decodeEventLog } from "viem";
+import { decodeEventLog, toHex } from "viem";
 import { availableCollateral, penaltyCap, perProposalCL } from "../../domain/collateral.js";
 import { checkEnvelope, checkProposalSlippage } from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
@@ -349,8 +349,12 @@ export class SimulationValidator implements ValidateProposal {
 
 		// Step 7: Dispatch eth_simulateV1
 		let result: unknown;
+		let blockNumber: bigint;
+		const stateOverrides = toSimulateV1StateOverrides(sim.stateOverride);
 		const simulationStarted = performance.now();
 		try {
+			// Pin the base block so retained diagnostics replay the same state.
+			blockNumber = await this.publicClient.getBlockNumber({ cacheTime: 0 });
 			result = await this.publicClient.request({
 				method: "eth_simulateV1" as never,
 				params: [
@@ -364,13 +368,11 @@ export class SimulationValidator implements ValidateProposal {
 										data: sim.calldata,
 									},
 								],
-								...(sim.stateOverride.length > 0
-									? { stateOverrides: toSimulateV1StateOverrides(sim.stateOverride) }
-									: {}),
+								...(sim.stateOverride.length > 0 ? { stateOverrides } : {}),
 							},
 						],
 					},
-					"latest",
+					toHex(blockNumber),
 				] as never,
 			});
 		} catch {
@@ -390,42 +392,46 @@ export class SimulationValidator implements ValidateProposal {
 		}
 		const call = firstBlock.calls[0];
 
+		const chainId = this.publicClient.chain?.id;
+		const simulationFailureParams: SimulationFailureParams | undefined = chainId
+			? {
+					chainId,
+					blockNumber: blockNumber.toString(),
+					timestamp: Math.floor(Date.now() / 1000),
+					from: sim.submitter,
+					to: this.settlementAddress,
+					calldata: sim.calldata,
+					stateOverrides,
+				}
+			: undefined;
+		if (!simulationFailureParams) {
+			this.logger?.warn(
+				{ proposalId: proposal.id, orderUid: proposal.orderUid },
+				"simulation diagnostics unavailable: RPC client has no chain ID",
+			);
+		}
+
 		// Step 8: Handle revert
 		if (call.status === "0x0") {
 			const revertData = revertDataFrom(call);
 			const revertReason =
 				extractRevertReasonFromHex(revertData) ?? call.error?.message ?? "execution reverted";
 
-			const chainId = this.publicClient.chain?.id;
-			let blockNumber: bigint | undefined;
-			try {
-				blockNumber = await this.publicClient.getBlockNumber();
-			} catch {
-				// best-effort
-			}
-			const simulationFailureParams: SimulationFailureParams | undefined =
-				chainId && blockNumber !== undefined
-					? {
-							chainId,
-							blockNumber: blockNumber.toString(),
-							timestamp: Math.floor(Date.now() / 1000),
-							from: sim.submitter,
-							to: this.settlementAddress,
-							calldata: sim.calldata,
-						}
-					: undefined;
-
 			if (this.logger) {
 				const tenderlyUrl = simulationFailureParams
 					? buildTenderlyUrl({
 							chainId: simulationFailureParams.chainId,
-							blockNumber: blockNumber as bigint,
+							blockNumber,
 							from: sim.submitter,
 							to: this.settlementAddress,
 							calldata: sim.calldata,
 						})
 					: "";
-				const { calldata: _calldata, ...logParams } = simulationFailureParams ?? {};
+				const {
+					calldata: _calldata,
+					stateOverrides: _overrides,
+					...logParams
+				} = simulationFailureParams ?? {};
 				this.logger.warn(
 					{
 						proposalId: proposal.id,
@@ -502,6 +508,7 @@ export class SimulationValidator implements ValidateProposal {
 		return {
 			kind: "accept",
 			simulation: {
+				simulationParams: simulationFailureParams,
 				gasUsed: gas,
 				trampoline,
 				sellToken: record.order.sellToken,

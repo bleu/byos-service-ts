@@ -30,7 +30,7 @@ export default async function ProposalsPage({
     orderUidUrl: cowExplorerOrderUrl(p.orderUid),
     tenderlyUrl: p.settlementTxHash
       ? tenderlyTxUrl(p.settlementTxHash)
-      : p.status === "simFailed" && p.simulationFailureParams
+      : p.simulationFailureParams
         ? tenderlySimulationUrl(p.simulationFailureParams as SimulationFailureParams)
         : null,
   }));

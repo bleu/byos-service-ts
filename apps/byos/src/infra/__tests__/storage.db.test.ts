@@ -481,6 +481,46 @@ describe("log redaction", () => {
 		return row;
 	}
 
+	it.each([true, false])(
+		"clears both diagnostic copies without restoration (hasInteractions=%s)",
+		async (hasInteractions) => {
+			const candidate = sampleCandidate({
+				...(hasInteractions ? {} : { interactions: [] }),
+				createdAt: new Date(Date.now() - WINDOW_SECS * 2000),
+				simulationParams: {
+					chainId: 1,
+					blockNumber: "1000",
+					timestamp: 1700000000,
+					from: SUB_SOLVER,
+					to: TRAMPOLINE,
+					calldata: "0xdeadbeef",
+				},
+			});
+			await store.insertAsSubmitted(
+				redactCtx.db,
+				candidate,
+				"1000000000000000000",
+				SOLUTION_PRICES,
+			);
+			expect((await store.get(redactCtx.db, candidate.id))?.simulationFailureParams).toEqual(
+				candidate.simulationParams,
+			);
+			expect((await logRow(candidate.id))?.simulationFailureParams).toEqual(
+				candidate.simulationParams,
+			);
+			expect(await store.redactOldLogEntries(redactCtx.db, WINDOW_SECS)).toBe(1);
+			const live = await store.get(redactCtx.db, candidate.id);
+			expect(live?.simulationFailureParams).toBeNull();
+			expect(live?.interactions).toHaveLength(hasInteractions ? 1 : 0);
+			if (!live) throw new Error("expected submitted proposal");
+			await store.applySettlementOutcome(redactCtx.db, live, {
+				kind: "reverted",
+				txHash: `0x${"aa".repeat(32)}`,
+			});
+			expect((await logRow(candidate.id))?.simulationFailureParams).toBeNull();
+		},
+	);
+
 	it("clears interactions and simulationFailureParams on aged rows", async () => {
 		const id = await insertAgedLog(1);
 		await redactCtx.db.execute(
