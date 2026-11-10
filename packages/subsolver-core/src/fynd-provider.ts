@@ -10,6 +10,10 @@ import type { CandidateOrder, ProviderRoute, RouteProvider } from "./provider.js
 
 type Address = `0x${string}`;
 
+export interface FyndProviderLogger {
+	debug?: (obj: Record<string, unknown>, msg: string) => void;
+}
+
 export interface FyndProviderConfig {
 	client: Pick<FyndClient, "quote" | "health" | "info">;
 	chainId: number;
@@ -19,6 +23,7 @@ export interface FyndProviderConfig {
 	slippageBps?: number;
 	maxQuoteAgeSeconds?: number;
 	now?: () => number;
+	logger?: FyndProviderLogger;
 }
 
 /** A permanent startup mismatch; retrying the sidecar cannot repair it. */
@@ -115,17 +120,70 @@ export class FyndProvider implements RouteProvider {
 		quote: Quote,
 		expectedTokenOut: Address,
 	): ProviderRoute | null {
-		if (quote.status !== "success" || quote.amountIn !== order.remainingSell) return null;
-		if (!quote.route || !quote.transaction || !quote.feeBreakdown) return null;
-		if (
-			quote.transaction.to.toLowerCase() !== router.toLowerCase() ||
-			quote.transaction.value !== 0n
-		)
+		const log = this.config.logger;
+		const uid = order.uid;
+		if (quote.status !== "success") {
+			log?.debug?.({ uid, quoteStatus: quote.status }, "fynd quote rejected: non-success status");
 			return null;
-		if (quote.feeBreakdown.minAmountReceived < order.scaledLimitBuy) return null;
-		if (quote.receiver.toLowerCase() !== this.config.settlement.toLowerCase()) return null;
-		if (quote.tokenOut.toLowerCase() !== expectedTokenOut.toLowerCase()) return null;
-		if (this.now() - quote.block.timestamp > this.maxQuoteAgeSeconds) return null;
+		}
+		if (quote.amountIn !== order.remainingSell) {
+			log?.debug?.(
+				{ uid, expected: order.remainingSell.toString(), got: quote.amountIn.toString() },
+				"fynd quote rejected: amountIn mismatch",
+			);
+			return null;
+		}
+		if (!quote.route || !quote.transaction || !quote.feeBreakdown) {
+			log?.debug?.({ uid }, "fynd quote rejected: missing route/transaction/feeBreakdown");
+			return null;
+		}
+		if (quote.transaction.to.toLowerCase() !== router.toLowerCase()) {
+			log?.debug?.(
+				{ uid, expected: router, got: quote.transaction.to },
+				"fynd quote rejected: transaction target mismatch",
+			);
+			return null;
+		}
+		if (quote.transaction.value !== 0n) {
+			log?.debug?.(
+				{ uid, value: quote.transaction.value.toString() },
+				"fynd quote rejected: non-zero tx value",
+			);
+			return null;
+		}
+		if (quote.feeBreakdown.minAmountReceived < order.scaledLimitBuy) {
+			log?.debug?.(
+				{
+					uid,
+					minReceived: quote.feeBreakdown.minAmountReceived.toString(),
+					limitBuy: order.scaledLimitBuy.toString(),
+				},
+				"fynd quote rejected: below limit price",
+			);
+			return null;
+		}
+		if (quote.receiver.toLowerCase() !== this.config.settlement.toLowerCase()) {
+			log?.debug?.(
+				{ uid, expected: this.config.settlement, got: quote.receiver },
+				"fynd quote rejected: receiver mismatch",
+			);
+			return null;
+		}
+		if (quote.tokenOut.toLowerCase() !== expectedTokenOut.toLowerCase()) {
+			log?.debug?.(
+				{ uid, expected: expectedTokenOut, got: quote.tokenOut },
+				"fynd quote rejected: tokenOut mismatch",
+			);
+			return null;
+		}
+		const age = this.now() - quote.block.timestamp;
+		if (age > this.maxQuoteAgeSeconds) {
+			log?.debug?.(
+				{ uid, age, maxAge: this.maxQuoteAgeSeconds },
+				"fynd quote rejected: stale quote",
+			);
+			return null;
+		}
 		return {
 			// Commit to the guaranteed output, matching the Binance provider.
 			quoteBuyAmount: quote.feeBreakdown.minAmountReceived,
