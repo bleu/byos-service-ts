@@ -15,6 +15,7 @@ export interface FyndProviderConfig {
 	chainId: number;
 	trampoline: Address;
 	settlement: Address;
+	wrappedNative: Address;
 	slippageBps?: number;
 	maxQuoteAgeSeconds?: number;
 	now?: () => number;
@@ -62,10 +63,16 @@ export class FyndProvider implements RouteProvider {
 			order.chainId !== 56 ||
 			order.remainingSell <= 0n ||
 			order.sellToken.toLowerCase() === order.buyToken.toLowerCase() ||
-			order.sellToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase() ||
-			order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()
+			order.sellToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()
 		)
 			return null;
+		// Fynd routes through DEX pools that use the wrapped native token (WBNB),
+		// but the CoW orderbook represents native buy orders with the 0xEeee…
+		// sentinel. Substitute for the fynd request; the proposal keeps the
+		// original buyToken so BYOS envelope checks pass.
+		const isNativeBuy =
+			order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase();
+		const tokenOut = isNativeBuy ? this.config.wrappedNative : order.buyToken;
 		let info = this.info;
 		if (!info) {
 			info = this.checkedInfo(await this.config.client.info());
@@ -74,7 +81,7 @@ export class FyndProvider implements RouteProvider {
 		const quote = await this.config.client.quote({
 			order: {
 				tokenIn: order.sellToken,
-				tokenOut: order.buyToken,
+				tokenOut,
 				amount: order.remainingSell,
 				side: "sell",
 				sender: this.config.trampoline,
@@ -82,7 +89,7 @@ export class FyndProvider implements RouteProvider {
 			},
 			options: { timeoutMs: 5000, encodingOptions: encodingOptions(this.slippageBps / 10_000) },
 		});
-		return this.toRoute(order, info.routerAddress, quote);
+		return this.toRoute(order, info.routerAddress, quote, tokenOut);
 	}
 
 	private assertBscRouter(
@@ -103,7 +110,12 @@ export class FyndProvider implements RouteProvider {
 		return info;
 	}
 
-	private toRoute(order: CandidateOrder, router: Address, quote: Quote): ProviderRoute | null {
+	private toRoute(
+		order: CandidateOrder,
+		router: Address,
+		quote: Quote,
+		expectedTokenOut: Address,
+	): ProviderRoute | null {
 		if (quote.status !== "success" || quote.amountIn !== order.remainingSell) return null;
 		if (!quote.route || !quote.transaction || !quote.feeBreakdown) return null;
 		if (
@@ -113,7 +125,7 @@ export class FyndProvider implements RouteProvider {
 			return null;
 		if (quote.feeBreakdown.minAmountReceived < order.scaledLimitBuy) return null;
 		if (quote.receiver.toLowerCase() !== this.config.settlement.toLowerCase()) return null;
-		if (quote.tokenOut.toLowerCase() !== order.buyToken.toLowerCase()) return null;
+		if (quote.tokenOut.toLowerCase() !== expectedTokenOut.toLowerCase()) return null;
 		if (this.now() - quote.block.timestamp > this.maxQuoteAgeSeconds) return null;
 		return {
 			// Commit to the guaranteed output, matching the Binance provider.

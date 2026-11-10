@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FyndConfigurationError, FyndProvider } from "../fynd-provider.js";
 
 const router = "0x0000000000000000000000000000000000000003" as const;
+const wrappedNative = "0x0000000000000000000000000000000000000009" as const;
 const client = {
 	info: async () => ({ chainId: 56, routerAddress: router, permit2Address: router }),
 	health: async () => ({ healthy: true, lastUpdateMs: 1, numSolverPools: 1 }),
@@ -33,6 +34,7 @@ describe("FyndProvider", () => {
 				chainId: 56,
 				trampoline: "0x0000000000000000000000000000000000000005",
 				settlement: "0x0000000000000000000000000000000000000004",
+				wrappedNative,
 				now: () => 105,
 			});
 			const route = await provider.quote({
@@ -73,6 +75,7 @@ describe("FyndProvider", () => {
 			chainId: 56,
 			trampoline: "0x0000000000000000000000000000000000000005",
 			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
 		});
 		await provider.ready();
 		await provider.ready();
@@ -87,7 +90,7 @@ describe("FyndProvider", () => {
 		expect(infoCalls).toBe(1);
 	});
 
-	it("skips native-token, same-token, and zero-size orders without calling Fynd", async () => {
+	it("skips native-sell, same-token, and zero-size orders without calling Fynd", async () => {
 		let calls = 0;
 		const provider = new FyndProvider({
 			client: {
@@ -100,10 +103,10 @@ describe("FyndProvider", () => {
 			chainId: 56,
 			trampoline: "0x0000000000000000000000000000000000000005",
 			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
 		});
 		for (const [sellToken, buyToken, remainingSell] of [
 			[BUY_ETH_ADDRESS, "0x0000000000000000000000000000000000000002", 100n],
-			["0x0000000000000000000000000000000000000001", BUY_ETH_ADDRESS, 100n],
 			[
 				"0x0000000000000000000000000000000000000001",
 				"0x0000000000000000000000000000000000000001",
@@ -129,6 +132,35 @@ describe("FyndProvider", () => {
 		expect(calls).toBe(0);
 	});
 
+	it("substitutes wrapped native for native buy orders and quotes successfully", async () => {
+		const quote = vi.fn(async () => ({
+			...(await client.quote()),
+			tokenOut: wrappedNative,
+		}));
+		const provider = new FyndProvider({
+			client: { ...client, quote },
+			chainId: 56,
+			trampoline: "0x0000000000000000000000000000000000000005",
+			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
+			now: () => 105,
+		});
+		const route = await provider.quote({
+			uid: "0x01",
+			chainId: 56,
+			sellToken: "0x0000000000000000000000000000000000000001",
+			buyToken: BUY_ETH_ADDRESS,
+			remainingSell: 100n,
+			scaledLimitBuy: 100n,
+		});
+		expect(quote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				order: expect.objectContaining({ tokenOut: wrappedNative }),
+			}),
+		);
+		expect(route).toMatchObject({ quoteBuyAmount: 110n, minBuyAmount: 110n });
+	});
+
 	it("rejects stale, unsafe, and under-limit successful responses", async () => {
 		const badQuote = {
 			...client.quote,
@@ -146,6 +178,7 @@ describe("FyndProvider", () => {
 				chainId: 56,
 				trampoline: "0x0000000000000000000000000000000000000005",
 				settlement: "0x0000000000000000000000000000000000000004",
+				wrappedNative,
 				now: () => 105,
 			});
 			await expect(
@@ -171,6 +204,7 @@ describe("FyndProvider", () => {
 			chainId: 56,
 			trampoline: "0x0000000000000000000000000000000000000005",
 			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
 		});
 		await expect(provider.initialize()).rejects.toBeInstanceOf(FyndConfigurationError);
 	});
