@@ -70,8 +70,7 @@ export class FyndProvider implements RouteProvider {
 		// but the CoW orderbook represents native buy orders with the 0xEeee…
 		// sentinel. Substitute for the fynd request; the proposal keeps the
 		// original buyToken so BYOS envelope checks pass.
-		const isNativeBuy =
-			order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase();
+		const isNativeBuy = order.buyToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase();
 		const tokenOut = isNativeBuy ? this.config.wrappedNative : order.buyToken;
 		let info = this.info;
 		if (!info) {
