@@ -29,5 +29,6 @@ export {
 	type RouteProvider,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
+export { DEFAULT_CORRELATED_SLIPPAGE_BPS, selectSlippageBps } from "./slippage.js";
 export { createSolveApp } from "./solve-app.js";
 export { SolveOrderbookClient } from "./solve-orderbook-client.js";

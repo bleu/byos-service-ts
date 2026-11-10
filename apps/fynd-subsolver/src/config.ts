@@ -1,3 +1,4 @@
+import { DEFAULT_CORRELATED_SLIPPAGE_BPS } from "@byos/subsolver-core";
 import { type Address, isAddress } from "viem";
 import { z } from "zod";
 
@@ -13,6 +14,12 @@ const envSchema = z.object({
 	TRAMPOLINE_FACTORY: addressSchema,
 	FYND_URL: z.string().url().default("http://fynd:3000"),
 	FYND_SLIPPAGE_BPS: z.coerce.number().int().min(0).max(10_000).default(50),
+	CORRELATED_SLIPPAGE_BPS: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.max(10_000)
+		.default(DEFAULT_CORRELATED_SLIPPAGE_BPS),
 	FYND_QUOTE_CONCURRENCY: z.coerce.number().int().positive().default(32),
 	FYND_MAX_QUOTE_AGE_SECONDS: z.coerce.number().int().nonnegative().default(10),
 	GPV2_SETTLEMENT: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
@@ -42,6 +49,7 @@ interface BaseConfig {
 	trampolineFactory: Address;
 	fyndUrl: string;
 	fyndSlippageBps: number;
+	correlatedSlippageBps: number;
 	fyndQuoteConcurrency: number;
 	fyndMaxQuoteAgeSeconds: number;
 	gpv2Settlement: Address;
@@ -86,6 +94,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		trampolineFactory: result.data.TRAMPOLINE_FACTORY as Address,
 		fyndUrl: result.data.FYND_URL,
 		fyndSlippageBps: result.data.FYND_SLIPPAGE_BPS,
+		correlatedSlippageBps: result.data.CORRELATED_SLIPPAGE_BPS,
 		fyndQuoteConcurrency: result.data.FYND_QUOTE_CONCURRENCY,
 		fyndMaxQuoteAgeSeconds: result.data.FYND_MAX_QUOTE_AGE_SECONDS,
 		gpv2Settlement: result.data.GPV2_SETTLEMENT as Address,

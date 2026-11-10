@@ -21,6 +21,7 @@ const config: Config = {
 	trampolineFactory: factory,
 	fyndUrl: "http://fynd",
 	fyndSlippageBps: 50,
+	correlatedSlippageBps: 5,
 	fyndQuoteConcurrency: 1,
 	fyndMaxQuoteAgeSeconds: 10,
 	gpv2Settlement: "0x0000000000000000000000000000000000000002",

@@ -12,6 +12,7 @@ import {
 	type RequestBudget,
 	type RouteProvider,
 	randomNonce,
+	selectSlippageBps,
 } from "@byos/subsolver-core";
 import type pino from "pino";
 import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
@@ -33,16 +34,26 @@ class BinanceProvider implements RouteProvider {
 		private readonly client: BinanceClient,
 		private readonly trampoline: Address,
 		private readonly settlement: Address,
-		private readonly slippageBps: number,
+		private readonly config: Pick<
+			Config,
+			"chainId" | "binanceSlippageBps" | "correlatedSlippageBps"
+		>,
 	) {}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
+		const slippageBps = selectSlippageBps({
+			chainId: this.config.chainId,
+			sellToken: order.sellToken,
+			buyToken: order.buyToken,
+			defaultSlippageBps: this.config.binanceSlippageBps,
+			correlatedSlippageBps: this.config.correlatedSlippageBps,
+		});
 		const quotes = await this.client.getQuotes(
 			order.sellToken,
 			order.buyToken,
 			order.remainingSell,
 			this.trampoline,
-			this.slippageBps,
+			slippageBps,
 		);
 		if (quotes.length === 0) return null;
 
@@ -56,7 +67,7 @@ class BinanceProvider implements RouteProvider {
 					order.buyToken,
 					order.remainingSell,
 					this.trampoline,
-					this.slippageBps,
+					slippageBps,
 				),
 			),
 		);
@@ -135,12 +146,7 @@ export class BinanceSubsolver {
 		private readonly budget: RequestBudget,
 		private readonly orderFilter: OrderFilter,
 	) {
-		this.provider = new BinanceProvider(
-			binanceClient,
-			trampoline,
-			config.gpv2Settlement,
-			config.binanceSlippageBps,
-		);
+		this.provider = new BinanceProvider(binanceClient, trampoline, config.gpv2Settlement, config);
 	}
 
 	async synchronize(now: bigint): Promise<boolean> {

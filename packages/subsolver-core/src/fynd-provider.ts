@@ -7,6 +7,7 @@ import {
 } from "@kayibal/fynd-client";
 import { encodeFunctionData } from "viem";
 import type { CandidateOrder, ProviderRoute, RouteProvider } from "./provider.js";
+import { DEFAULT_CORRELATED_SLIPPAGE_BPS, selectSlippageBps } from "./slippage.js";
 
 type Address = `0x${string}`;
 
@@ -21,6 +22,7 @@ export interface FyndProviderConfig {
 	settlement: Address;
 	wrappedNative: Address;
 	slippageBps?: number;
+	correlatedSlippageBps?: number;
 	maxQuoteAgeSeconds?: number;
 	now?: () => number;
 	logger?: FyndProviderLogger;
@@ -71,6 +73,13 @@ export class FyndProvider implements RouteProvider {
 			order.sellToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()
 		)
 			return null;
+		const slippageBps = selectSlippageBps({
+			chainId: this.config.chainId,
+			sellToken: order.sellToken,
+			buyToken: order.buyToken,
+			defaultSlippageBps: this.slippageBps,
+			correlatedSlippageBps: this.config.correlatedSlippageBps ?? DEFAULT_CORRELATED_SLIPPAGE_BPS,
+		});
 		// Fynd routes through DEX pools that use the wrapped native token (WBNB),
 		// but the CoW orderbook represents native buy orders with the 0xEeee…
 		// sentinel. Substitute for the fynd request; the proposal keeps the
@@ -91,7 +100,7 @@ export class FyndProvider implements RouteProvider {
 				sender: this.config.trampoline,
 				receiver: this.config.settlement,
 			},
-			options: { timeoutMs: 5000, encodingOptions: encodingOptions(this.slippageBps / 10_000) },
+			options: { timeoutMs: 5000, encodingOptions: encodingOptions(slippageBps / 10_000) },
 		});
 		return this.toRoute(order, info.routerAddress, quote, tokenOut);
 	}
