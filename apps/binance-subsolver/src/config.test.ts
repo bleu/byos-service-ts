@@ -62,3 +62,22 @@ describe("solve discovery config", () => {
 		).toBe("orderbook");
 	});
 });
+
+describe("correlated slippage config", () => {
+	it("defaults to 5 bps without requiring the environment variable", () => {
+		expect(parseConfig({ ...base, SUBSOLVER_BEARER: "secret" }).correlatedSlippageBps).toBe(5);
+	});
+
+	it.each([0, 7, 10_000])("accepts %i bps", (bps) => {
+		expect(
+			parseConfig({ ...base, SUBSOLVER_BEARER: "secret", CORRELATED_SLIPPAGE_BPS: String(bps) })
+				.correlatedSlippageBps,
+		).toBe(bps);
+	});
+
+	it.each(["-1", "10001", "1.5", "invalid", "Infinity"])("rejects invalid slippage %s", (bps) => {
+		expect(() =>
+			parseConfig({ ...base, SUBSOLVER_BEARER: "secret", CORRELATED_SLIPPAGE_BPS: bps }),
+		).toThrow(/CORRELATED_SLIPPAGE_BPS/);
+	});
+});

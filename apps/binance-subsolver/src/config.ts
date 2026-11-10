@@ -1,3 +1,4 @@
+import { DEFAULT_CORRELATED_SLIPPAGE_BPS } from "@byos/subsolver-core";
 import { type Address, isAddress } from "viem";
 import { z } from "zod";
 
@@ -15,6 +16,12 @@ const envSchema = z.object({
 	BINANCE_SECRET_KEY: z.string(),
 	GPV2_SETTLEMENT: addressSchema,
 	BINANCE_SLIPPAGE_BPS: z.coerce.number().int().min(0).max(10_000).default(50),
+	CORRELATED_SLIPPAGE_BPS: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.max(10_000)
+		.default(DEFAULT_CORRELATED_SLIPPAGE_BPS),
 	BINANCE_QUOTE_CONCURRENCY: z.coerce.number().int().positive().default(32),
 	BYOS_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(100),
 	BYOS_READ_RESERVE: z.coerce.number().int().nonnegative().default(10),
@@ -44,6 +51,7 @@ interface BaseConfig {
 	binanceSecretKey: string;
 	gpv2Settlement: Address;
 	binanceSlippageBps: number;
+	correlatedSlippageBps: number;
 	binanceQuoteConcurrency: number;
 	byosRequestsPerMinute: number;
 	byosReadReserve: number;
@@ -87,6 +95,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		binanceSecretKey: result.data.BINANCE_SECRET_KEY,
 		gpv2Settlement: result.data.GPV2_SETTLEMENT as Address,
 		binanceSlippageBps: result.data.BINANCE_SLIPPAGE_BPS,
+		correlatedSlippageBps: result.data.CORRELATED_SLIPPAGE_BPS,
 		binanceQuoteConcurrency: result.data.BINANCE_QUOTE_CONCURRENCY,
 		byosRequestsPerMinute: result.data.BYOS_REQUESTS_PER_MINUTE,
 		byosReadReserve: result.data.BYOS_READ_RESERVE,

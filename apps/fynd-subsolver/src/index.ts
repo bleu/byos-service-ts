@@ -62,6 +62,7 @@ async function main() {
 		settlement: config.gpv2Settlement,
 		wrappedNative: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
 		slippageBps: config.fyndSlippageBps,
+		correlatedSlippageBps: config.correlatedSlippageBps,
 		maxQuoteAgeSeconds: config.fyndMaxQuoteAgeSeconds,
 		logger,
 	});

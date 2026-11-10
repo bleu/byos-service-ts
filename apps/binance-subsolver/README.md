@@ -29,3 +29,21 @@ same host, assign different `SOLVE_PORT` values.
 
 Both apps share the solve listener and selection components in
 `packages/subsolver-core`.
+
+## Correlated-asset slippage
+
+`CORRELATED_SLIPPAGE_BPS` defaults to `5` (0.05%). It replaces
+`BINANCE_SLIPPAGE_BPS` when both trade tokens belong to the same hardcoded
+basket on the configured chain. Other pairs and chains without defined baskets
+keep the ordinary slippage (default `50` bps). An explicit `0` is supported;
+the correlated value is used directly, without clamping to ordinary slippage.
+
+Both sub-solvers share the registry in
+[`correlated-assets.ts`](../../packages/subsolver-core/src/correlated-assets.ts).
+It initially defines ETH, USD, EUR, BTC, and BNB baskets for chain `56`.
+Add another chain ID there to extend the policy for supported providers.
+Address matching is case-insensitive and uses the original order tokens,
+including the native BNB sentinel. Provider chain and order restrictions still apply.
+
+Staking tokens may have accruing exchange rates. Basket membership does not
+guarantee parity or available liquidity; tighter slippage can reduce successful fills.

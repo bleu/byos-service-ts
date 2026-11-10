@@ -1,6 +1,8 @@
 import { BUY_ETH_ADDRESS } from "@byos/common";
+import type { FyndClient } from "@kayibal/fynd-client";
 import { describe, expect, it, vi } from "vitest";
 import { FyndConfigurationError, FyndProvider } from "../fynd-provider.js";
+import type { CandidateOrder } from "../provider.js";
 
 const router = "0x0000000000000000000000000000000000000003" as const;
 const wrappedNative = "0x0000000000000000000000000000000000000009" as const;
@@ -207,5 +209,77 @@ describe("FyndProvider", () => {
 			wrappedNative,
 		});
 		await expect(provider.initialize()).rejects.toBeInstanceOf(FyndConfigurationError);
+	});
+});
+
+describe("Fynd correlated slippage", () => {
+	const usdt = "0x55d398326f99059ff775485246999027b3197955" as const;
+	const usdc = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d" as const;
+	const wbnb = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" as const;
+	const candidate: CandidateOrder = {
+		uid: "0x01",
+		chainId: 56,
+		sellToken: usdt,
+		buyToken: usdc,
+		remainingSell: 100n,
+		scaledLimitBuy: 100n,
+	};
+
+	it.each([undefined, 0, 7])(
+		"encodes %s correlated bps independently of ordinary quotes",
+		async (correlatedSlippageBps) => {
+			// Return each request's output asset so both routes pass token validation.
+			const fyndQuote = vi.fn(async (request: Parameters<FyndClient["quote"]>[0]) => ({
+				...(await client.quote()),
+				tokenOut: request.order.tokenOut,
+			}));
+			const provider = new FyndProvider({
+				client: { ...client, quote: fyndQuote },
+				chainId: 56,
+				trampoline: "0x0000000000000000000000000000000000000005",
+				settlement: "0x0000000000000000000000000000000000000004",
+				wrappedNative: wbnb,
+				slippageBps: 80,
+				correlatedSlippageBps,
+				now: () => 105,
+			});
+			const routes = await Promise.all([
+				provider.quote(candidate),
+				provider.quote({ ...candidate, uid: "0x02", buyToken: wbnb }),
+			]);
+			expect(
+				fyndQuote.mock.calls.map(([request]) => request.options?.encodingOptions?.slippage),
+			).toEqual([(correlatedSlippageBps ?? 5) / 10_000, 0.008]);
+			for (const route of routes)
+				expect(route).toMatchObject({ quoteBuyAmount: 110n, minBuyAmount: 110n });
+		},
+	);
+
+	it("selects correlated slippage on original native-buy addresses before wrapping", async () => {
+		const quote = vi.fn(async () => ({ ...(await client.quote()), tokenOut: wrappedNative }));
+		const provider = new FyndProvider({
+			client: { ...client, quote },
+			chainId: 56,
+			trampoline: "0x0000000000000000000000000000000000000005",
+			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
+			now: () => 105,
+		});
+		expect(
+			await provider.quote({
+				...candidate,
+				sellToken: "0xb0b84d294e0c75a6abe60171b70edeb2efd14a1b",
+				buyToken: BUY_ETH_ADDRESS,
+			}),
+		).toMatchObject({ minBuyAmount: 110n, quoteBuyAmount: 110n });
+		expect(quote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				order: expect.objectContaining({ tokenOut: wrappedNative }),
+				options: {
+					timeoutMs: 5000,
+					encodingOptions: { slippage: 0.0005, transferType: "transfer_from" },
+				},
+			}),
+		);
 	});
 });
