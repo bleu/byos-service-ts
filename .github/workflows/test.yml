@@ -4,10 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: test-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -49,3 +50,15 @@ jobs:
       - run: pnpm test:db
       - run: pnpm test:redis
       - run: pnpm test:integration
+
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-compose-action@v2
+        with:
+          version: v5.7.1
+      - name: Deployment helper regressions
+        run: python3 -m unittest discover -s scripts/deployment -p 'test_*.py'
+      - name: Verify both build contexts exclude deployment secrets
+        run: python3 scripts/deployment/check-build-context.py
