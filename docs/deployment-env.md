@@ -56,3 +56,93 @@ Internal API, admin dashboard, Postgres, Redis and sub-solver listeners require
 appropriate host network/firewall restrictions. Network changes are deferred;
 the existing machine must enforce the internal listener and Tailscale boundaries
 specified by the shared specification and ADR-0016.
+
+## Operator commands
+
+Local prerequisites: Python 3.10+, Bash, OpenSSH, rsync, pnpm. The Hetzner host
+needs Git, Python 3.10+, Bash, Docker Engine and recent
+Docker Compose supporting `config --no-env-resolution` (Compose v5 is tested).
+The SSH user must be able to use Docker without sudo and fetch commits using its
+read-only GitHub deploy key. The checkout must have no tracked modifications.
+
+Set only connection settings in the ignored local root `.env`:
+
+```dotenv
+DEPLOY_HOST=your-host
+DEPLOY_USER=bleu
+# Optional, default shown:
+DEPLOY_PATH=/home/bleu/byos-service-ts
+```
+
+Your existing local `env/<project>/` directories can then be synchronized:
+
+```bash
+pnpm push-secrets                 # entire env/, preserves remote-only files
+pnpm pull-secrets                 # entire env/, preserves local-only files
+pnpm check-ports                  # all declared projects, no container changes
+pnpm build-remote                 # resolve origin/main once; build on Hetzner
+pnpm build-remote <full-sha>       # explicit revision, no CI claim
+pnpm deploy bnb-prod              # current manifest services and dependencies
+pnpm deploy bnb-prod byos admin   # selected services; never implies removal
+pnpm logs bnb-prod byos --tail 100
+pnpm delete-remote-env bnb-staging # only that env directory, no container changes
+```
+
+`pnpm build-remote` initially requires these scripts to exist at the requested
+remote revision. Before PR 2 merges, test its full pushed branch commit explicitly
+with `pnpm build-remote <full-pr-commit-sha>`. The bootstrap fetches that commit
+and runs its scripts. A subsequent default build selects remote `origin/main`,
+so use an explicit commit until the scripts reach main.
+
+Use `bash scripts/release-remote.sh <full-sha> --all` to build and deploy the entire
+manifest with one lock. CI calls this only after checks pass. Server-only entry
+points `scripts/build-server.sh <sha>` and `scripts/deploy-server.sh --all`
+acquire the same lock. All builds stay on Hetzner. No images are pushed to a
+registry. Deploy-only checks the checkout, revision labels and both recorded image
+IDs; incomplete builds require another complete build before deployment.
+
+State and the shared lock live at `<checkout-parent>/.byos-deployment-state/`,
+outside Git. The directory is mode 0700; state files are mode 0600 because they
+contain resolved secrets. Keep this state for recovery. Do not edit or delete it
+to bypass validation. Compose errors are suppressed because diagnostics can
+contain secrets; investigate the host privately on failure. Build output streams
+normally. Logs can contain application data and release their lock before following.
+
+Every deployment preflights all declared projects. It resolves env files with no
+ambient shell configuration, checks required credentials and active host ports,
+and checks cross-project conflicts and host occupancy before container changes.
+The resulting configuration is reused for deployment, with image IDs pinned.
+Application startup still performs full Zod validation. Existing containers are
+recognized by exact Compose project/service labels and managed state, never by
+name prefix. Deploying into an unmanaged existing project is deliberately blocked
+when its ports are occupied; use fresh project names or perform a planned manual
+migration rather than stopping unknown containers automatically.
+
+Only `--all` reconciles explicit manifest removals. It removes deleted services
+from retained projects, and runs `down` for removed managed projects, preserving
+named volumes. Old snapshots allow teardown even after an env directory is gone.
+Missing configuration for a declared project fails preflight and never requests
+teardown. An explicit empty `projects` object removes all managed projects.
+Manual service selections never remove other services or projects.
+
+Per-project state records in-progress operations before Compose runs and records
+success after it finishes. A failure leaves recovery metadata and preserves the
+previous successful-release record. Fix the cause and retry the same release;
+there is no automatic rollback. Removing a project's env directory while it is
+still declared makes its next deployment fail until configuration is restored.
+Secret sync never deletes destination-only files and does not change containers.
+
+Run helper regressions with `pnpm test:deployment`. The Compose tests require a
+recent CLI but no Docker daemon; the concurrency test uses the same OS file lock as releases. Dummy fixtures are
+used throughout, never operator env files.
+
+`pnpm test:deployment:context` additionally requires Docker Engine + BuildKit.
+It exports tiny synthetic build contexts using each production Dockerfile's
+ignore rules and asserts that dummy shared and service env markers are excluded.
+It never sends real operator env files to the builder.
+
+The shared service image's default health probe targets BYOS on port 9585. It is
+disabled for sub-solver commands, which can run without an HTTP listener in polling
+mode. Deploy waits for their containers to run, while BYOS/Postgres/Redis must
+pass their health checks. Binance's solve listener is explicitly set to 3002 to
+match its Compose target; Fynd's target remains 3001.
