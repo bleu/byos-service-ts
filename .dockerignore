@@ -9,3 +9,7 @@ scripts
 .gitmodules
 biome.json
 vitest.config.ts
+
+# Local deployment secrets must never enter image layers or build cache.
+env/
+.scratch/
