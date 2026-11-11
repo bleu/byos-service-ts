@@ -172,6 +172,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 		escrowValidator.getBalance.bind(escrowValidator),
+		config.USE_GAS_PROFITABILITY,
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);

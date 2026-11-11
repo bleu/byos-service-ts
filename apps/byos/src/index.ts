@@ -64,6 +64,7 @@ async function main() {
 		candidateStore,
 		solveBearerToken: config.SOLVE_BEARER_TOKEN,
 		selectorBufferMs: config.SELECTOR_BUFFER_MS,
+		useGasProfitability: config.USE_GAS_PROFITABILITY,
 		subsolvingEndpoints: config.SUBSOLVERS_ENDPOINTS,
 		subsolverBearer: config.SUBSOLVER_BEARER,
 		onAuditEvent: ctx.onAuditEvent,

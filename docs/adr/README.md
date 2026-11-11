@@ -22,6 +22,8 @@ This directory holds the ADRs for the BYOS service. Domain ADRs (0001–0003, 00
 
 - [0021 — Evidence-backed Non-settlement Penalties](0021-evidence-backed-non-settlement-penalties.md): separate driver evidence, eligibility, and durable debit execution
 
+- [0022 — Optional Gas Profitability](0022-optional-gas-profitability.md): rationale for an operator-funded gas mode, enabled explicitly by environment configuration
+
 ### TypeScript-specific ADRs
 
 - [0004 — pnpm Monorepo and Tooling](0004-pnpm-monorepo-and-tooling.md): pnpm workspaces, tsup, Biome, Vitest, `tsc -b` project references

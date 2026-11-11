@@ -39,6 +39,8 @@ export interface SolveConfig {
 	validator: ValidateProposal;
 	onAuditEvent: (event: AuditEvent) => void;
 	selectorBufferMs?: number;
+	/** Defaults to true. False scores raw surplus and declares a zero gas cut. */
+	useGasProfitability?: boolean;
 	/** Subsolver /solve endpoints to forward each auction to (fire-and-forget). */
 	subsolvingEndpoints?: string[];
 	subsolverBearer?: string;
@@ -231,7 +233,10 @@ export function createSolveRoute(config: SolveConfig) {
 					if (exceeds) continue;
 				}
 
-				const gasCost = effectiveGas(candidate.gasUsed) * auctionGasPrice;
+				const gasCost =
+					config.useGasProfitability === false
+						? 0n
+						: effectiveGas(candidate.gasUsed) * auctionGasPrice;
 				const effectiveBuy =
 					candidate.simulationBuyAmount != null &&
 					candidate.simulationBuyAmount < candidate.quoteBuyAmount
