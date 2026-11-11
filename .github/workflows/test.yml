@@ -55,9 +55,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-compose-action@v2
-        with:
-          version: v5.7.1
+      - name: Install tested Compose CLI
+        run: |
+          set -euo pipefail
+          compose_dir="$RUNNER_TEMP/compose-v5.7.1"
+          mkdir -p "$compose_dir"
+          cd "$compose_dir"
+          release=https://github.com/docker/compose/releases/download/v5.7.1
+          curl -fsSL --retry 3 "$release/docker-compose-linux-x86_64" -o docker-compose-linux-x86_64
+          curl -fsSL --retry 3 "$release/docker-compose-linux-x86_64.sha256" -o docker-compose-linux-x86_64.sha256
+          sha256sum -c docker-compose-linux-x86_64.sha256
+          install -D -m 755 docker-compose-linux-x86_64 "$HOME/.docker/cli-plugins/docker-compose"
+          docker compose version
       - name: Deployment helper regressions
         run: python3 -m unittest discover -s scripts/deployment -p 'test_*.py'
       - name: Verify both build contexts exclude deployment secrets
