@@ -1,8 +1,8 @@
 # Deployment environments
 
-`deploy.yml` declares stable Compose project names and active services. It uses
-JSON syntax (a YAML subset), so the deployment host needs only Python's standard
-library to parse it. Keep that syntax when editing; duplicate keys are rejected.
+`deploy.json` declares stable Compose project names and active services. It uses
+JSON, so the deployment host needs only Python's standard library to parse it.
+Duplicate keys are rejected.
 Postgres and Redis are implicit. Dependencies must be declared explicitly.
 Project renames and volume migrations are outside this deployment system.
 
