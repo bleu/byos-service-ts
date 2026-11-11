@@ -1,22 +1,10 @@
 {
-  "projects": {
-    "bnb-prod": {
-      "services": [
-        "byos",
-        "admin",
-        "fynd",
-        "fynd-subsolver",
-        "binance-subsolver"
-      ]
-    },
-    "bnb-staging": {
-      "services": [
-        "byos",
-        "admin",
-        "fynd",
-        "fynd-subsolver",
-        "binance-subsolver"
-      ]
-    }
-  }
+	"projects": {
+		"bnb-prod": {
+			"services": ["byos", "admin", "fynd", "fynd-subsolver", "binance-subsolver"]
+		},
+		"bnb-staging": {
+			"services": ["byos", "admin", "fynd", "fynd-subsolver", "binance-subsolver"]
+		}
+	}
 }
