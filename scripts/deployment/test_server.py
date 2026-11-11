@@ -45,7 +45,7 @@ class ReleaseTests(unittest.TestCase):
         )
 
     def write_manifest(self, projects):
-        (self.root / "deploy.yml").write_text(json.dumps({"projects": projects}))
+        (self.root / "deploy.json").write_text(json.dumps({"projects": projects}))
 
     def save(self, projects):
         server.atomic_json(
@@ -95,7 +95,7 @@ class ReleaseTests(unittest.TestCase):
             '{"projects":{"prod":{"services":["byos","byos"]}}}',
         ]:
             with self.subTest(text=text):
-                (self.root / "deploy.yml").write_text(text)
+                (self.root / "deploy.json").write_text(text)
                 with self.assertRaises((server.DeploymentError, ValueError)):
                     server.manifest(self.root)
 
@@ -265,7 +265,7 @@ class ReleaseTests(unittest.TestCase):
         target = self.root / "env" / "prod"
         target.mkdir(parents=True)
         (target / ".env").write_text("secret")
-        before = (self.root / "deploy.yml").read_bytes()
+        before = (self.root / "deploy.json").read_bytes()
         with (
             patch.object(server, "compose") as compose,
             contextlib.redirect_stdout(io.StringIO()),
@@ -273,7 +273,7 @@ class ReleaseTests(unittest.TestCase):
             server.delete_env(self.root, "prod")
             compose.assert_not_called()
         self.assertFalse(target.exists())
-        self.assertEqual(before, (self.root / "deploy.yml").read_bytes())
+        self.assertEqual(before, (self.root / "deploy.json").read_bytes())
         target.symlink_to(self.state, target_is_directory=True)
         for name in ["prod", "../state", "/tmp", "-prod"]:
             with self.subTest(name=name), self.assertRaises(server.DeploymentError):
