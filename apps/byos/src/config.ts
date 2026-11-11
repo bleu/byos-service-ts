@@ -115,6 +115,11 @@ export const configSchema = z.object({
 	 * waiting for proposals and runs the selector. A small safety margin that
 	 * accounts for serialisation and network round-trip back to the driver. */
 	SELECTOR_BUFFER_MS: z.coerce.number().int().min(0).default(200),
+	/** When false, score raw surplus and charge no gas cut. BYOS pays settlement gas. */
+	USE_GAS_PROFITABILITY: z
+		.enum(["true", "false"])
+		.default("true")
+		.transform((v) => v === "true"),
 	MIN_PROPOSAL_SCORE: z.string().default("0"),
 
 	// Slippage protection (ADR-0019)

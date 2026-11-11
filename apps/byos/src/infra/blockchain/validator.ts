@@ -174,6 +174,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly readEscrowBalance: (
 			subSolver: Address,
 		) => Promise<bigint> = createBatchedEscrowBalanceReader(publicClient, escrowAddress),
+		private readonly useGasProfitability = true,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -213,7 +214,7 @@ export class SimulationValidator implements ValidateProposal {
 		gasPrice: bigint,
 	): "ok" | "unprofitable" {
 		const isSellOrder = record.order.kind === OrderKind.SELL;
-		const gasCost = effectiveGas(gas) * gasPrice;
+		const gasCost = this.useGasProfitability ? effectiveGas(gas) * gasPrice : 0n;
 
 		const candidate: Candidate = {
 			orderSell: record.order.sellAmount,
