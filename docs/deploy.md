@@ -26,7 +26,7 @@ docker build -f apps/admin/Dockerfile -t byos-admin:local .
 
 ## Configure environment variables
 
-Each project in `deploy.yml` has isolated env files. See [deployment environments](deployment-env.md) for the directory layout and required host ports. Shared secrets belong in `env/<project>/.env`; per-service values belong in that project’s service files.
+Each project in `deploy.json` has isolated env files. See [deployment environments](deployment-env.md) for the directory layout and required host ports. Shared secrets belong in `env/<project>/.env`; per-service values belong in that project’s service files.
 
 ### Compose-level secrets
 

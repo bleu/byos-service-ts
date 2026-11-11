@@ -100,7 +100,7 @@ def read_json(path):
 
 
 def manifest(root):
-    data = read_json(root / "deploy.yml")
+    data = read_json(root / "deploy.json")
     require(
         isinstance(data, dict)
         and set(data) == {"projects"}
