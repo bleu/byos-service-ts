@@ -181,11 +181,21 @@ It exports tiny synthetic build contexts using each production Dockerfile's
 ignore rules and asserts that dummy shared and service env markers are excluded.
 It never sends real operator env files to the builder.
 
-The shared service image's default health probe targets BYOS on port 9585. It is
-disabled for sub-solver commands, which can run without an HTTP listener in polling
-mode. Deploy waits for their containers to run, while BYOS/Postgres/Redis must
-pass their health checks. Binance's solve listener is explicitly set to 3002 to
-match its Compose target; Fynd's target remains 3001.
+The shared service image's default health probe targets BYOS on port 9585.
+Compose overrides it for both sub-solvers with `GET /healthz` on their own HTTP
+listeners (Fynd 3001, Binance 3002). These listeners start after initialization
+and proposal synchronization in all discovery modes: `orderbook`, `aws` and
+`solve`. `SOLVE_PORT` configures the listener even in polling modes; the Compose
+Binance service explicitly sets it to 3002. Host port mappings are unchanged.
+
+The health endpoint is unauthenticated and returns only `{"status":"ok"}`. It
+checks startup completion and event-loop responsiveness, not RPC, Binance, Fynd
+or orderbook availability on each probe, and does not submit orders. In solve
+mode, `POST /solve` still requires the configured bearer token. Polling modes
+expose only the health route. Compose waits for these HTTP checks along with
+BYOS/Postgres/Redis health checks. Real health checks also avoid the older Compose
+`--wait` bug with explicitly disabled checks; no host-wide Compose upgrade is
+needed for this change.
 
 ## Automatic releases
 

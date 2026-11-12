@@ -1,5 +1,6 @@
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
+import { createHealthApp } from "./health-app.js";
 import type { SolveOrderbookClient } from "./solve-orderbook-client.js";
 
 /** Authenticate auction pushes before they can replace discovery state. */
@@ -9,7 +10,7 @@ export function createSolveApp(
 	onAuction: () => Promise<void>,
 ): Hono {
 	if (!token) throw new Error("SUBSOLVER_BEARER is required for solve discovery");
-	const app = new Hono();
+	const app = createHealthApp();
 	// Serialize receipt and quoting together so a later push cannot replace the
 	// current cycle's orders while it is synchronizing proposal state.
 	let pending = Promise.resolve();

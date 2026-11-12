@@ -112,9 +112,12 @@ services:
       image: byos-service:local
       restart: unless-stopped
       command: ["node", "apps/fynd-subsolver/dist/index.js"]
-      # The shared image probes the BYOS API; sub-solver commands do not run it.
       healthcheck:
-        disable: true
+        test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+        interval: 5s
+        timeout: 3s
+        retries: 24
+        start_period: 30s
       env_file: env/${PROJECT}/.env.fynd-subsolver
       environment:
         FYND_URL: http://fynd:3000
@@ -142,9 +145,12 @@ services:
       image: byos-service:local
       restart: unless-stopped
       command: ["node", "apps/binance-subsolver/dist/index.js"]
-      # The shared image probes the BYOS API; sub-solver commands do not run it.
       healthcheck:
-        disable: true
+        test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/healthz"]
+        interval: 5s
+        timeout: 3s
+        retries: 24
+        start_period: 30s
       env_file: env/${PROJECT}/.env.binance-subsolver
       environment:
         SOLVE_PORT: 3002

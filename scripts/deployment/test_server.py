@@ -477,6 +477,42 @@ class ComposeResolutionTests(unittest.TestCase):
                     rendered["services"]["redis"]["healthcheck"]["test"][1],
                 )
 
+    def test_subsolver_healthchecks_probe_their_own_listener_ports(self):
+        directory = self.root / "env/prod"
+        with (directory / ".env").open("a") as stream:
+            stream.write(
+                "FYND_HOST_PORT=30100\nFYND_SUBSOLVER_HOST_PORT=30101\nBINANCE_SUBSOLVER_HOST_PORT=30102\n"
+            )
+        (directory / ".env.fynd").write_text("")
+        for service in ("fynd-subsolver", "binance-subsolver"):
+            values = {key: "dummy" for key in server.REQUIRED[service]}
+            values.update(
+                {"DISCOVERY_METHOD": "orderbook", "DISCOVERY_URL": "http://orders"}
+            )
+            (directory / f".env.{service}").write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items())
+            )
+        rendered = server.resolve(
+            self.root,
+            "prod",
+            [
+                "postgres",
+                "redis",
+                "byos",
+                "fynd",
+                "fynd-subsolver",
+                "binance-subsolver",
+            ],
+        )
+        for service, port in (("fynd-subsolver", 3001), ("binance-subsolver", 3002)):
+            entry = rendered["services"][service]
+            self.assertFalse(entry["healthcheck"].get("disable", False))
+            self.assertEqual(
+                entry["healthcheck"]["test"],
+                ["CMD", "wget", "-qO-", f"http://127.0.0.1:{port}/healthz"],
+            )
+            self.assertEqual(entry["ports"][0]["target"], port)
+
     def test_compose_file_adds_prefix_without_cli_project_override(self):
         environment = {**server.clean_env(), "PROJECT": "prod"}
         rendered = json.loads(

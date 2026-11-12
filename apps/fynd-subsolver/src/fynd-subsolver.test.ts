@@ -10,6 +10,7 @@ const factory = "0x0000000000000000000000000000000000000001" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
+	solvePort: 3001,
 	discoveryUrl: "http://orderbook",
 	discoveryMethod: "orderbook",
 	byosUrl: "http://byos",

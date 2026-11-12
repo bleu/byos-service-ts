@@ -39,6 +39,7 @@ const envSchema = z.object({
 });
 
 interface BaseConfig {
+	solvePort: number;
 	discoveryUrl: string;
 	byosUrl: string;
 	rpcUrl: string;
@@ -64,7 +65,7 @@ interface BaseConfig {
 export type Config =
 	| (BaseConfig & { discoveryMethod: "orderbook" })
 	| (BaseConfig & { discoveryMethod: "aws" })
-	| (BaseConfig & { discoveryMethod: "solve"; solvePort: number; subsolverBearer: string });
+	| (BaseConfig & { discoveryMethod: "solve"; subsolverBearer: string });
 
 export function parseConfig(env: Record<string, string | undefined> = process.env): Config {
 	const result = envSchema.safeParse(env);
@@ -81,6 +82,7 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		throw new Error("DISCOVERY_URL is required for orderbook and aws discovery methods");
 	}
 	const base = {
+		solvePort: result.data.SOLVE_PORT,
 		discoveryUrl: result.data.DISCOVERY_URL ?? "",
 		byosUrl: result.data.BYOS_URL,
 		rpcUrl: result.data.RPC_URL,
@@ -113,7 +115,6 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		return {
 			...base,
 			discoveryMethod: "solve" as const,
-			solvePort: result.data.SOLVE_PORT,
 			subsolverBearer: result.data.SUBSOLVER_BEARER,
 		};
 	}
