@@ -146,3 +146,27 @@ disabled for sub-solver commands, which can run without an HTTP listener in poll
 mode. Deploy waits for their containers to run, while BYOS/Postgres/Redis must
 pass their health checks. Binance's solve listener is explicitly set to 3002 to
 match its Compose target; Fynd's target remains 3001.
+
+## Automatic releases
+
+`.github/workflows/deploy.yml` calls the existing lint/test workflows after a push
+to `main`. Only after both succeed does the deployment job read environment
+secrets from `byos-deploy` and invoke the shared release command with `github.sha`.
+Configure `HETZNER_SSH_PRIVATE_KEY`, `DEPLOY_HOST`, and `DEPLOY_USER` there. The
+SSH key must authorize the `bleu` account on Hetzner; the machine separately needs
+a read-only GitHub deploy key to fetch repository commits. Keep required reviewers
+and wait timers disabled, and allow `main` if branch restrictions are enabled.
+
+Both production and staging deploy automatically. The workflow performs SSH host
+key discovery with `ssh-keyscan`, as specified in the plan; a pre-pinned host key
+would require an additional trusted configuration value. Builds remain on Hetzner.
+Lint/test concurrency groups use distinct prefixes and cancel only PR checks,
+so called deployment gates cannot cancel each other. GitHub serializes deployment
+workflow runs and the server lock also coordinates manual callers. GitHub may
+replace queued pending runs when many pushes arrive; each run that executes still
+deploys only its own tested SHA. There is no production approval gate or rollback.
+
+Merge the Compose/manifest PR first and the server-command PR second. Verify a
+manual build and deployment with the actual env files before merging the CI PR,
+whose merge enables automatic deployment. The test workflow also exercises helper
+regressions and both synthetic build contexts without production secrets.
