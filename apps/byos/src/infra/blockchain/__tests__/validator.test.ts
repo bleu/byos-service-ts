@@ -249,7 +249,6 @@ function validatorAt(
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
 	_minCollateral = 10n ** 16n,
-	useGasProfitability = true,
 ): SimulationValidator {
 	// Gas price lives in auction state. Patch the local state so tests that
 	// pass a non-zero gasPrice still exercise the profitability gate.
@@ -265,10 +264,6 @@ function validatorAt(
 		0n, // collateralRatioBps = 0 → Gate 2 exposure is 0, always passes
 		0n, // minCollateral = 0 → penaltyCap = 0
 		async () => ({ proposals: [], bufferBalance: 0n }), // fetchInflightData: no siblings
-		undefined,
-		undefined,
-		undefined,
-		useGasProfitability,
 	);
 }
 
@@ -323,45 +318,6 @@ describe("SimulationValidator native-buy settlement", () => {
 });
 
 describe("SimulationValidator profitability gate", () => {
-	it.each([true, false])(
-		"gas profitability %s controls rejection when gas exceeds surplus",
-		async (enabled) => {
-			const proposal = submittedProposal();
-			setupAuctionState(
-				sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n })),
-			);
-			const verdict = await validatorAt(
-				fakeNode(),
-				1n,
-				0n,
-				undefined,
-				undefined,
-				undefined,
-				enabled,
-			).validate(proposal);
-			if (enabled) {
-				expect(verdict).toEqual({ kind: "reject", reason: "Unprofitable" });
-			} else {
-				expect(verdict).toMatchObject({ kind: "accept", simulation: { gasUsed: 100_000n } });
-			}
-		},
-	);
-
-	it("still enforces the minimum score when gas profitability is disabled", async () => {
-		const proposal = submittedProposal();
-		setupAuctionState(sampleRecord(sampleOrder({ buyAmount: proposal.quoteBuyAmount - 10_000n })));
-		const verdict = await validatorAt(
-			fakeNode(),
-			1n,
-			10_000n,
-			undefined,
-			undefined,
-			undefined,
-			false,
-		).validate(proposal);
-		expect(verdict).toEqual({ kind: "reject", reason: "Unprofitable" });
-	});
-
 	it("zero-surplus first simulation rejects as unprofitable", async () => {
 		// Order limit equal to the proposal's buy amount: zero surplus. With a
 		// zero gas price the score is exactly 0, which must NOT exceed the
