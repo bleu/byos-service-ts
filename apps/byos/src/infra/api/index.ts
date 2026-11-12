@@ -36,7 +36,6 @@ export interface AppContext {
 	candidateStore: CandidateStore;
 	solveBearerToken?: string;
 	selectorBufferMs?: number;
-	useGasProfitability?: boolean;
 	onAuditEvent: (event: AuditEvent) => void;
 	logger?: Logger;
 	/** Subsolver /solve endpoints to forward each auction to (fire-and-forget). */
@@ -132,7 +131,6 @@ export function createInternalApp(ctx: AppContext): Hono {
 		validator: ctx.validator,
 		onAuditEvent: ctx.onAuditEvent,
 		selectorBufferMs: ctx.selectorBufferMs,
-		useGasProfitability: ctx.useGasProfitability,
 		subsolvingEndpoints: ctx.subsolvingEndpoints,
 		subsolverBearer: ctx.subsolverBearer,
 		logger: ctx.logger,

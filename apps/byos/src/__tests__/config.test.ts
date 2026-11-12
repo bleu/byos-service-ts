@@ -12,19 +12,6 @@ const base = {
 };
 
 describe("parseConfig", () => {
-	it("defaults gas profitability to true and parses explicit boolean strings", () => {
-		expect(parseConfig(base).USE_GAS_PROFITABILITY).toBe(true);
-		expect(parseConfig({ ...base, USE_GAS_PROFITABILITY: "true" }).USE_GAS_PROFITABILITY).toBe(
-			true,
-		);
-		expect(parseConfig({ ...base, USE_GAS_PROFITABILITY: "false" }).USE_GAS_PROFITABILITY).toBe(
-			false,
-		);
-		expect(() => parseConfig({ ...base, USE_GAS_PROFITABILITY: "0" })).toThrow(
-			/USE_GAS_PROFITABILITY/,
-		);
-	});
-
 	it("requires a bearer token for sub-solver forwarding and redacts it", () => {
 		const forwarding = { ...base, SUBSOLVERS_ENDPOINTS: "http://subsolver:3001" };
 		expect(() => parseConfig(forwarding)).toThrow(/SUBSOLVER_BEARER/);
