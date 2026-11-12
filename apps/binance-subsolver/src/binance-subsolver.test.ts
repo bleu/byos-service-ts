@@ -12,6 +12,7 @@ const trampolineAddress = "0x0000000000000000000000000000000000000005" as const;
 const logger = pino({ level: "silent" });
 
 const config: Config = {
+	solvePort: 3001,
 	discoveryMethod: "orderbook",
 	discoveryUrl: "http://orderbook",
 	byosUrl: "http://byos",

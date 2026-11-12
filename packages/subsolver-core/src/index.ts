@@ -5,6 +5,7 @@ export {
 	FyndProvider,
 	type FyndProviderConfig,
 } from "./fynd-provider.js";
+export { createHealthApp } from "./health-app.js";
 export { randomNonce } from "./nonce.js";
 export { OrderFilter, type OrderFilterOptions } from "./order-filter.js";
 export { OrderbookClient, type OrderbookOrder, toOrderbookOrders } from "./orderbook-client.js";

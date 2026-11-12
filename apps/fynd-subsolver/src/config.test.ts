@@ -48,3 +48,20 @@ describe("correlated slippage config", () => {
 		).toThrow(/CORRELATED_SLIPPAGE_BPS/);
 	});
 });
+
+describe("health listener config", () => {
+	it.each(["orderbook", "aws", "solve"])(
+		"provides the listener port in %s mode",
+		(discoveryMethod) => {
+			const env = {
+				...base,
+				DISCOVERY_METHOD: discoveryMethod,
+				DISCOVERY_URL: "http://discovery",
+				SUBSOLVER_BEARER: "secret",
+			};
+			expect(parseConfig(env)).toMatchObject({ solvePort: 3001 });
+			expect(parseConfig({ ...env, SOLVE_PORT: "3002" })).toMatchObject({ solvePort: 3002 });
+			expect(() => parseConfig({ ...env, SOLVE_PORT: "0" })).toThrow(/SOLVE_PORT/);
+		},
+	);
+});

@@ -3,6 +3,7 @@ import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
 import {
 	AwsOrderbookClient,
 	ByosClient,
+	createHealthApp,
 	createSolveApp,
 	FyndConfigurationError,
 	FyndProvider,
@@ -116,6 +117,10 @@ async function main() {
 		process.on("SIGINT", shutdown);
 		return;
 	}
+	// Polling modes also expose readiness after initialization and synchronization.
+	serve({ fetch: createHealthApp().fetch, port: config.solvePort }, (info) => {
+		logger.info({ port: info.port }, "health listener started");
+	});
 	const tick = async () => {
 		try {
 			await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
