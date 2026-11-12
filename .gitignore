@@ -30,3 +30,6 @@ coverage/
 
 # Deployment secrets (documentation lives in docs/deployment-env.md)
 env/
+
+# Deployment helper bytecode
+__pycache__/

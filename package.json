@@ -28,7 +28,16 @@
 		"typecheck": "tsc -b",
 		"format": "biome format --write .",
 		"db:generate": "pnpm --filter @byos/byos run db:generate",
-		"db:migrate": "pnpm --filter @byos/byos run db:migrate"
+		"db:migrate": "pnpm --filter @byos/byos run db:migrate",
+		"deploy": "./scripts/deploy.sh",
+		"build-remote": "./scripts/build-remote.sh",
+		"push-secrets": "./scripts/push-secrets.sh",
+		"pull-secrets": "./scripts/pull-secrets.sh",
+		"delete-remote-env": "./scripts/delete-remote-env.sh",
+		"logs": "./scripts/logs.sh",
+		"check-ports": "./scripts/check-ports.sh",
+		"test:deployment": "python3 -m unittest discover -s scripts/deployment -p \"test_*.py\"",
+		"test:deployment:context": "python3 scripts/deployment/check-build-context.py"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.0.0",
