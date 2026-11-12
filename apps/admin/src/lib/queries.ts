@@ -197,6 +197,7 @@ export interface ProposalListItem {
 }
 
 export interface ProposalListOptions {
+	orderUid?: string;
 	subSolver?: string;
 	status?: string;
 	page: number;
@@ -207,10 +208,12 @@ export async function listProposals(
 	db: Db,
 	opts: ProposalListOptions,
 ): Promise<{ items: ProposalListItem[]; total: number }> {
-	const { subSolver, status, page, limit } = opts;
+	const { orderUid, subSolver, status, page, limit } = opts;
 	const offset = (page - 1) * limit;
 
 	const conditions = [];
+	const normalizedOrderUid = orderUid?.trim().toLowerCase();
+	if (normalizedOrderUid) conditions.push(eq(proposalsLog.orderUid, normalizedOrderUid));
 	if (subSolver) conditions.push(eq(proposalsLog.subSolver, subSolver.toLowerCase()));
 	if (status) conditions.push(eq(proposalsLog.status, status));
 

@@ -18,12 +18,12 @@ function isoZ(date: Date | string) {
 export default async function ProposalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ subSolver?: string; status?: string; page?: string }>;
+  searchParams: Promise<{ orderUid?: string; subSolver?: string; status?: string; page?: string }>;
 }) {
-  const { subSolver, status, page: pageStr } = await searchParams;
+  const { orderUid, subSolver, status, page: pageStr } = await searchParams;
   const page = Math.max(1, Number(pageStr ?? "1"));
 
-  const { items: rawItems, total } = await listProposals(db, { subSolver, status, page, limit: 50 });
+  const { items: rawItems, total } = await listProposals(db, { orderUid, subSolver, status, page, limit: 50 });
   const items = rawItems.map((p) => ({
     ...p,
     subSolverUrl: blockExplorerAddressUrl(p.subSolver),
@@ -38,14 +38,24 @@ export default async function ProposalsPage({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[13px] font-semibold text-ink">
           Proposals
           <span className="font-mono font-normal text-dim ml-2">{total.toLocaleString()}</span>
         </h1>
 
         {/* Filters */}
-        <form method="GET" className="flex gap-2 items-end">
+        <form method="GET" className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label htmlFor="orderUid" className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">Order UID</label>
+            <input
+              id="orderUid"
+              name="orderUid"
+              defaultValue={orderUid ?? ""}
+              placeholder="0x…"
+              className="border border-line rounded bg-surface font-mono text-[12px] text-ink px-2 py-1.5 w-60 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent placeholder:text-dim"
+            />
+          </div>
           <div>
             <label className="block text-[10px] uppercase tracking-widest text-dim font-medium mb-1">Subsolver</label>
             <input
@@ -71,8 +81,8 @@ export default async function ProposalsPage({
           <button type="submit" className="bg-accent text-white text-[12px] font-medium px-3 py-1.5 rounded hover:opacity-90">
             Filter
           </button>
-          {(subSolver || status) && (
-            <a href="/proposals" className="text-[12px] text-dim hover:text-muted underline pb-1.5">Clear</a>
+          {(orderUid || subSolver || status) && (
+            <Link href="/proposals" className="text-[12px] text-dim hover:text-muted underline pb-1.5">Clear</Link>
           )}
         </form>
       </div>
@@ -134,7 +144,7 @@ export default async function ProposalsPage({
       {totalPages > 1 && (
         <div className="flex gap-1.5 justify-center">
           {page > 1 && (
-            <a href={buildPageUrl(subSolver, status, page - 1)} className="px-3 py-1.5 border border-line rounded text-[12px] text-muted hover:text-ink hover:bg-surface">
+            <a href={buildPageUrl(orderUid, subSolver, status, page - 1)} className="px-3 py-1.5 border border-line rounded text-[12px] text-muted hover:text-ink hover:bg-surface">
               ← Prev
             </a>
           )}
@@ -142,7 +152,7 @@ export default async function ProposalsPage({
             {page} / {totalPages}
           </span>
           {page < totalPages && (
-            <a href={buildPageUrl(subSolver, status, page + 1)} className="px-3 py-1.5 border border-line rounded text-[12px] text-muted hover:text-ink hover:bg-surface">
+            <a href={buildPageUrl(orderUid, subSolver, status, page + 1)} className="px-3 py-1.5 border border-line rounded text-[12px] text-muted hover:text-ink hover:bg-surface">
               Next →
             </a>
           )}
@@ -152,8 +162,9 @@ export default async function ProposalsPage({
   );
 }
 
-function buildPageUrl(subSolver?: string, status?: string, page?: number) {
+function buildPageUrl(orderUid?: string, subSolver?: string, status?: string, page?: number) {
   const qs = new URLSearchParams();
+  if (orderUid) qs.set("orderUid", orderUid);
   if (subSolver) qs.set("subSolver", subSolver);
   if (status) qs.set("status", status);
   if (page) qs.set("page", String(page));
