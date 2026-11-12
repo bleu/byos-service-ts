@@ -22,7 +22,7 @@ def config(project, services=("postgres", "redis", "byos"), port=None):
     }
     if port:
         entries["byos"]["ports"] = [{"published": str(port), "target": 9585}]
-    return {"name": project, "services": entries}
+    return {"name": f"byos-{project}", "services": entries}
 
 
 class ReleaseTests(unittest.TestCase):
@@ -119,7 +119,7 @@ class ReleaseTests(unittest.TestCase):
         calls = self.deploy(["--all"])
         down = [call for call in calls.call_args_list if "down" in call.args]
         self.assertEqual(len(down), 1)
-        self.assertEqual(down[0].args[0]["name"], "removed")
+        self.assertEqual(down[0].args[0]["name"], "byos-removed")
         self.assertNotIn("-v", down[0].args)
         self.assertNotIn(
             "removed", server.read_json(self.state / "applied.json")["projects"]
@@ -222,6 +222,24 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(server.DeploymentError):
                 server.provenance(self.root, self.state)
 
+    def test_existing_prefixed_container_owns_port_without_saved_state(self):
+        container = {
+            "Id": "existing",
+            "Config": {
+                "Labels": {
+                    "com.docker.compose.project": "byos-prod",
+                    "com.docker.compose.service": "byos",
+                }
+            },
+            "NetworkSettings": {
+                "Ports": {"9585/tcp": [{"HostPort": "20000", "HostIp": "0.0.0.0"}]}
+            },
+        }
+        with patch.object(
+            server, "run", side_effect=["existing", json.dumps([container])]
+        ):
+            server.validate_ports({"prod": config("prod", port=20000)})
+
     def test_cross_project_ports_conflict_before_host_checks(self):
         with patch.object(server, "run") as run:
             with self.assertRaisesRegex(server.DeploymentError, "Port conflict"):
@@ -230,7 +248,6 @@ class ReleaseTests(unittest.TestCase):
                         "prod": config("prod", port=20000),
                         "staging": config("staging", port=20000),
                     },
-                    {},
                 )
             run.assert_not_called()
 
@@ -242,12 +259,12 @@ class ReleaseTests(unittest.TestCase):
             port = listener.getsockname()[1]
             with patch.object(server, "run", return_value=""):
                 with self.assertRaisesRegex(server.DeploymentError, "occupied on host"):
-                    server.validate_ports({"prod": config("prod", port=port)}, {})
+                    server.validate_ports({"prod": config("prod", port=port)})
         container = {
             "Id": "id",
             "Config": {
                 "Labels": {
-                    "com.docker.compose.project": "prod-pretender",
+                    "com.docker.compose.project": "byos-prod-pretender",
                     "com.docker.compose.service": "byos",
                 }
             },
@@ -257,9 +274,7 @@ class ReleaseTests(unittest.TestCase):
         }
         with patch.object(server, "run", side_effect=["id", json.dumps([container])]):
             with self.assertRaisesRegex(server.DeploymentError, "another container"):
-                server.validate_ports(
-                    {"prod": config("prod", port=20000)}, {"prod": {}}
-                )
+                server.validate_ports({"prod": config("prod", port=20000)})
 
     def test_delete_env_confines_paths_and_does_not_touch_manifest_or_containers(self):
         target = self.root / "env" / "prod"
@@ -278,6 +293,91 @@ class ReleaseTests(unittest.TestCase):
         for name in ["prod", "../state", "/tmp", "-prod"]:
             with self.subTest(name=name), self.assertRaises(server.DeploymentError):
                 server.delete_env(self.root, name)
+
+    def test_prefixed_project_with_wrong_service_cannot_claim_port(self):
+        container = {
+            "Id": "existing",
+            "Config": {
+                "Labels": {
+                    "com.docker.compose.project": "byos-prod",
+                    "com.docker.compose.service": "admin",
+                }
+            },
+            "NetworkSettings": {
+                "Ports": {"9585/tcp": [{"HostPort": "20000", "HostIp": "0.0.0.0"}]}
+            },
+        }
+        with patch.object(
+            server, "run", side_effect=["existing", json.dumps([container])]
+        ):
+            with self.assertRaisesRegex(server.DeploymentError, "another container"):
+                server.validate_ports({"prod": config("prod", port=20000)})
+
+    def test_existing_volume_mismatch_blocks_deployment_before_state_or_compose(self):
+        rendered = config("prod")
+        rendered["services"]["postgres"]["volumes"] = [
+            {
+                "type": "volume",
+                "source": "postgres-data",
+                "target": "/var/lib/postgresql/data",
+            }
+        ]
+        rendered["volumes"] = {"postgres-data": {"name": "byos-prod_postgres-data"}}
+        container = {
+            "Config": {
+                "Labels": {
+                    "com.docker.compose.project": "byos-prod",
+                    "com.docker.compose.service": "postgres",
+                }
+            },
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": "legacy_postgres-data",
+                    "Destination": "/var/lib/postgresql/data",
+                }
+            ],
+        }
+        self.write_manifest({"prod": {"services": ["byos"]}})
+        with (
+            patch.object(server, "provenance", return_value=self.record),
+            patch.object(server, "resolve", return_value=rendered),
+            patch.object(server, "validate_ports", return_value=[container]),
+            patch.object(server, "compose") as compose,
+        ):
+            with self.assertRaisesRegex(server.DeploymentError, "POSTGRES_VOLUME_NAME"):
+                server.deploy(self.root, self.state, ["--all"])
+            compose.assert_not_called()
+            self.assertFalse((self.state / "applied.json").exists())
+            # An explicit name for the old data is safe to reuse.
+            rendered["volumes"]["postgres-data"]["name"] = "legacy_postgres-data"
+            with contextlib.redirect_stdout(io.StringIO()):
+                server.deploy(self.root, self.state, ["--all"])
+            compose.assert_called_once()
+
+    def test_saved_unprefixed_project_requires_explicit_migration(self):
+        old = config("prod")
+        old["name"] = "prod"
+        self.save({"prod": old})
+        before = (self.state / "applied.json").read_bytes()
+        with self.assertRaisesRegex(server.DeploymentError, "migrate it explicitly"):
+            self.deploy(["--all"])
+        self.assertEqual((self.state / "applied.json").read_bytes(), before)
+
+    def test_preflight_does_not_adopt_or_remove_existing_projects(self):
+        with (
+            patch.object(
+                server,
+                "resolve",
+                side_effect=lambda root, project, services: config(project, services),
+            ),
+            patch.object(server, "validate_ports", return_value=[]),
+            patch.object(server, "compose") as compose,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            server.deploy(self.root, self.state, ["--all"], check_only=True)
+            compose.assert_not_called()
+            self.assertFalse((self.state / "applied.json").exists())
 
     def test_state_permissions(self):
         server.atomic_json(self.state / "applied.json", {"secret": "dummy"})
@@ -340,6 +440,15 @@ class ComposeResolutionTests(unittest.TestCase):
                     30002 + index * 10,
                 )
                 self.assertNotIn("admin", rendered["services"])
+                self.assertEqual(rendered["name"], f"byos-{project}")
+                self.assertEqual(
+                    rendered["volumes"]["postgres-data"]["name"],
+                    f"byos-{project}_postgres-data",
+                )
+                self.assertEqual(
+                    rendered["volumes"]["redis-data"]["name"],
+                    f"byos-{project}_redis-data",
+                )
                 # Compose canonical JSON is already escaped for another parse.
                 model = self.root / "snapshot.json"
                 server.atomic_json(model, rendered)
@@ -367,6 +476,43 @@ class ComposeResolutionTests(unittest.TestCase):
                     "$$$$REDIS_PASSWORD",
                     rendered["services"]["redis"]["healthcheck"]["test"][1],
                 )
+
+    def test_compose_file_adds_prefix_without_cli_project_override(self):
+        environment = {**server.clean_env(), "PROJECT": "prod"}
+        rendered = json.loads(
+            server.run(
+                [
+                    "docker",
+                    "compose",
+                    "--env-file",
+                    str(self.root / "env/prod/.env"),
+                    "-f",
+                    str(self.root / "docker-compose.prod-local.yml"),
+                    "config",
+                    "--no-env-resolution",
+                    "--format",
+                    "json",
+                ],
+                env=environment,
+            )
+        )
+        self.assertEqual(rendered["name"], "byos-prod")
+
+    def test_explicit_legacy_volume_names_override_defaults(self):
+        path = self.root / "env/staging/.env"
+        with path.open("a") as stream:
+            stream.write(
+                "POSTGRES_VOLUME_NAME=byos-prod-local_postgres-data\nREDIS_VOLUME_NAME=byos-prod-local_redis-data\n"
+            )
+        rendered = server.resolve(self.root, "staging", ["postgres", "redis", "byos"])
+        self.assertEqual(rendered["name"], "byos-staging")
+        self.assertEqual(
+            rendered["volumes"]["postgres-data"]["name"],
+            "byos-prod-local_postgres-data",
+        )
+        self.assertEqual(
+            rendered["volumes"]["redis-data"]["name"], "byos-prod-local_redis-data"
+        )
 
     def test_omitted_shared_value_cannot_inherit_previous_project_or_shell(self):
         server.resolve(self.root, "prod", ["postgres", "redis", "byos"])

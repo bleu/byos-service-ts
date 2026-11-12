@@ -1,10 +1,22 @@
 # Deployment environments
 
-`deploy.json` declares stable Compose project names and active services. It uses
+`deploy.json` declares stable logical project names and active services. It uses
 JSON, so the deployment host needs only Python's standard library to parse it.
 Duplicate keys are rejected.
 Postgres and Redis are implicit. Dependencies must be declared explicitly.
 Project renames and volume migrations are outside this deployment system.
+
+Compose project names always use `byos-<project>`. Manifest keys, env directories,
+pnpm arguments and saved-state keys keep the logical name:
+
+| Manifest key / CLI argument | Env directory | Compose project |
+|---|---|---|
+| `bnb-prod` | `env/bnb-prod/` | `byos-bnb-prod` |
+| `bnb-staging` | `env/bnb-staging/` | `byos-bnb-staging` |
+
+Do not add the prefix to manifest keys or rename the env directories. This mapping
+is used for configuration, container ownership, logs and deployment. Removal uses
+the actual Compose name retained in the project's saved snapshot.
 
 Create an ignored `env/<project>/` directory for each declared project:
 
@@ -113,10 +125,38 @@ ambient shell configuration, checks required credentials and active host ports,
 and checks cross-project conflicts and host occupancy before container changes.
 The resulting configuration is reused for deployment, with image IDs pinned.
 Application startup still performs full Zod validation. Existing containers are
-recognized by exact Compose project/service labels and managed state, never by
-name prefix. Deploying into an unmanaged existing project is deliberately blocked
-when its ports are occupied; use fresh project names or perform a planned manual
-migration rather than stopping unknown containers automatically.
+recognized by exact Compose project/service labels. For example, the admin port
+for `bnb-prod` can belong to a container labelled project `byos-bnb-prod` and
+service `admin`, even before the first managed deployment. Similar container names,
+a different service label, or a project such as `byos-bnb-prod-other` cannot claim
+that port. Preflight does not adopt containers or write management state; a
+successful deployment records the declared project. Only recorded projects are
+eligible for later manifest-removal reconciliation.
+
+Existing managed snapshots using an unprefixed Compose project require explicit
+migration before deployment; the scripts fail instead of creating a second project
+and abandoning the old one. Port checks remain read-only.
+
+## Reusing existing data volumes
+
+Default volume names follow the Compose namespace, such as
+`byos-bnb-prod_postgres-data` and `byos-bnb-prod_redis-data`. To keep legacy staging
+data, set these optional values in **local** `env/bnb-staging/.env`, then run
+`pnpm push-secrets` before merging/enabling the next automated release:
+
+```dotenv
+POSTGRES_VOLUME_NAME=byos-prod-local_postgres-data
+REDIS_VOLUME_NAME=byos-prod-local_redis-data
+```
+
+The values must match the volumes mounted by staging's existing Postgres and
+Redis containers. Production keeps its own default `byos-bnb-prod_*` volumes.
+Before changing containers, deployment compares the resolved named volumes with
+existing mounts, including stopped containers, and fails on a mismatch. It never
+silently replaces an existing data mount with a fresh volume. `pnpm check-ports`
+checks configuration and port ownership; this additional data-mount check happens
+during deployment. No volume is renamed, copied or deleted by this setting.
+Do not share a database or Redis data volume between projects.
 
 Only `--all` reconciles explicit manifest removals. It removes deleted services
 from retained projects, and runs `down` for removed managed projects, preserving
