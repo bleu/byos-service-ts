@@ -25,3 +25,19 @@ describe("Binance slippage encoding", () => {
 		}
 	});
 });
+
+describe("Binance Avalanche requests", () => {
+	it("uses configured chain 43114 for both quote and swap requests", async () => {
+		const fetchMock = vi
+			.fn<typeof fetch>()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: [] })))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: { tx: {} } })));
+		vi.stubGlobal("fetch", fetchMock);
+		const client = new BinanceClient("test-key", "test-secret", 43114);
+		await client.getQuotes(token, token, 100n, token, 50);
+		await client.buildSwap("quote-1", token, token, 100n, token, 50);
+		for (const [url] of fetchMock.mock.calls) {
+			expect(new URL(String(url)).searchParams.get("binanceChainId")).toBe("43114");
+		}
+	});
+});

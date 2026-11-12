@@ -89,8 +89,8 @@ describe("formatNativeAmount", () => {
 		expect(formatNativeAmount(10_000_000_000_000_000n, MAINNET)).toBe("0.01 ETH");
 	});
 
-	it("formats XDAI on gnosis", () => {
-		expect(formatNativeAmount(1_000_000_000_000_000_000n, GNOSIS)).toBe("1 XDAI");
+	it("formats xDAI on gnosis", () => {
+		expect(formatNativeAmount(1_000_000_000_000_000_000n, GNOSIS)).toBe("1 xDAI");
 	});
 
 	it("accepts string bigint input", () => {
@@ -157,5 +157,18 @@ describe("txLinks", () => {
 		const links = txLinks(SAMPLE_TX, UNKNOWN_CHAIN);
 		expect(links.explorerUrl).toBeNull();
 		expect(links.tenderlyUrl).toBeNull();
+	});
+});
+
+describe("Avalanche notification and API formatting", () => {
+	it("formats AVAX and provides explorer/Tenderly links", () => {
+		const ctx = { chainId: 43114, cowExplorerUrl: "https://explorer.cow.fi/avalanche" };
+		expect(formatNativeAmount("1000000000000000000", 43114)).toBe("1 AVAX");
+		expect(slackAmount(1000000000000000000n, ctx)).toBe("1 AVAX");
+		expect(slackAddress(SAMPLE_ADDRESS, ctx)).toContain("https://snowscan.xyz/address/");
+		expect(txLinks(SAMPLE_TX, 43114)).toEqual({
+			explorerUrl: `https://snowscan.xyz/tx/${SAMPLE_TX}`,
+			tenderlyUrl: `https://dashboard.tenderly.co/tx/avalanche-mainnet/${SAMPLE_TX}`,
+		});
 	});
 });

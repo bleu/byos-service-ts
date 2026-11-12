@@ -5,6 +5,12 @@
 		},
 		"bnb-staging": {
 			"services": ["byos", "admin", "fynd", "fynd-subsolver", "binance-subsolver"]
+		},
+		"avax-staging": {
+			"services": ["byos", "admin", "binance-subsolver"]
+		},
+		"avax-prod": {
+			"services": ["byos", "admin", "binance-subsolver"]
 		}
 	}
 }

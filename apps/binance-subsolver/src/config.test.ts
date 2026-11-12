@@ -14,6 +14,11 @@ const base = {
 };
 
 describe("solve discovery config", () => {
+	it("accepts Avalanche mainnet for quote and proposal configuration", () => {
+		expect(parseConfig({ ...base, CHAIN_ID: "43114", SUBSOLVER_BEARER: "secret" }).chainId).toBe(
+			43114,
+		);
+	});
 	it.each(["orderbook", "aws"])("requires a URL for %s", (method) => {
 		expect(() => parseConfig({ ...base, DISCOVERY_METHOD: method })).toThrow(/DISCOVERY_URL/);
 		expect(

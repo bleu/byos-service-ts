@@ -63,9 +63,12 @@ describe("selectSlippageBps", () => {
 		},
 	);
 
-	it.each([1, 100, 999_999])("retains ordinary slippage on unconfigured chain %i", (chainId) => {
-		expect(selectSlippageBps({ ...options, chainId })).toBe(50);
-	});
+	it.each([1, 100, 43114, 999_999])(
+		"retains ordinary slippage on unconfigured chain %i",
+		(chainId) => {
+			expect(selectSlippageBps({ ...options, chainId })).toBe(50);
+		},
+	);
 
 	it("recognizes wrapped/native BNB without a global native alias", () => {
 		expect(selectSlippageBps({ ...options, sellToken: wbnb, buyToken: BUY_ETH_ADDRESS })).toBe(5);

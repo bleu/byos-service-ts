@@ -1,14 +1,19 @@
-import { formatUnits } from "viem";
-import { bsc, gnosis, gnosisChiado, mainnet, sepolia } from "viem/chains";
+import {
+	blockExplorerAddressUrl as chainAddressUrl,
+	formatNativeAmount as chainNativeAmount,
+	tenderlyTxUrl as chainTenderlyTxUrl,
+	blockExplorerTxUrl as chainTxUrl,
+	nativeCurrencySymbol,
+} from "@byos/common";
 
-const KNOWN_CHAINS = [mainnet, gnosis, sepolia, gnosisChiado, bsc];
-
-function getChain(chainId: number) {
-	return KNOWN_CHAINS.find((c) => c.id === chainId);
-}
+export { type SimulationFailureParams, tenderlySimulationUrl } from "@byos/common";
 
 export function getChainId(): number {
 	return Number(process.env.CHAIN_ID ?? "1");
+}
+
+export function getNativeCurrencySymbol(): string {
+	return nativeCurrencySymbol(getChainId());
 }
 
 export function getCowExplorerUrl(): string {
@@ -16,63 +21,23 @@ export function getCowExplorerUrl(): string {
 }
 
 export function cowExplorerOrderUrl(orderUid: string): string | null {
-	const base = getCowExplorerUrl();
-	return `${base}/orders/${orderUid}`;
+	return `${getCowExplorerUrl()}/orders/${orderUid}`;
 }
 
 export function blockExplorerAddressUrl(address: string): string | null {
-	const baseUrl = getChain(getChainId())?.blockExplorers?.default?.url;
-	if (!baseUrl) return null;
-	return `${baseUrl}/address/${address}`;
+	return chainAddressUrl(address, getChainId());
 }
 
 export function blockExplorerTxUrl(txHash: string): string | null {
-	const baseUrl = getChain(getChainId())?.blockExplorers?.default?.url;
-	if (!baseUrl) return null;
-	return `${baseUrl}/tx/${txHash}`;
+	return chainTxUrl(txHash, getChainId());
 }
-
-const TENDERLY_NETWORK_SLUGS: Record<number, string> = {
-	1: "mainnet",
-	56: "bsc",
-	100: "gnosis",
-	11155111: "sepolia",
-	10200: "chiado",
-};
 
 export function tenderlyTxUrl(txHash: string): string | null {
-	const slug = TENDERLY_NETWORK_SLUGS[getChainId()];
-	if (!slug) return null;
-	return `https://dashboard.tenderly.co/tx/${slug}/${txHash}`;
-}
-
-export interface SimulationFailureParams {
-	chainId: number;
-	blockNumber: string;
-	timestamp: number;
-	from: string;
-	to: string;
-	calldata: string;
-}
-
-/** Builds a Tenderly "new simulation" URL pre-filled with the failed call's parameters. */
-export function tenderlySimulationUrl(params: SimulationFailureParams): string | null {
-	const slug = TENDERLY_NETWORK_SLUGS[params.chainId];
-	if (!slug) return null;
-	const q = new URLSearchParams({
-		network: String(params.chainId),
-		blockNumber: params.blockNumber,
-		from: params.from,
-		contractAddress: params.to,
-		rawFunctionInput: params.calldata,
-	});
-	return `https://dashboard.tenderly.co/simulator/new?${q.toString()}`;
+	return chainTenderlyTxUrl(txHash, getChainId());
 }
 
 export function formatNativeAmount(amountWei: string): string {
-	const bn = BigInt(amountWei);
-	const symbol = getChain(getChainId())?.nativeCurrency?.symbol ?? "ETH";
-	return `${formatUnits(bn, 18)} ${symbol}`;
+	return chainNativeAmount(amountWei, getChainId());
 }
 
 export interface TxLinks {
@@ -82,8 +47,5 @@ export interface TxLinks {
 
 export function txLinks(txHash: string | null): TxLinks {
 	if (!txHash) return { explorerUrl: null, tenderlyUrl: null };
-	return {
-		explorerUrl: blockExplorerTxUrl(txHash),
-		tenderlyUrl: tenderlyTxUrl(txHash),
-	};
+	return { explorerUrl: blockExplorerTxUrl(txHash), tenderlyUrl: tenderlyTxUrl(txHash) };
 }

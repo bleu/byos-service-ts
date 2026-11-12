@@ -1,50 +1,15 @@
-import { formatUnits } from "viem";
-import { bsc, gnosis, gnosisChiado, mainnet, sepolia } from "viem/chains";
+import {
+	blockExplorerAddressUrl,
+	blockExplorerTxUrl,
+	formatNativeAmount,
+	tenderlyTxUrl,
+} from "@byos/common";
 
-// Chains CoW Protocol operates on. Extend as needed.
-const KNOWN_CHAINS = [mainnet, gnosis, sepolia, gnosisChiado, bsc];
-
-function getChain(chainId: number) {
-	return KNOWN_CHAINS.find((c) => c.id === chainId);
-}
-
-// --- URL builders (return null when data is unavailable — callers must handle) ---
+export { blockExplorerAddressUrl, blockExplorerTxUrl, formatNativeAmount, tenderlyTxUrl };
 
 export function cowExplorerOrderUrl(orderUid: string, cowExplorerUrl: string): string | null {
 	if (!cowExplorerUrl) return null;
 	return `${cowExplorerUrl}/orders/${orderUid}`;
-}
-
-export function blockExplorerAddressUrl(address: string, chainId: number): string | null {
-	const baseUrl = getChain(chainId)?.blockExplorers?.default?.url;
-	if (!baseUrl) return null;
-	return `${baseUrl}/address/${address}`;
-}
-
-export function blockExplorerTxUrl(txHash: string, chainId: number): string | null {
-	const baseUrl = getChain(chainId)?.blockExplorers?.default?.url;
-	if (!baseUrl) return null;
-	return `${baseUrl}/tx/${txHash}`;
-}
-
-const TENDERLY_NETWORK_SLUGS: Record<number, string> = {
-	1: "mainnet",
-	56: "bsc",
-	100: "gnosis",
-	11155111: "sepolia",
-	10200: "chiado",
-};
-
-export function tenderlyTxUrl(txHash: string, chainId: number): string | null {
-	const slug = TENDERLY_NETWORK_SLUGS[chainId];
-	if (!slug) return null;
-	return `https://dashboard.tenderly.co/tx/${slug}/${txHash}`;
-}
-
-export function formatNativeAmount(amount: string | bigint, chainId: number): string {
-	const bn = typeof amount === "bigint" ? amount : BigInt(amount);
-	const symbol = getChain(chainId)?.nativeCurrency?.symbol ?? "ETH";
-	return `${formatUnits(bn, 18)} ${symbol}`;
 }
 
 // --- Slack mrkdwn helpers ---

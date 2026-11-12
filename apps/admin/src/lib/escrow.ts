@@ -1,4 +1,4 @@
-import { EscrowAbi } from "@byos/common";
+import { EscrowAbi, evmChainFor } from "@byos/common";
 import { type Address, createPublicClient, http, parseEther } from "viem";
 
 // Varied mocked escrow balances for local development (USE_MOCKED_DATA=true).
@@ -28,7 +28,10 @@ export async function getEscrowBalances(
 		throw new Error("RPC_URL and ESCROW_ADDRESS env vars are required");
 	}
 
-	const client = createPublicClient({ transport: http(rpcUrl) });
+	const client = createPublicClient({
+		chain: evmChainFor(Number(process.env.CHAIN_ID ?? "1")),
+		transport: http(rpcUrl),
+	});
 
 	const results = await client.multicall({
 		contracts: addresses.map((address) => ({
