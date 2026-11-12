@@ -52,16 +52,23 @@ jobs:
       - run: pnpm test:integration
 
   deployment:
+    name: deployment (${{ matrix.compose }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compose: [v2.39.1, v5.7.1]
     steps:
       - uses: actions/checkout@v4
       - name: Install tested Compose CLI
+        env:
+          COMPOSE_VERSION: ${{ matrix.compose }}
         run: |
           set -euo pipefail
-          compose_dir="$RUNNER_TEMP/compose-v5.7.1"
+          compose_dir="$RUNNER_TEMP/compose-$COMPOSE_VERSION"
           mkdir -p "$compose_dir"
           cd "$compose_dir"
-          release=https://github.com/docker/compose/releases/download/v5.7.1
+          release="https://github.com/docker/compose/releases/download/$COMPOSE_VERSION"
           curl -fsSL --retry 3 "$release/docker-compose-linux-x86_64" -o docker-compose-linux-x86_64
           curl -fsSL --retry 3 "$release/docker-compose-linux-x86_64.sha256" -o docker-compose-linux-x86_64.sha256
           sha256sum -c docker-compose-linux-x86_64.sha256

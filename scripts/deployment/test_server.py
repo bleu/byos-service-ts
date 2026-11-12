@@ -568,6 +568,10 @@ class ComposeResolutionTests(unittest.TestCase):
             self.assertEqual(entry["ports"][0]["target"], port)
 
     def test_compose_file_adds_prefix_without_cli_project_override(self):
+        # This direct Compose invocation includes every service, unlike resolve(),
+        # so provide its complete env-file set on older CLIs as well.
+        for service in ("admin", "fynd", "fynd-subsolver", "binance-subsolver"):
+            (self.root / "env/prod" / f".env.{service}").write_text("")
         environment = {**server.clean_env(), "PROJECT": "prod"}
         rendered = json.loads(
             server.run(
@@ -623,6 +627,15 @@ class ComposeResolutionTests(unittest.TestCase):
             server.DeploymentError, "missing BYOS_PUBLIC_HOST_PORT"
         ):
             server.resolve(self.root, "prod", ["postgres", "redis", "byos"])
+
+    def test_declared_service_still_requires_its_env_file_before_compose(self):
+        (self.root / "env/prod/.env.byos").unlink()
+        with patch.object(server, "run") as run:
+            with self.assertRaisesRegex(
+                server.DeploymentError, "missing or linked .env.byos"
+            ):
+                server.resolve(self.root, "prod", ["postgres", "redis", "byos"])
+            run.assert_not_called()
 
     def test_dependency_omission_fails(self):
         with self.assertRaisesRegex(server.DeploymentError, "dependencies"):

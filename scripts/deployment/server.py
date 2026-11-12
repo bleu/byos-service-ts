@@ -261,8 +261,9 @@ def resolve(root, project, selected):
             path.is_file() and not path.is_symlink(),
             f"{project}: missing or linked {filename}",
         )
-    # --no-env-resolution lets inactive services lack their env files. Filter those
-    # services before asking Compose to resolve active env files and dependencies.
+    # Older Compose versions still check service env-file existence when using
+    # --no-env-resolution alone. Load an uninterpolated model first, then resolve
+    # only the declared services and their required env files.
     environment = {**clean_env(), "PROJECT": project}
     args = [
         "docker",
@@ -278,7 +279,14 @@ def resolve(root, project, selected):
     ]
     raw = json.loads(
         run(
-            [*args, "config", "--no-env-resolution", "--format", "json"],
+            [
+                *args,
+                "config",
+                "--no-interpolate",
+                "--no-env-resolution",
+                "--format",
+                "json",
+            ],
             env=environment,
         )
     )
@@ -295,26 +303,24 @@ def resolve(root, project, selected):
     with tempfile.TemporaryDirectory() as temporary:
         model = Path(temporary) / "compose.json"
         atomic_json(model, raw)
+        resolved_args = [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(root),
+            "--env-file",
+            str(directory / ".env"),
+            "-p",
+            compose_project(project),
+            "-f",
+            str(model),
+        ]
         rendered = json.loads(
-            run(
-                [
-                    "docker",
-                    "compose",
-                    "--project-directory",
-                    str(root),
-                    "--env-file",
-                    str(directory / ".env"),
-                    "-p",
-                    compose_project(project),
-                    "-f",
-                    str(model),
-                    "config",
-                    "--format",
-                    "json",
-                ],
-                env=environment,
-            )
+            run([*resolved_args, "config", "--format", "json"], env=environment)
         )
+        # Read interpolation values from the filtered model too; the original
+        # Compose file would re-check inactive env files on older versions.
+        resolved_env = run([*resolved_args, "config", "--environment"], env=environment)
     for service, config in rendered["services"].items():
         env = config.get("environment", {})
         for key in REQUIRED.get(service, ()):
@@ -344,9 +350,6 @@ def resolve(root, project, selected):
                     f"{project}/{service}: SOLVE_PORT must match Compose target",
                 )
     # Validate explicit shared port settings rather than silently accepting defaults.
-    resolved_env = run(
-        [*args, "config", "--no-env-resolution", "--environment"], env=environment
-    )
     values = dict(
         line.split("=", 1) for line in resolved_env.splitlines() if "=" in line
     )
