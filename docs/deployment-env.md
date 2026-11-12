@@ -75,7 +75,7 @@ specified by the shared specification and ADR-0016.
 
 Local prerequisites: Python 3.10+, Bash, OpenSSH, rsync, pnpm. The Hetzner host
 needs Git, Python 3.10+, Bash, Docker Engine and recent
-Docker Compose supporting `config --no-env-resolution` (Compose v5 is tested).
+Docker Compose supporting `config --no-env-resolution` (v2.39.1 and v5.7.1 are tested).
 The SSH user must be able to use Docker without sudo and fetch commits using its
 read-only GitHub deploy key. The checkout must have no tracked modifications.
 
@@ -276,3 +276,12 @@ Confirm the host has sufficient disk and memory capacity, then run
 configuration blocks the release before changing any containers. Live Avalanche
 quote/swap, simulation and `/solve` verification requires the configured contracts,
 credentials and chain endpoints; unit tests do not substitute for this check.
+
+
+Configuration loading first reads an uninterpolated Compose model, filters it to
+manifest services, and only then resolves their env files and shared variables.
+This ordering supports Compose v2.39.1, whose `--no-env-resolution` flag alone
+still checks inactive env-file paths. Missing files for declared services continue
+to fail preflight. Both the initial resolution and shared-variable inspection use
+the filtered model, so AVAX never needs dummy Fynd files. CI runs deployment
+regressions against both v2.39.1 and v5.7.1.
