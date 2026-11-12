@@ -21,25 +21,25 @@ docker build -t byos-service:local .
 Build the admin dashboard image (must be rebuilt separately whenever admin code changes):
 
 ```bash
-docker compose -f docker-compose.prod-local.yml build admin
+docker build -f apps/admin/Dockerfile -t byos-admin:local .
 ```
 
 ## Configure environment variables
 
-The deployment uses two env files and two compose-level secrets.
+Each project in `deploy.json` has isolated env files. See [deployment environments](deployment-env.md) for the directory layout and required host ports. Shared secrets belong in `env/<project>/.env`; per-service values belong in that project’s service files.
 
 ### Compose-level secrets
 
-Set these in your shell or in a `.env` file at the repo root before running `docker compose`:
+Set these in your shell or in a `.env` file in `env/<project>/` before running `docker compose`:
 
 | Variable | Description |
 |----------|-------------|
 | `POSTGRES_PASSWORD` | Password for the PostgreSQL database |
 | `REDIS_PASSWORD` | Password for the Redis instance |
 
-### BYOS service — `.env.byos`
+### BYOS service — `env/<project>/.env.byos`
 
-Create `.env.byos` with the values below. Use `.env.byos` in the repo root as a starting template.
+Create `.env.byos` with the values below. Use `.env.byos` under `env/<project>/` as a starting template.
 
 #### Required
 
@@ -76,9 +76,9 @@ Create `.env.byos` with the values below. Use `.env.byos` in the repo root as a 
 | `RATE_MIN_PER_WINDOW` | `120` | Minimum requests allowed per window regardless of balance |
 | `RATE_MAX_PER_WINDOW` | `3000` | Maximum requests allowed per window regardless of balance |
 
-### Admin dashboard — `.env.admin`
+### Admin dashboard — `env/<project>/.env.admin`
 
-Create `.env.admin`. Use the template in the repo root as a starting point.
+Create `.env.admin`. Use the template under `env/<project>/` as a starting point.
 
 #### Required
 
@@ -97,7 +97,7 @@ Create `.env.admin`. Use the template in the repo root as a starting point.
 ## Start services
 
 ```bash
-docker compose -f docker-compose.prod-local.yml up byos postgres redis admin -d
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml up byos postgres redis admin -d
 ```
 
 This command starts the BYOS service, PostgreSQL, Redis, and the admin dashboard. Database migrations run automatically when the service starts.
@@ -105,7 +105,7 @@ This command starts the BYOS service, PostgreSQL, Redis, and the admin dashboard
 ### Port mapping
 
 The `docker-compose.prod-local.yml` file uses the following default host ports.
-Set any override in the **repo-root `.env` file**; all seven variables belong in
+Set any override in the **project `env/<project>/.env` file**; all seven variables belong in
 that file, rather than `.env.byos`, `.env.admin`, or a sub-solver env file.
 Service `env_file` entries configure containers and do not supply Compose port
 interpolation values.
@@ -126,14 +126,14 @@ For example, to publish the admin dashboard on port 53002:
 ADMIN_HOST_PORT=53002
 ```
 
-Then run `docker compose -f docker-compose.prod-local.yml up -d admin` to
+Then run `PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml up -d admin` to
 recreate its port mapping. No image rebuild is needed. Unset or empty variables
 use the defaults. Container ports and URLs between containers stay the same.
 Shell environment variables take precedence over `.env`. To use a different
 Compose env file, pass it explicitly:
 
 ```bash
-docker compose --env-file env/bnb-staging/.env -f docker-compose.prod-local.yml up -d
+PROJECT=bnb-staging docker compose --env-file env/bnb-staging/.env -f docker-compose.prod-local.yml up -d
 ```
 
 > **Security.** The BYOS internal API (port 9586) and the admin dashboard (port 53001) must not be exposed to the public internet. Use a firewall rule or a network overlay such as [Tailscale](https://tailscale.com/) to restrict access. The public API (port 59585) is the only port that should be reachable externally.
@@ -141,7 +141,7 @@ docker compose --env-file env/bnb-staging/.env -f docker-compose.prod-local.yml 
 ## Access logs
 
 ```bash
-docker compose -f docker-compose.prod-local.yml logs -f byos
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml logs -f byos
 ```
 
 Replace `byos` with `admin`, `postgres`, or `redis` to view logs for other services.
@@ -151,13 +151,13 @@ Replace `byos` with `admin`, `postgres`, or `redis` to view logs for other servi
 Stop all services:
 
 ```bash
-docker compose -f docker-compose.prod-local.yml stop
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml stop
 ```
 
 Restart a single service:
 
 ```bash
-docker compose -f docker-compose.prod-local.yml restart byos
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml restart byos
 ```
 
 ## Verify
@@ -230,11 +230,11 @@ an image containing the Redis history command:
 
 ```bash
 # Read-only: Redis memory and completed/failed/pending counts per queue.
-docker compose -f docker-compose.prod-local.yml exec byos \
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml exec byos \
   node apps/byos/dist/redis-history.js
 
 # Remove completed jobs older than one hour in batches of 100.
-docker compose -f docker-compose.prod-local.yml exec byos \
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml exec byos \
   node apps/byos/dist/redis-history.js --apply
 ```
 
@@ -249,5 +249,5 @@ To apply the resource and policy changes without removing persisted data:
 
 ```bash
 docker build -t byos-service:local .
-docker compose -f docker-compose.prod-local.yml up -d redis byos
+PROJECT=bnb-prod docker compose --env-file env/bnb-prod/.env -f docker-compose.prod-local.yml up -d redis byos
 ```
