@@ -3,6 +3,7 @@ export { BUY_ETH_ADDRESS, SupportedChainId } from "@cowprotocol/cow-sdk";
 
 export * from "./abis/index.js";
 export * from "./chain.js";
+export * from "./chain-formatters.js";
 export * from "./dto.js";
 export * from "./eip712.js";
 export * from "./error.js";

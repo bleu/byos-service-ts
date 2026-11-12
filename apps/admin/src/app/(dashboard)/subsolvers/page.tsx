@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { getEscrowBalances } from "@/lib/escrow";
-import { formatNativeAmount } from "@/lib/formatters";
+import { formatNativeAmount, getNativeCurrencySymbol } from "@/lib/formatters";
 import { getSubsolverStats } from "@/lib/queries";
 import type { Address } from "viem";
 import { DateRangeForm } from "../date-range-form";
@@ -21,6 +21,7 @@ export default async function SubsolversPage({
   const from = fromParam ?? defaults.from;
   const to = toParam ?? defaults.to;
 
+  const nativeSymbol = getNativeCurrencySymbol();
   const range = { from: new Date(from), to: new Date(to) };
 
   const subsolvers = await getSubsolverStats(db, range);
@@ -46,9 +47,9 @@ export default async function SubsolversPage({
               <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Penalized</th>
               <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Win rate</th>
               <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Penalties</th>
-              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Penalized (ETH)</th>
-              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Buffer (ETH)</th>
-              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Escrow (ETH)</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Penalized ({nativeSymbol})</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Buffer ({nativeSymbol})</th>
+              <th className="px-4 py-3 text-right text-[10px] uppercase tracking-widest text-dim font-medium">Escrow ({nativeSymbol})</th>
             </tr>
           </thead>
           <tbody>

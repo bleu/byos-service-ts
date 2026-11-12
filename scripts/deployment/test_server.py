@@ -477,6 +477,60 @@ class ComposeResolutionTests(unittest.TestCase):
                     rendered["services"]["redis"]["healthcheck"]["test"][1],
                 )
 
+    def test_avalanche_projects_resolve_without_fynd_files_or_port_settings(self):
+        declared = server.manifest(ROOT)
+        expected = ["byos", "admin", "binance-subsolver", "postgres", "redis"]
+        for index, project in enumerate(("avax-staging", "avax-prod")):
+            self.assertEqual(declared[project], expected)
+            directory = self.root / "env" / project
+            directory.mkdir(parents=True)
+            port_keys = [
+                "POSTGRES_HOST_PORT",
+                "REDIS_HOST_PORT",
+                "BYOS_PUBLIC_HOST_PORT",
+                "BYOS_INTERNAL_HOST_PORT",
+                "ADMIN_HOST_PORT",
+                "BINANCE_SUBSOLVER_HOST_PORT",
+            ]
+            shared = "POSTGRES_PASSWORD=dummy\nREDIS_PASSWORD=dummy\n"
+            shared += "\n".join(
+                f"{key}={32000 + index * 10 + offset}"
+                for offset, key in enumerate(port_keys)
+            )
+            (directory / ".env").write_text(shared + "\n")
+            for service in ("byos", "admin", "binance-subsolver"):
+                values = {key: "dummy" for key in server.REQUIRED[service]}
+                values.update(
+                    {
+                        "CHAIN_ID": "43114",
+                        "DISCOVERY_METHOD": "solve",
+                        "SUBSOLVER_BEARER": "dummy",
+                        "SUBSOLVERS_ENDPOINTS": "http://binance-subsolver:3002/solve",
+                    }
+                )
+                (directory / f".env.{service}").write_text(
+                    "\n".join(f"{key}={value}" for key, value in values.items())
+                )
+            rendered = server.resolve(self.root, project, expected)
+            self.assertEqual(rendered["name"], f"byos-{project}")
+            self.assertEqual(set(rendered["services"]), set(expected))
+            self.assertEqual(
+                rendered["services"]["byos"]["environment"]["CHAIN_ID"], "43114"
+            )
+            self.assertEqual(
+                rendered["services"]["binance-subsolver"]["environment"]["CHAIN_ID"],
+                "43114",
+            )
+            self.assertEqual(
+                rendered["volumes"]["postgres-data"]["name"],
+                f"byos-{project}_postgres-data",
+            )
+            self.assertEqual(
+                rendered["services"]["byos"]["environment"]["SUBSOLVERS_ENDPOINTS"],
+                "http://binance-subsolver:3002/solve",
+            )
+            self.assertFalse((directory / ".env.fynd").exists())
+
     def test_subsolver_healthchecks_probe_their_own_listener_ports(self):
         directory = self.root / "env/prod"
         with (directory / ".env").open("a") as stream:

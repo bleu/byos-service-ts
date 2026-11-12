@@ -27,7 +27,7 @@ describe("parseConfig", () => {
 	});
 
 	it("accepts every EVM chain CoW settles on", () => {
-		for (const id of [1, 100, 137, 8453, 42161, 11155111]) {
+		for (const id of [1, 56, 100, 137, 8453, 42161, 43114, 11155111]) {
 			expect(parseConfig({ ...base, CHAIN_ID: String(id) }).CHAIN_ID).toBe(id);
 		}
 	});

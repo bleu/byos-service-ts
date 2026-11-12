@@ -13,6 +13,8 @@ pnpm arguments and saved-state keys keep the logical name:
 |---|---|---|
 | `bnb-prod` | `env/bnb-prod/` | `byos-bnb-prod` |
 | `bnb-staging` | `env/bnb-staging/` | `byos-bnb-staging` |
+| `avax-staging` | `env/avax-staging/` | `byos-avax-staging` |
+| `avax-prod` | `env/avax-prod/` | `byos-avax-prod` |
 
 Do not add the prefix to manifest keys or rename the env directories. This mapping
 is used for configuration, container ownership, logs and deployment. Removal uses
@@ -220,3 +222,57 @@ Merge the Compose/manifest PR first and the server-command PR second. Verify a
 manual build and deployment with the actual env files before merging the CI PR,
 whose merge enables automatic deployment. The test workflow also exercises helper
 regressions and both synthetic build contexts without production secrets.
+
+
+## Avalanche deployment preparation
+
+`avax-staging` and `avax-prod` run BYOS, admin and the Binance sub-solver, plus
+implicit Postgres and Redis. Fynd and the Fynd sub-solver remain BSC-only and are
+not part of either Avalanche deployment. No Fynd env files or host-port variables
+are required for these projects.
+
+Before merging the manifest change, create **both** local directories with these
+files, fill their values, and run `pnpm push-secrets`:
+
+```text
+env/avax-staging/
+  .env
+  .env.byos
+  .env.admin
+  .env.binance-subsolver
+env/avax-prod/
+  (the same four files)
+```
+
+- Set `CHAIN_ID=43114` in all three service env files. These are two isolated
+  deployments on Avalanche C-Chain mainnet; the staging name does not select Fuji.
+- Configure an Avalanche RPC endpoint and the correct Escrow, TrampolineFactory,
+  operator key/roles and funded collateral for each deployment. Contract deployment
+  and operator funding are prerequisites, managed in `bleu/byos-contracts`.
+- BYOS derives Avalanche's settlement address, WAVAX and production orderbook URL
+  from the pinned CoW SDK. Set `SETTLEMENT_ADDRESS`/`ORDERBOOK_URL` when an explicit
+  deployment override is needed. Binance still requires `GPV2_SETTLEMENT` in its
+  own env file; it must match BYOS's settlement.
+- Configure the Binance credentials and discovery mode. For `solve`, set BYOS's
+  `SUBSOLVERS_ENDPOINTS=http://binance-subsolver:3002/solve` and a matching
+  `SUBSOLVER_BEARER` in BYOS and Binance. For `orderbook` or `aws`, set Binance's
+  `DISCOVERY_URL` for the selected chain and environment instead. Never forward
+  Avalanche auctions to the absent Fynd service.
+- Set `COW_EXPLORER_URL` appropriately in BYOS and admin, including a staging
+  override if needed. Their native amount labels and block-explorer links use the
+  shared chain registry automatically.
+- Set chain-appropriate gas, block-duration, collateral and slippage settings;
+  do not carry BNB-specific economic values over without review. Avalanche uses
+  ordinary slippage unless an explicit correlated-asset group is added later.
+- In each shared `.env`, set `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and all six
+  active host-port values: `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`,
+  `BYOS_PUBLIC_HOST_PORT`, `BYOS_INTERNAL_HOST_PORT`, `ADMIN_HOST_PORT`, and
+  `BINANCE_SUBSOLVER_HOST_PORT`. All four projects must use distinct host bindings.
+  New Avalanche deployments use their own default data volumes; do not reuse BNB
+  volume overrides.
+
+Confirm the host has sufficient disk and memory capacity, then run
+`pnpm check-ports`. Merging deploys **all four** projects; missing Avalanche env
+configuration blocks the release before changing any containers. Live Avalanche
+quote/swap, simulation and `/solve` verification requires the configured contracts,
+credentials and chain endpoints; unit tests do not substitute for this check.
