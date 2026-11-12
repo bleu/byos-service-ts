@@ -87,6 +87,10 @@ def name(value):
     return value
 
 
+def compose_project(project):
+    return f"byos-{name(project)}"
+
+
 def unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -268,7 +272,7 @@ def resolve(root, project, selected):
         "--env-file",
         str(directory / ".env"),
         "-p",
-        project,
+        compose_project(project),
         "-f",
         str(root / "docker-compose.prod-local.yml"),
     ]
@@ -301,7 +305,7 @@ def resolve(root, project, selected):
                     "--env-file",
                     str(directory / ".env"),
                     "-p",
-                    project,
+                    compose_project(project),
                     "-f",
                     str(model),
                     "config",
@@ -377,7 +381,7 @@ def overlaps(left, right):
     )
 
 
-def validate_ports(configs, managed):
+def validate_ports(configs):
     seen = []
     for project, config in configs.items():
         for service, host, port, protocol in bindings(config):
@@ -398,12 +402,14 @@ def validate_ports(configs, managed):
                 )
             seen.append((project, service, host, port, protocol))
     containers = []
-    ids = run(["docker", "container", "ls", "--quiet"]).split()
+    ids = run(["docker", "container", "ls", "--all", "--quiet"]).split()
     if ids:
         containers = json.loads(run(["docker", "container", "inspect", *ids]))
     for project, service, host, port, protocol in seen:
         owners = []
         for container in containers:
+            if not container.get("State", {}).get("Running", True):
+                continue
             for key, published in (
                 container.get("NetworkSettings", {}).get("Ports") or {}
             ).items():
@@ -415,8 +421,8 @@ def validate_ports(configs, managed):
                     ):
                         labels = container["Config"].get("Labels") or {}
                         require(
-                            project in managed
-                            and labels.get("com.docker.compose.project") == project
+                            labels.get("com.docker.compose.project")
+                            == compose_project(project)
                             and labels.get("com.docker.compose.service") == service,
                             f"{project}/{service}: port {port} occupied by another container",
                         )
@@ -432,6 +438,39 @@ def validate_ports(configs, managed):
                 raise DeploymentError(
                     f"{project}/{service}: port {port} occupied on host"
                 ) from None
+
+    return containers
+
+
+def validate_existing_volumes(configs, containers):
+    # A matching project can predate this system. Never replace its mounted data
+    # with fresh default volumes merely because the logical project name changed.
+    for project, config in configs.items():
+        for container in containers:
+            labels = container["Config"].get("Labels") or {}
+            if labels.get("com.docker.compose.project") != compose_project(project):
+                continue
+            service = labels.get("com.docker.compose.service")
+            if service not in config["services"]:
+                continue
+            mounted = {
+                entry["Destination"]: entry for entry in container.get("Mounts", [])
+            }
+            for volume in config["services"][service].get("volumes", []):
+                if volume.get("type") != "volume" or not volume.get("source"):
+                    continue
+                old = mounted.get(volume["target"])
+                if not old:
+                    continue
+                expected = config["volumes"][volume["source"]]["name"]
+                variable = {
+                    "postgres-data": "POSTGRES_VOLUME_NAME",
+                    "redis-data": "REDIS_VOLUME_NAME",
+                }.get(volume["source"], "the volume configuration")
+                require(
+                    old.get("Type") == "volume" and old.get("Name") == expected,
+                    f"{project}/{service}: existing data mount differs from {expected}; configure {variable} to preserve it before deployment",
+                )
 
 
 def compose(config, *args, capture=True):
@@ -470,7 +509,15 @@ def deploy(root, state, args, check_only=False):
         project: resolve(root, project, services)
         for project, services in desired.items()
     }
-    validate_ports(configs, saved["projects"])
+    containers = validate_ports(configs)
+    if not check_only:
+        for project, previous in saved["projects"].items():
+            if project in desired:
+                require(
+                    previous["config"]["name"] == compose_project(project),
+                    f"{project}: saved deployment uses a different Compose project; migrate it explicitly before deployment",
+                )
+        validate_existing_volumes(configs, containers)
     targets = list(desired) if args == ["--all"] else [name(args[0])]
     if args != ["--all"]:
         require(targets[0] in desired, "Project is not declared in manifest")

@@ -1,4 +1,4 @@
-name: ${PROJECT:?PROJECT is required}
+name: byos-${PROJECT:?PROJECT is required}
 
 services:
     postgres:
@@ -204,4 +204,6 @@ services:
           condition: service_healthy
 volumes:
   postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:-byos-${PROJECT}_postgres-data}
   redis-data:
+    name: ${REDIS_VOLUME_NAME:-byos-${PROJECT}_redis-data}
