@@ -555,7 +555,8 @@ components:
         - `InsufficientEscrow` — the sub-solver's escrow balance is below
           the required minimum. Fix: deposit escrow and resubmit.
         - `UnsupportedOrder` — the order is outside the simulation envelope
-          (hooks, non-erc20 balances).
+          (general Atomic Bundle wrappers or non-erc20 balances; ordinary hooks and
+          dedicated FlashLoanRouter orders are supported).
         - `AmountMismatch` — for fill-or-kill orders, the proposal amount
           differs from the order's; for partial fills, the amount is
           zero, exceeds the order, or violates the limit price.

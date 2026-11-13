@@ -31,3 +31,11 @@ Secrets (`DATABASE_URL`, `RPC_URL`, `OPERATOR_PRIVATE_KEY`, `SOLVE_BEARER_TOKEN`
 `RPC_URL`, `ESCROW_ADDRESS`, `DEFAULT_GAS_PRICE`, and `OPERATOR_PRIVATE_KEY` are all required. BYOS cannot validate proposals without an RPC connection, and the penalty loop requires an operator key. Omitting any of these fails startup with a clear error.
 
 `ORDERBOOK_URL` and `SETTLEMENT_ADDRESS` resolve automatically from `CHAIN_ID` via the cow-sdk and only need to be set for barn/staging overrides.
+
+### Protocol deployment metadata
+
+`FLASH_LOAN_ROUTER` is an optional override for local/custom deployments. Without it,
+startup resolves `FlashLoanRouter[CHAIN_ID].address` from CoW's deployment registry.
+An unavailable or invalid registry entry falls back to the canonical router address;
+this avoids making registry availability a service startup requirement. Runtime
+configuration remains environment-based; the registry supplies protocol metadata.

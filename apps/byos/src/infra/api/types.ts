@@ -52,6 +52,16 @@ export const auctionOrderSchema = z.object({
 	signingScheme: z.string(),
 	signature: z.string(),
 	flashloanHint: flashloanHintSchema.nullish(),
+	// General Atomic Bundles are detected so unsupported orders cannot settle unwrapped.
+	wrappers: z
+		.array(
+			z.object({
+				address: addressString,
+				data: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/),
+				isOmittable: z.boolean().optional(),
+			}),
+		)
+		.optional(),
 });
 
 export type AuctionOrder = z.infer<typeof auctionOrderSchema>;

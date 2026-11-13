@@ -137,6 +137,7 @@ interface SerializedOrderRecord {
 	erc20Balances: boolean;
 	status: string;
 	flashloanHint?: SerializedFlashloanHint;
+	hasSettlementWrappers?: boolean;
 }
 interface SerializedState {
 	auctionId: number;
@@ -197,6 +198,7 @@ function serializeRecord(r: OrderRecord): SerializedOrderRecord {
 		postInteractions: r.postInteractions.map(serializeInteraction),
 		erc20Balances: r.erc20Balances,
 		status: r.status,
+		hasSettlementWrappers: r.hasSettlementWrappers,
 		...(r.flashloanHint ? { flashloanHint: serializeFlashloanHint(r.flashloanHint) } : {}),
 	};
 }
@@ -221,6 +223,7 @@ function deserializeRecord(r: SerializedOrderRecord): OrderRecord {
 		postInteractions: r.postInteractions.map(deserializeInteraction),
 		erc20Balances: r.erc20Balances,
 		status: r.status as OrderStatus,
+		hasSettlementWrappers: r.hasSettlementWrappers,
 		...(r.flashloanHint ? { flashloanHint: deserializeFlashloanHint(r.flashloanHint) } : {}),
 	};
 }
@@ -378,5 +381,6 @@ export function auctionOrderToRecord(order: AuctionOrder): OrderRecord {
 		erc20Balances,
 		status: OrderStatus.OPEN,
 		...(flashloanHint ? { flashloanHint } : {}),
+		hasSettlementWrappers: (order.wrappers?.length ?? 0) > 0,
 	};
 }

@@ -182,3 +182,20 @@ The service runs three BullMQ background jobs:
 ## License
 
 [GPL-3.0-or-later](LICENSE)
+
+### Flash loan orders
+
+BYOS simulates dedicated CoW FlashLoanRouter orders, including their pre/post hooks
+and loan repayment. At startup it resolves the router for `CHAIN_ID` from
+[CoW networks.json](https://github.com/cowprotocol/flash-loan-router/blob/main/networks.json).
+Fetch/parse failures or missing/invalid entries use
+`0x9da8b48441583a2b93e2ef8213aad0ec0b392c69`. `FLASH_LOAN_ROUTER` optionally
+overrides this for local/custom deployments. Enable flash loans in the CoW driver
+and configure the same router there. Verify the router is deployed for the selected
+settlement and authorized as a solver, and the submitter has solver authorization
+and Escrow `SUBMITTER_ROLE`. Simulating with a real `SUBMITTER_ADDRESS` checks the
+actual authorization rather than the dummy authenticator override.
+
+General Atomic Bundle wrapper orders are currently rejected as `UnsupportedOrder`
+and skipped by `/solve`; support for the dedicated flash loan router does not imply
+support for `wrappedSettle` chains.

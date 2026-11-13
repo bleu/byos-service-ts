@@ -17,6 +17,7 @@ import {
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
 import { createBatchedEscrowBalanceReader, type EscrowValidator } from "./escrow.js";
+import { DEFAULT_FLASH_LOAN_ROUTER } from "./flash-loan-router.js";
 import { buildSimulation } from "./simulation.js";
 import { simulationOrder } from "./simulation-order.js";
 
@@ -175,7 +176,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly readEscrowBalance: (
 			subSolver: Address,
 		) => Promise<bigint> = createBatchedEscrowBalanceReader(publicClient, escrowAddress),
-		private readonly flashLoanRouterAddress?: Address,
+		private readonly flashLoanRouterAddress: Address = DEFAULT_FLASH_LOAN_ROUTER,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -320,12 +321,10 @@ export class SimulationValidator implements ValidateProposal {
 		const trampoline = trampolineResult.value;
 		const authenticator = authenticatorResult.value;
 
-		// Build an optional settlement wrapper when the order carries a flash
-		// loan hint and a router address is configured.
-		const wrapper: SettlementWrapper | undefined =
-			record.flashloanHint && this.flashLoanRouterAddress
-				? flashLoanWrapper(record.flashloanHint, this.flashLoanRouterAddress)
-				: undefined;
+		// Every hinted order must use the resolved router, including its loan gas.
+		const wrapper: SettlementWrapper | undefined = record.flashloanHint
+			? flashLoanWrapper(record.flashloanHint, this.flashLoanRouterAddress)
+			: undefined;
 
 		// Step 6: Build simulation
 		const sim = buildSimulation({

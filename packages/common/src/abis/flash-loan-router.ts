@@ -1,4 +1,6 @@
 /** Minimal ABI for the CoW Protocol FlashLoanRouter contract.
+ * Source: https://github.com/cowprotocol/flash-loan-router/blob/main/src/interface/IFlashLoanRouter.sol
+ * Loan.Data: https://github.com/cowprotocol/flash-loan-router/blob/main/src/library/Loan.sol
  * Only includes flashLoanAndSettle — the single function solvers call. */
 export const FlashLoanRouterAbi = [
 	{
