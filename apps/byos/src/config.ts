@@ -75,6 +75,13 @@ export const configSchema = z.object({
 		.string()
 		.regex(addressPattern, "Must be a valid 0x-prefixed address")
 		.optional(),
+	/** FlashLoanRouter address for this chain. When set, orders with flash loan
+	 * hints are simulated through the router instead of calling settle() directly.
+	 * Deterministic address on all networks: 0x9da8b48441583a2b93e2ef8213aad0ec0b392c69 */
+	FLASH_LOAN_ROUTER: z
+		.string()
+		.regex(addressPattern, "Must be a valid 0x-prefixed address")
+		.optional(),
 	/** Overrides the settlement address from `settlementAddressFor`. */
 	SETTLEMENT_ADDRESS: z
 		.string()

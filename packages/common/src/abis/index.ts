@@ -1,5 +1,6 @@
 export { Erc20Abi } from "./erc20.js";
 export { EscrowAbi } from "./escrow.js";
+export { FlashLoanRouterAbi } from "./flash-loan-router.js";
 export {
 	GPv2SettlementAbi,
 	gpv2InteractionComponents,

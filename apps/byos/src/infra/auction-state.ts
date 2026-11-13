@@ -1,4 +1,4 @@
-import type { OrderKind, SettlementInteraction, SigningScheme } from "@byos/common";
+import type { FlashloanHint, OrderKind, SettlementInteraction, SigningScheme } from "@byos/common";
 import {
 	OrderKind as OrderKindEnum,
 	OrderStatus,
@@ -123,12 +123,20 @@ interface SerializedOrder {
 	signingScheme: string;
 	signature: string;
 }
+interface SerializedFlashloanHint {
+	liquidityProvider: string;
+	protocolAdapter: string;
+	receiver: string;
+	token: string;
+	amount: string;
+}
 interface SerializedOrderRecord {
 	order: SerializedOrder;
 	preInteractions: SerializedInteraction[];
 	postInteractions: SerializedInteraction[];
 	erc20Balances: boolean;
 	status: string;
+	flashloanHint?: SerializedFlashloanHint;
 }
 interface SerializedState {
 	auctionId: number;
@@ -146,6 +154,26 @@ function deserializeInteraction(i: SerializedInteraction): SettlementInteraction
 		target: i.target as Address,
 		value: BigInt(i.value),
 		callData: i.callData as Hex,
+	};
+}
+
+function serializeFlashloanHint(h: FlashloanHint): SerializedFlashloanHint {
+	return {
+		liquidityProvider: h.liquidityProvider,
+		protocolAdapter: h.protocolAdapter,
+		receiver: h.receiver,
+		token: h.token,
+		amount: h.amount.toString(),
+	};
+}
+
+function deserializeFlashloanHint(h: SerializedFlashloanHint): FlashloanHint {
+	return {
+		liquidityProvider: h.liquidityProvider as Address,
+		protocolAdapter: h.protocolAdapter as Address,
+		receiver: h.receiver as Address,
+		token: h.token as Address,
+		amount: BigInt(h.amount),
 	};
 }
 
@@ -169,6 +197,7 @@ function serializeRecord(r: OrderRecord): SerializedOrderRecord {
 		postInteractions: r.postInteractions.map(serializeInteraction),
 		erc20Balances: r.erc20Balances,
 		status: r.status,
+		...(r.flashloanHint ? { flashloanHint: serializeFlashloanHint(r.flashloanHint) } : {}),
 	};
 }
 
@@ -192,6 +221,7 @@ function deserializeRecord(r: SerializedOrderRecord): OrderRecord {
 		postInteractions: r.postInteractions.map(deserializeInteraction),
 		erc20Balances: r.erc20Balances,
 		status: r.status as OrderStatus,
+		...(r.flashloanHint ? { flashloanHint: deserializeFlashloanHint(r.flashloanHint) } : {}),
 	};
 }
 
@@ -315,6 +345,16 @@ export function auctionOrderToRecord(order: AuctionOrder): OrderRecord {
 		signature = order.signature as Hex;
 	}
 
+	const flashloanHint: FlashloanHint | undefined = order.flashloanHint
+		? {
+				liquidityProvider: order.flashloanHint.liquidityProvider as Address,
+				protocolAdapter: order.flashloanHint.protocolAdapter as Address,
+				receiver: order.flashloanHint.receiver as Address,
+				token: order.flashloanHint.token as Address,
+				amount: BigInt(order.flashloanHint.amount),
+			}
+		: undefined;
+
 	return {
 		order: {
 			sellToken: order.sellToken as Address,
@@ -337,5 +377,6 @@ export function auctionOrderToRecord(order: AuctionOrder): OrderRecord {
 		postInteractions,
 		erc20Balances,
 		status: OrderStatus.OPEN,
+		...(flashloanHint ? { flashloanHint } : {}),
 	};
 }

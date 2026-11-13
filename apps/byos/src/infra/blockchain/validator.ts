@@ -1,4 +1,5 @@
-import { OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
+import type { SettlementWrapper } from "@byos/common";
+import { flashLoanWrapper, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
 import { decodeEventLog, toHex } from "viem";
@@ -174,6 +175,7 @@ export class SimulationValidator implements ValidateProposal {
 		private readonly readEscrowBalance: (
 			subSolver: Address,
 		) => Promise<bigint> = createBatchedEscrowBalanceReader(publicClient, escrowAddress),
+		private readonly flashLoanRouterAddress?: Address,
 	) {}
 
 	private async resolveTrampoline(subSolver: Address): Promise<Address> {
@@ -318,6 +320,13 @@ export class SimulationValidator implements ValidateProposal {
 		const trampoline = trampolineResult.value;
 		const authenticator = authenticatorResult.value;
 
+		// Build an optional settlement wrapper when the order carries a flash
+		// loan hint and a router address is configured.
+		const wrapper: SettlementWrapper | undefined =
+			record.flashloanHint && this.flashLoanRouterAddress
+				? flashLoanWrapper(record.flashloanHint, this.flashLoanRouterAddress)
+				: undefined;
+
 		// Step 6: Build simulation
 		const sim = buildSimulation({
 			settlement: this.settlementAddress,
@@ -345,6 +354,7 @@ export class SimulationValidator implements ValidateProposal {
 			preInteractions: record.preInteractions,
 			postInteractions: record.postInteractions,
 			submitter: this.submitter,
+			wrapper,
 		});
 
 		// Step 7: Dispatch eth_simulateV1
@@ -364,7 +374,7 @@ export class SimulationValidator implements ValidateProposal {
 								calls: [
 									{
 										from: sim.submitter,
-										to: this.settlementAddress,
+										to: sim.to,
 										data: sim.calldata,
 									},
 								],
@@ -399,7 +409,7 @@ export class SimulationValidator implements ValidateProposal {
 					blockNumber: blockNumber.toString(),
 					timestamp: Math.floor(Date.now() / 1000),
 					from: sim.submitter,
-					to: this.settlementAddress,
+					to: sim.to,
 					calldata: sim.calldata,
 					stateOverrides,
 				}
@@ -423,7 +433,7 @@ export class SimulationValidator implements ValidateProposal {
 							chainId: simulationFailureParams.chainId,
 							blockNumber,
 							from: sim.submitter,
-							to: this.settlementAddress,
+							to: sim.to,
 							calldata: sim.calldata,
 						})
 					: "";

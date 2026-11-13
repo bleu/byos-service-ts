@@ -14,6 +14,14 @@ const wireInteractionSchema = z.object({
 	callData: z.string(),
 });
 
+const flashloanHintSchema = z.object({
+	liquidityProvider: addressString,
+	protocolAdapter: addressString,
+	receiver: addressString,
+	token: addressString,
+	amount: decimalString,
+});
+
 export const auctionTokenSchema = z.object({
 	referencePrice: decimalString.nullish(),
 	availableBalance: z.string(),
@@ -43,6 +51,7 @@ export const auctionOrderSchema = z.object({
 	appData: z.string(),
 	signingScheme: z.string(),
 	signature: z.string(),
+	flashloanHint: flashloanHintSchema.nullish(),
 });
 
 export type AuctionOrder = z.infer<typeof auctionOrderSchema>;
