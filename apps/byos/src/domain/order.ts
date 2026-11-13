@@ -23,6 +23,8 @@ export interface OrderRecord {
 	status: OrderStatus;
 	/** Flash loan hint from the driver's appData, if present. */
 	flashloanHint?: FlashloanHint;
+	/** General Atomic Bundles are outside the supported simulation envelope. */
+	hasSettlementWrappers?: boolean;
 }
 
 /**
@@ -30,7 +32,7 @@ export interface OrderRecord {
  * Returns null if the proposal passes, or a RejectionReason if it fails.
  */
 export function checkEnvelope(record: OrderRecord, proposal: Proposal): RejectionReason | null {
-	if (!record.erc20Balances) {
+	if (record.hasSettlementWrappers || !record.erc20Balances) {
 		return "UnsupportedOrder";
 	}
 	// Token pair must match the order — prevents cross-pair signature reuse

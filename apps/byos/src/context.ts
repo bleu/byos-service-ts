@@ -17,6 +17,7 @@ import {
 } from "./infra/auction-state.js";
 import { createRedisBalanceStore } from "./infra/balance-cache.js";
 import { createEscrowBalanceReader, EscrowValidator } from "./infra/blockchain/escrow.js";
+import { resolveFlashLoanRouter } from "./infra/blockchain/flash-loan-router.js";
 import { EscrowOperator } from "./infra/blockchain/operator.js";
 import { ProposalValidator, SimulationValidator } from "./infra/blockchain/validator.js";
 
@@ -157,6 +158,13 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 	// Escrow validator
 	const escrowValidator = new EscrowValidator(publicClient, escrowAddress, minCollateralWei);
 
+	// Resolve protocol deployment metadata once, outside /solve and validation.
+	const flashLoanRouter = await resolveFlashLoanRouter(
+		config.CHAIN_ID,
+		config.FLASH_LOAN_ROUTER as Address | undefined,
+		logger,
+	);
+
 	// Simulation validator
 	const simulationValidator = new SimulationValidator(
 		publicClient,
@@ -172,7 +180,7 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		logger.child({ component: "simulation" }),
 		config.SUBMITTER_ADDRESS as Address | undefined,
 		escrowValidator.getBalance.bind(escrowValidator),
-		config.FLASH_LOAN_ROUTER as Address | undefined,
+		flashLoanRouter,
 	);
 
 	const validator = new ProposalValidator(escrowValidator, simulationValidator);

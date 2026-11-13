@@ -2,6 +2,7 @@ import {
 	BUY_ETH_ADDRESS,
 	type CowOrder,
 	encodeSettle,
+	FlashLoanRouterAbi,
 	GPv2SettlementAbi,
 	OrderKind,
 	OrderStatus,
@@ -13,12 +14,15 @@ import {
 	decodeFunctionData,
 	encodeAbiParameters,
 	encodeEventTopics,
+	getAddress,
 	type Hex,
+	keccak256,
 	type PublicClient,
 } from "viem";
 import { afterEach, describe, expect, it } from "vitest";
 import type { OrderRecord } from "../../../domain/order.js";
 import type { Proposal } from "../../../domain/proposal.js";
+import { auctionOrderSchema } from "../../api/types.js";
 import {
 	_clearLocalAuctionState,
 	_patchLocalGasPrice,
@@ -27,6 +31,7 @@ import {
 } from "../../auction-state.js";
 import { DUMMY_SUBMITTER } from "../simulation.js";
 import { SimulationValidator } from "../validator.js";
+import bnbCollateralSwap from "./fixtures/bnb-aave-collateral-swap.json" with { type: "json" };
 import { nativeBuyAuctionOrder } from "./fixtures/native-buy-order.js";
 
 const SETTLEMENT = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41";
@@ -249,6 +254,8 @@ function validatorAt(
 	maxSlippageBps = 10_000n, // 100% — effectively disabled
 	maxSlippageNative = 10n ** 36n, // astronomically large — effectively disabled
 	_minCollateral = 10n ** 16n,
+	flashLoanRouter?: Address,
+	submitter?: Address,
 ): SimulationValidator {
 	// Gas price lives in auction state. Patch the local state so tests that
 	// pass a non-zero gasPrice still exercise the profitability gate.
@@ -264,6 +271,10 @@ function validatorAt(
 		0n, // collateralRatioBps = 0 → Gate 2 exposure is 0, always passes
 		0n, // minCollateral = 0 → penaltyCap = 0
 		async () => ({ proposals: [], bufferBalance: 0n }), // fetchInflightData: no siblings
+		undefined,
+		submitter,
+		undefined,
+		flashLoanRouter,
 	);
 }
 
@@ -958,4 +969,155 @@ describe("concurrent simulation metadata reads", () => {
 		const validator = validatorAt(node);
 		expect(await validator.validate(activeProposal())).toBeNull();
 	});
+});
+
+describe("flash loan proposal simulation", () => {
+	function flashloanRecord(): OrderRecord {
+		return {
+			...sampleRecord(sampleOrder({ buyAmount: 980_000n })),
+			flashloanHint: {
+				liquidityProvider: "0x1111111111111111111111111111111111111111",
+				protocolAdapter: "0x2222222222222222222222222222222222222222",
+				receiver: "0x3333333333333333333333333333333333333333",
+				token: "0x4444444444444444444444444444444444444444",
+				amount: 2n ** 100n,
+			},
+			preInteractions: [{ target: AUTHENTICATOR, value: 0n, callData: "0x12345678" }],
+			postInteractions: [{ target: ESCROW, value: 0n, callData: "0x87654321" }],
+		};
+	}
+	it("simulates the canonical router without optional configuration and accounts for all gas", async () => {
+		const record = flashloanRecord();
+		setupAuctionState(record);
+		const node = fakeNode({
+			simulateV1: async () =>
+				simulateSuccess(990_000n, submittedProposal().orderUidHash as Hex, 650_000n),
+		});
+		const verdict = await validatorAt(node).validate(submittedProposal());
+		expect(verdict).toMatchObject({
+			kind: "accept",
+			simulation: { gasUsed: 650_000n, simulationBuyAmount: 990_000n },
+		});
+		const request = node.simulateCalls[0] as {
+			params: [{ blockStateCalls: [{ calls: [{ to: Address; data: Hex }] }] }];
+		};
+		const call = request.params[0].blockStateCalls[0].calls[0];
+		expect(call.to).toBe("0x9da8b48441583a2b93e2ef8213aad0ec0b392c69");
+		const outer = decodeFunctionData({ abi: FlashLoanRouterAbi, data: call.data });
+		const inner = decodeFunctionData({ abi: GPv2SettlementAbi, data: outer.args[1] });
+		expect(outer.args[0][0]).toMatchObject({
+			amount: record.flashloanHint?.amount,
+			borrower: record.flashloanHint?.protocolAdapter,
+		});
+		expect(inner.args[3][0]).toEqual(record.preInteractions);
+		expect(inner.args[3][2]).toEqual(record.postInteractions);
+	});
+	it("uses a custom router and real submitter without fabricating permissions", async () => {
+		setupAuctionState(flashloanRecord());
+		const node = fakeNode();
+		const customRouter = "0x5555555555555555555555555555555555555555";
+		const submitter = "0x6666666666666666666666666666666666666666";
+		const validator = validatorAt(node, 0n, 0n, 10_000n, 10n ** 36n, 0n, customRouter, submitter);
+		expect(await validator.validate(submittedProposal())).toMatchObject({ kind: "accept" });
+		const request = node.simulateCalls[0] as {
+			params: [
+				{ blockStateCalls: [{ stateOverrides: unknown; calls: [{ to: Address; from: Address }] }] },
+			];
+		};
+		const block = request.params[0].blockStateCalls[0];
+		expect(block.calls[0]).toMatchObject({ to: customRouter, from: submitter });
+		expect(block.stateOverrides).toBeUndefined();
+	});
+	it("rejects an outer loan/repayment failure even when the RPC includes inner Executed logs", async () => {
+		setupAuctionState(flashloanRecord());
+		const node = fakeNode({
+			chainId: 1,
+			simulateV1: async () => ({
+				...simulateSuccess(990_000n, submittedProposal().orderUidHash as Hex),
+				status: "0x0",
+				error: { message: "repayment failed", code: -32000, data: "0x" },
+			}),
+		});
+		const verdict = await validatorAt(node).validate(submittedProposal());
+		expect(verdict).toMatchObject({
+			kind: "simFailed",
+			revertReason: "repayment failed",
+			simulationFailureParams: {
+				to: "0x9da8b48441583a2b93e2ef8213aad0ec0b392c69",
+			},
+		});
+	});
+	it("rejects unsupported Atomic Bundles before simulation", async () => {
+		setupAuctionState({ ...sampleRecord(sampleOrder()), hasSettlementWrappers: true });
+		const node = fakeNode();
+		expect(await validatorAt(node).validate(submittedProposal())).toEqual({
+			kind: "reject",
+			reason: "UnsupportedOrder",
+		});
+		expect(node.counts.simulateV1).toBe(0);
+	});
+});
+
+// Public order: https://explorer.cow.fi/bnb/orders/0xd584c00c2e60ac2d1fd7b31df0162ab52d38a22f3b332ba2295fef92597e77382394b5662a25b2e83ff39f8e10f9afca000776516af709c0
+it("routes the real BNB Aave collateral swap through the router without env configuration", async () => {
+	const appData = JSON.parse(bnbCollateralSwap.fullAppData) as { metadata: { flashloan: unknown } };
+	// Reconstruct the driver's wire shape from the public order and its appData.
+	const auctionOrder = auctionOrderSchema.parse({
+		...bnbCollateralSwap,
+		fullSellAmount: bnbCollateralSwap.sellAmount,
+		fullBuyAmount: bnbCollateralSwap.buyAmount,
+		preInteractions: bnbCollateralSwap.interactions.pre,
+		postInteractions: bnbCollateralSwap.interactions.post,
+		sellTokenSource: "erc20",
+		buyTokenDestination: "erc20",
+		class: "limit",
+		flashloanHint: appData.metadata.flashloan,
+	});
+	const record = auctionOrderToRecord(auctionOrder);
+	const quoteBuyAmount = BigInt(bnbCollateralSwap.buyAmount) + 100_000n;
+	const proposal: Proposal = {
+		...submittedProposal(),
+		orderUid: bnbCollateralSwap.uid as Hex,
+		orderUidHash: keccak256(bnbCollateralSwap.uid as Hex),
+		sellToken: record.order.sellToken,
+		buyToken: record.order.buyToken,
+		sellAmount: record.order.sellAmount,
+		minBuyAmount: record.order.buyAmount,
+		quoteBuyAmount,
+	};
+	_setLocalAuctionState({
+		auctionId: 1,
+		gasPrice: 0n,
+		orders: new Map([[proposal.orderUid.toLowerCase(), record]]),
+		prices: new Map([
+			[proposal.sellToken.toLowerCase(), ETHER],
+			[proposal.buyToken.toLowerCase(), ETHER],
+		]),
+	});
+	const node = fakeNode({ chainId: 56, delta: quoteBuyAmount });
+	expect(await validatorAt(node).validate(proposal)).toMatchObject({ kind: "accept" });
+	const request = node.simulateCalls[0] as {
+		params: [{ blockStateCalls: [{ calls: [{ to: Address; data: Hex }] }] }];
+	};
+	const call = request.params[0].blockStateCalls[0].calls[0];
+	expect(call.to).toBe("0x9da8b48441583a2b93e2ef8213aad0ec0b392c69");
+	const outer = decodeFunctionData({ abi: FlashLoanRouterAbi, data: call.data });
+	expect(outer.args[0]).toEqual([
+		{
+			amount: 1554322994666691n,
+			borrower: "0xdeCC46a4b09162F5369c5C80383AAa9159bCf192",
+			lender: "0x6807dc923806fE8Fd134338EABCA509979a7e0cB",
+			token: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+		},
+	]);
+	const inner = decodeFunctionData({ abi: GPv2SettlementAbi, data: outer.args[1] });
+	expect(inner.args[2][0]?.signature.toLowerCase()).toBe(
+		`${bnbCollateralSwap.owner}${bnbCollateralSwap.signature.slice(2)}`,
+	);
+	expect(inner.args[3][0]).toEqual(
+		record.preInteractions.map((i) => ({ ...i, target: getAddress(i.target) })),
+	);
+	expect(inner.args[3][2]).toEqual(
+		record.postInteractions.map((i) => ({ ...i, target: getAddress(i.target) })),
+	);
 });

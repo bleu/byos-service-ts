@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { nativeBuyAuctionOrder } from "../../blockchain/__tests__/fixtures/native-buy-order.js";
 import type { SolveConfig } from "../solve.js";
 import { createSolveRoute } from "../solve.js";
 
@@ -38,4 +39,32 @@ describe("sub-solver forwarding", () => {
 			body: JSON.stringify(auction),
 		});
 	});
+});
+
+it("does not select cached candidates for unsupported bundle orders", async () => {
+	const app = createSolveRoute({
+		db: {} as SolveConfig["db"],
+		candidateStore: {
+			getAll: () => [{ orderUid: nativeBuyAuctionOrder.uid }],
+		} as unknown as SolveConfig["candidateStore"],
+		validator: {} as SolveConfig["validator"],
+		onAuditEvent: () => {},
+	});
+	const response = await app.request("/solve", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			tokens: {},
+			effectiveGasPrice: "1",
+			deadline: new Date().toISOString(),
+			orders: [
+				{
+					...nativeBuyAuctionOrder,
+					wrappers: [{ address: nativeBuyAuctionOrder.sellToken, data: "0x", isOmittable: false }],
+				},
+			],
+		}),
+	});
+	expect(response.status).toBe(200);
+	expect(await response.json()).toEqual({ solutions: [] });
 });

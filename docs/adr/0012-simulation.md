@@ -125,3 +125,21 @@ Considered and dropped (COW-1297): once the clearing price is set to `min(simula
 - **RPC load scales with active proposals.** Bounded per proposal by the ingestion lifetime cap ([ADR-0013](0013-proposal-lifecycle-and-retention.md)).
 - **Hooked orders are supported** (COW-1243).
 - **Anvil integration tests** are deferred to COW-1165.
+
+### Why resolve and simulate the flash loan router
+
+A direct settlement call cannot establish flash loan viability or measure borrowing and
+repayment gas. Flash loan proposals therefore use the same dedicated router path as
+the driver, preserving the order's pre/post hooks and checking the outer call result.
+This extends the original direct-settlement decision above. No loan balances or
+allowances are fabricated.
+
+Deployment metadata is resolved once at startup so GitHub availability never enters
+auction latency. A bounded fetch and the canonical fallback keep deployment registry
+outages from disabling proposal processing. An environment override supports local
+and custom deployments. The configured driver must use the same router. The fallback
+is an address resolution policy, not proof of a deployment or its authorization.
+
+General Atomic Bundles use a different contract interface and require preservation of
+opaque wrapper chains. Until that path is implemented, declining these orders at both
+validation and selection avoids bidding a settlement that omits required operations.

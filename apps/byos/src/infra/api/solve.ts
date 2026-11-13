@@ -188,6 +188,8 @@ export function createSolveRoute(config: SolveConfig) {
 		const selectedOrderUids = new Set<string>();
 
 		for (const order of auction.orders) {
+			// Guard cached candidates too: general Atomic Bundles are not supported yet.
+			if (order.wrappers?.length) continue;
 			const candidates =
 				auctionId !== null
 					? (snapshotByOrder.get(order.uid.toLowerCase()) ?? [])
