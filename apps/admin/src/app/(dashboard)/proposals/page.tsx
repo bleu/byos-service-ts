@@ -1,10 +1,9 @@
+import { SimulationButton } from "@/components/tenderly-simulation";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import {
   blockExplorerAddressUrl,
   cowExplorerOrderUrl,
-  type SimulationFailureParams,
-  tenderlySimulationUrl,
   tenderlyTxUrl,
 } from "@/lib/formatters";
 import { listProposals } from "@/lib/queries";
@@ -30,9 +29,7 @@ export default async function ProposalsPage({
     orderUidUrl: cowExplorerOrderUrl(p.orderUid),
     tenderlyUrl: p.settlementTxHash
       ? tenderlyTxUrl(p.settlementTxHash)
-      : p.simulationFailureParams
-        ? tenderlySimulationUrl(p.simulationFailureParams as SimulationFailureParams)
-        : null,
+      : null,
   }));
   const totalPages = Math.ceil(total / 50);
 
@@ -119,7 +116,9 @@ export default async function ProposalsPage({
                     : <>{p.orderUid.slice(0, 10)}…</>}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge status={p.status} tenderlyUrl={p.tenderlyUrl} />
+                  {p.status === "simFailed" && p.simulationFailureParams
+                    ? <SimulationButton proposalId={p.id} badge />
+                    : <StatusBadge status={p.status} tenderlyUrl={p.tenderlyUrl} />}
                 </td>
                 <td className="px-4 py-3 font-mono text-[12px] text-muted">
                   {p.rejectionReason ?? <span className="text-dim">—</span>}

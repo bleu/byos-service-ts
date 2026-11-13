@@ -1,11 +1,10 @@
+import { SimulationButton } from "@/components/tenderly-simulation";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import {
 	blockExplorerAddressUrl,
 	cowExplorerOrderUrl,
-	type SimulationFailureParams,
-	tenderlySimulationUrl,
 	txLinks,
 } from "@/lib/formatters";
 import { getProposalDetail } from "@/lib/queries";
@@ -29,14 +28,12 @@ export default async function ProposalDetailPage({
 
   const { auditTrail } = detail;
   const raw = detail.proposal;
-  const simFailureParams = raw.simulationFailureParams as SimulationFailureParams | null;
   const proposal = {
     ...raw,
     subSolverUrl: blockExplorerAddressUrl(raw.subSolver),
     orderUidUrl: cowExplorerOrderUrl(raw.orderUid),
     ...txLinks(raw.settlementTxHash),
     penaltyTxLinks: txLinks(raw.penaltyTxHash),
-    tenderlySimUrl: simFailureParams ? tenderlySimulationUrl(simFailureParams) : null,
   };
 
   return (
@@ -59,7 +56,9 @@ export default async function ProposalDetailPage({
             <ExternalLink href={proposal.subSolverUrl}>{proposal.subSolver}</ExternalLink>
           </Field>
           <Field label="Status">
-            <span className="font-mono text-[12px] text-ink">{proposal.status}</span>
+            {proposal.status === "simFailed" && proposal.simulationFailureParams
+              ? <SimulationButton proposalId={proposal.id} badge />
+              : <span className="font-mono text-[12px] text-ink">{proposal.status}</span>}
           </Field>
           <Field label="Order UID">
             <ExternalLink href={proposal.orderUidUrl}>{proposal.orderUid}</ExternalLink>
@@ -112,15 +111,8 @@ export default async function ProposalDetailPage({
             )}
           </Field>
           <Field label="Simulation debug">
-            {proposal.tenderlySimUrl ? (
-              <a
-                href={proposal.tenderlySimUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[12px] text-accent hover:underline"
-              >
-                Replay on Tenderly
-              </a>
+            {proposal.simulationFailureParams ? (
+              <SimulationButton proposalId={proposal.id} />
             ) : (
               <span className="text-dim font-mono text-[12px]">—</span>
             )}

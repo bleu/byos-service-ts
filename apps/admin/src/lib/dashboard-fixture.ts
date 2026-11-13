@@ -120,7 +120,12 @@ export async function seedDashboardFixture(sql: Sql, now = new Date()): Promise<
 				timestamp: Math.floor(createdAt.getTime() / 1000) + 60,
 				from: "0x1111111111111111111111111111111111111111",
 				to: "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
-				calldata: hex(index + 201, 100),
+				// Deliberately larger than practical URL limits to exercise API replay.
+				calldata: hex(index + 201, 50_000),
+				// A deterministic revert, independent of historical contract deployments.
+				stateOverrides: {
+					"0x9008d19f58aabd9ed0d60971565aa8510560ab41": { code: "0x60006000fd" },
+				},
 			};
 			await sql`
 				UPDATE proposals SET simulation_failure_params = ${JSON.stringify(simFailureParams)} WHERE id = ${proposal.id}
