@@ -1,5 +1,6 @@
 import {
 	type CowOrder,
+	type FlashloanHint,
 	OrderKind,
 	type OrderStatus,
 	type RejectionReason,
@@ -20,6 +21,8 @@ export interface OrderRecord {
 	/** True if both sell and buy token balances are erc20 (not Balancer vault). */
 	erc20Balances: boolean;
 	status: OrderStatus;
+	/** Flash loan hint from the driver's appData, if present. */
+	flashloanHint?: FlashloanHint;
 }
 
 /**

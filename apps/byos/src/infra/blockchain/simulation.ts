@@ -1,5 +1,10 @@
 import type { Proposal as ContractProposal, SettlementInteraction } from "@byos/common";
-import { type ContractInteraction, type CowOrder, encodeSettle } from "@byos/common";
+import {
+	type ContractInteraction,
+	type CowOrder,
+	encodeSettle,
+	type SettlementWrapper,
+} from "@byos/common";
 import { type Address, concat, type Hex, keccak256, numberToHex, pad, toHex } from "viem";
 
 export const DUMMY_SUBMITTER: Address = "0x1111111111111111111111111111111111111111";
@@ -32,6 +37,9 @@ export interface SimulationParams {
 	 * The address must already hold SUBMITTER_ROLE on the Escrow — no state
 	 * override is emitted for it. */
 	submitter?: Address;
+	/** Optional wrapper (e.g. FlashLoanRouter) that wraps the settle() calldata
+	 * and changes the simulation target address. */
+	wrapper?: SettlementWrapper;
 }
 
 /**
@@ -46,6 +54,8 @@ export interface SimulationStateOverride {
 }
 
 export interface SimulationResult {
+	/** The contract address to call (settlement or wrapper). */
+	to: Address;
 	calldata: Hex;
 	stateOverride: SimulationStateOverride[];
 }
@@ -65,7 +75,7 @@ function submitterRoleSlot(account: Address): Hex {
 export function buildSimulation(
 	params: SimulationParams,
 ): SimulationResult & { submitter: Address } {
-	const calldata = encodeSettle(
+	const settleCalldata = encodeSettle(
 		params.order,
 		params.proposal,
 		params.trampoline,
@@ -74,6 +84,11 @@ export function buildSimulation(
 		params.preInteractions,
 		params.postInteractions,
 	);
+
+	// When a wrapper is present (e.g. FlashLoanRouter), wrap the settle()
+	// calldata and target the wrapper contract instead of the settlement.
+	const to = params.wrapper?.address ?? params.settlement;
+	const calldata = params.wrapper ? params.wrapper.encode(settleCalldata) : settleCalldata;
 
 	const submitter = params.submitter ?? DUMMY_SUBMITTER;
 
@@ -97,5 +112,5 @@ export function buildSimulation(
 		);
 	}
 
-	return { calldata, stateOverride, submitter };
+	return { to, calldata, stateOverride, submitter };
 }
