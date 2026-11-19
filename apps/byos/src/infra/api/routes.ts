@@ -194,6 +194,11 @@ export function createPublicRoutes(config: RoutesConfig) {
 		}
 		const { auctionId } = auctionState;
 
+		// Look up native ref prices from the auction so they are persisted even
+		// for proposals that never reach submission (rejected, simFailed, etc.).
+		const auctionSellRefPrice = auctionState.prices.get(parsed.sellToken.toLowerCase());
+		const auctionBuyRefPrice = auctionState.prices.get(parsed.buyToken.toLowerCase());
+
 		// Allocate an ID from the proposals sequence without inserting a row.
 		// This ID is used in the proposals_log (on reject) or proposals table (on /solve selection).
 		const id = await CandidateStore.allocateId(config.db);
@@ -221,8 +226,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			trampoline: null,
 			settlementTxHash: null,
 			penaltyTxHash: null,
-			sellTokenRefPrice: null,
-			buyTokenRefPrice: null,
+			sellTokenRefPrice: auctionSellRefPrice?.toString() ?? null,
+			buyTokenRefPrice: auctionBuyRefPrice?.toString() ?? null,
 			surplusTokenRefPrice: null,
 			auctionGasPrice: null,
 			clearingPrices: null,
@@ -583,6 +588,10 @@ export function createPublicRoutes(config: RoutesConfig) {
 		const candidate = config.candidateStore.getForOwner(id, canceller);
 		if (candidate) {
 			config.candidateStore.remove(id);
+			// Try to look up the buy-token ref price from the current auction state.
+			const cancelAuctionState = await getAuctionState();
+			const cancelBuyRefPrice =
+				cancelAuctionState?.prices.get(candidate.buyToken.toLowerCase())?.toString() ?? null;
 			// Write to log so sub-solvers can see the cancellation.
 			await store.writeToLog(
 				config.db,
@@ -608,7 +617,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 					settlementTxHash: null,
 					penaltyTxHash: null,
 					sellTokenRefPrice: candidate.sellTokenRefPrice,
-					buyTokenRefPrice: null,
+					buyTokenRefPrice: cancelBuyRefPrice,
 					surplusTokenRefPrice: null,
 					auctionGasPrice: null,
 					clearingPrices: null,
