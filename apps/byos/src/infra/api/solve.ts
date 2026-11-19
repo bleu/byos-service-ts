@@ -339,8 +339,7 @@ export function createSolveRoute(config: SolveConfig) {
 						? ("SubsolverOutbid" as const)
 						: ("AuctionClosed" as const);
 
-					const flushBuyRefPrice =
-						auction.tokens[candidate.buyToken]?.referencePrice ?? null;
+					const flushBuyRefPrice = auction.tokens[candidate.buyToken]?.referencePrice ?? null;
 					return store
 						.writeToLog(
 							config.db,
