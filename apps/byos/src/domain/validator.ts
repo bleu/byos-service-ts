@@ -21,6 +21,7 @@ export interface SimulationOutcome {
 /** Simulation replay context. The legacy name is kept for wire compatibility. */
 export interface SimulationFailureParams {
 	chainId: number;
+	/** Head observed before simulation at latest; an approximate replay reference. */
 	blockNumber: string;
 	timestamp: number;
 	from: string;

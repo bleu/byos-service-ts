@@ -389,7 +389,7 @@ describe("SimulationValidator", () => {
 			params: [Record<string, unknown>, string];
 		};
 		expect(args.method).toBe("eth_simulateV1");
-		expect(args.params[1]).toBe("0x3e8");
+		expect(args.params[1]).toBe("latest");
 
 		const blockStateCall = (
 			args.params[0] as {
@@ -553,7 +553,7 @@ describe("SimulationValidator", () => {
 		expect(verdict).toEqual({ kind: "reject", reason: "UnsupportedOrder" });
 	});
 
-	it.each([false, true])("retains replay parameters for simulation failure=%s", async (failed) => {
+	it.each([false, true])("uses latest and retains replay metadata, failure=%s", async (failed) => {
 		const node = fakeNode({
 			chainId: 1,
 			...(failed ? { simulateV1: async () => simulateRevert() } : {}),
@@ -588,7 +588,7 @@ describe("SimulationValidator", () => {
 			calldata: block.calls[0].data,
 			stateOverrides: block.stateOverrides,
 		});
-		expect(request.params[1]).toBe("0x3e8");
+		expect(request.params[1]).toBe("latest");
 		expect(Object.keys(params?.stateOverrides ?? {})).toHaveLength(2);
 	});
 
