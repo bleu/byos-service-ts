@@ -2,7 +2,7 @@ import type { SettlementWrapper } from "@byos/common";
 import { flashLoanWrapper, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
-import { decodeEventLog, toHex } from "viem";
+import { decodeEventLog } from "viem";
 import { availableCollateral, penaltyCap, perProposalCL } from "../../domain/collateral.js";
 import { checkEnvelope, checkProposalSlippage } from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
@@ -376,7 +376,9 @@ export class SimulationValidator implements ValidateProposal {
 		const simulationStarted = performance.now();
 		let rpcMethod = "eth_blockNumber";
 		try {
-			// Pin the base block so retained diagnostics replay the same state.
+			// Retain the observed head as an approximate replay reference.
+			// The simulation uses latest because some RPCs reject explicit block numbers.
+			// The head can advance between these calls; this does not pin simulation state.
 			blockNumber = await this.publicClient.getBlockNumber({ cacheTime: 0 });
 			rpcMethod = "eth_simulateV1";
 			result = await this.publicClient.request({
@@ -396,7 +398,7 @@ export class SimulationValidator implements ValidateProposal {
 							},
 						],
 					},
-					toHex(blockNumber),
+					"latest",
 				] as never,
 			});
 		} catch (err) {

@@ -31,6 +31,15 @@ Since COW-1297, simulation uses `eth_simulateV1` (Geth's `blockStateCalls` API) 
 
 The `stateOverrides` map in `eth_simulateV1` uses the Geth object format `{ [address]: { code?, stateDiff: { [slot]: value } } }` — stateDiff is an object keyed by slot, not an array.
 
+### Why simulate at latest
+
+Avalanche staging's RPC rejected an explicit block number with `unsupported block
+number`, preventing proposals from reaching simulation. Use `latest` so the RPC
+chooses its current head rather than requiring support for numbered simulation
+state. Retain the head observed immediately before dispatch as a best-effort replay
+reference for diagnostics. Replay is approximate: the head may advance, or requests
+may reach different provider nodes, between the head read and simulation.
+
 ### simulationBuyAmount: the effective clearing price
 
 `simulationBuyAmount` is the `_delta` field from the Trampoline `Executed` event — the buy-token amount the route actually delivered during simulation. It is stored on the proposal and used as the effective clearing price at `/solve` time:
