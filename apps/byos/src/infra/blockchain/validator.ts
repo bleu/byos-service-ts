@@ -17,6 +17,11 @@ import {
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
 import { logValidationUnavailable } from "../validation-log.js";
+import {
+	normalizeCallTrace,
+	parseEstimatedGas,
+	shouldFallbackToCallTracer,
+} from "./call-tracer.js";
 import { createBatchedEscrowBalanceReader, type EscrowValidator } from "./escrow.js";
 import { DEFAULT_FLASH_LOAN_ROUTER } from "./flash-loan-router.js";
 import { buildSimulation } from "./simulation.js";
@@ -374,39 +379,108 @@ export class SimulationValidator implements ValidateProposal {
 		let blockNumber: bigint;
 		const stateOverrides = toSimulateV1StateOverrides(sim.stateOverride);
 		const simulationStarted = performance.now();
-		let rpcMethod = "eth_blockNumber";
 		try {
-			// Retain the observed head as an approximate replay reference.
-			// The simulation uses latest because some RPCs reject explicit block numbers.
-			// The head can advance between these calls; this does not pin simulation state.
+			// Both methods use latest. The observed head is an approximate replay reference.
 			blockNumber = await this.publicClient.getBlockNumber({ cacheTime: 0 });
-			rpcMethod = "eth_simulateV1";
-			result = await this.publicClient.request({
-				method: "eth_simulateV1" as never,
-				params: [
+		} catch (err) {
+			logValidationUnavailable(this.logger, proposal, "eth_blockNumber", err);
+			return null;
+		}
+		let rpcMethod = "eth_simulateV1";
+		try {
+			const transaction = { from: sim.submitter, to: sim.to, data: sim.calldata };
+			try {
+				result = await this.publicClient.request(
 					{
-						blockStateCalls: [
+						method: "eth_simulateV1" as never,
+						params: [
 							{
-								calls: [
+								blockStateCalls: [
 									{
-										from: sim.submitter,
-										to: sim.to,
-										data: sim.calldata,
+										calls: [transaction],
+										...(sim.stateOverride.length > 0 ? { stateOverrides } : {}),
 									},
 								],
+							},
+							"latest",
+						] as never,
+					},
+					{ retryCount: 0 },
+				);
+			} catch (err) {
+				if (!shouldFallbackToCallTracer(err)) throw err;
+				logValidationUnavailable(this.logger, proposal, rpcMethod, err);
+				this.logger?.info(
+					{ proposalId: proposal.id, auctionId: proposal.auctionId, method: "debug_traceCall" },
+					"simulation fallback selected",
+				);
+				// Coreth can charge a floor proportional to the supplied gas limit.
+				// Estimate first instead of tracing with the node's large default limit.
+				rpcMethod = "eth_estimateGas";
+				const gas = parseEstimatedGas(
+					await this.publicClient.request(
+						{
+							method: "eth_estimateGas",
+							params: (sim.stateOverride.length > 0
+								? [transaction, "latest", stateOverrides]
+								: [transaction, "latest"]) as never,
+						},
+						{ retryCount: 0 },
+					),
+				);
+				rpcMethod = "debug_traceCall";
+				const trace = await this.publicClient.request(
+					{
+						method: "debug_traceCall" as never,
+						params: [
+							{ ...transaction, gas },
+							"latest",
+							{
+								tracer: "callTracer",
+								tracerConfig: { withLog: true },
+								timeout: "2s",
 								...(sim.stateOverride.length > 0 ? { stateOverrides } : {}),
+							},
+						] as never,
+					},
+					{ retryCount: 0 },
+				);
+				result = [{ calls: [normalizeCallTrace(trace)] }];
+			}
+		} catch (err) {
+			if (
+				(rpcMethod === "eth_estimateGas" || rpcMethod === "debug_traceCall") &&
+				isRevertError(err)
+			) {
+				// Estimation may reject before tracing a reverting settlement.
+				result = [
+					{
+						calls: [
+							{
+								status: "0x0",
+								gasUsed: "0x0",
+								returnData: "0x",
+								logs: [],
+								error: {
+									message: extractRevertReasonFromThrown(err) ?? "execution reverted",
+									code: 3,
+									data: "0x",
+								},
 							},
 						],
 					},
-					"latest",
-				] as never,
-			});
-		} catch (err) {
-			logValidationUnavailable(this.logger, proposal, rpcMethod, err);
-			return null; // transport error, defer
+				];
+			} else {
+				logValidationUnavailable(this.logger, proposal, rpcMethod, err);
+				return null; // transport error, defer
+			}
 		}
 		this.logger?.debug(
-			{ proposalId: proposal.id, elapsedMs: performance.now() - simulationStarted },
+			{
+				proposalId: proposal.id,
+				method: rpcMethod,
+				elapsedMs: performance.now() - simulationStarted,
+			},
 			"validation simulation RPC finished",
 		);
 

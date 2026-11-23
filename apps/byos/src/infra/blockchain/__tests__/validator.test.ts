@@ -17,6 +17,7 @@ import {
 	encodeEventTopics,
 	getAddress,
 	type Hex,
+	HttpRequestError,
 	keccak256,
 	type PublicClient,
 } from "viem";
@@ -191,6 +192,8 @@ interface FakeNode {
 	client: PublicClient;
 	counts: { addressOf: number; simulateV1: number };
 	simulateCalls: Array<unknown>;
+	traceCalls: Array<unknown>;
+	estimateCalls: Array<unknown>;
 }
 
 /**
@@ -202,6 +205,8 @@ interface FakeNode {
 function fakeNode(opts?: {
 	chainId?: number;
 	simulateV1?: () => Promise<SimulateV1CallResult>;
+	traceCall?: () => Promise<unknown>;
+	estimateGas?: () => Promise<unknown>;
 	addressOf?: () => Promise<string>;
 	authenticator?: () => Promise<string>;
 	/** Default Executed._delta (defaults to submittedProposal().quoteBuyAmount). */
@@ -209,6 +214,8 @@ function fakeNode(opts?: {
 }): FakeNode {
 	const counts = { addressOf: 0, simulateV1: 0 };
 	const simulateCalls: Array<unknown> = [];
+	const traceCalls: Array<unknown> = [];
+	const estimateCalls: Array<unknown> = [];
 	const defaultDelta = opts?.delta ?? submittedProposal().quoteBuyAmount;
 
 	const client = {
@@ -234,11 +241,34 @@ function fakeNode(opts?: {
 					: simulateSuccess(defaultDelta, submittedProposal().orderUidHash as Hex);
 				return [{ calls: [result] }];
 			}
+			if (typed.method === "eth_estimateGas") {
+				estimateCalls.push(args);
+				return opts?.estimateGas ? opts.estimateGas() : "0x30d40";
+			}
+			if (typed.method === "debug_traceCall") {
+				traceCalls.push(args);
+				return opts?.traceCall
+					? opts.traceCall()
+					: {
+							type: "CALL",
+							gasUsed: "0x186a0",
+							output: "0x",
+							calls: [
+								{
+									type: "CALL",
+									gasUsed: "0x100",
+									logs: [
+										buildExecutedLog(TRAMPOLINE, submittedProposal().orderUidHash, defaultDelta),
+									],
+								},
+							],
+						};
+			}
 			throw new Error(`unexpected RPC method: ${typed.method}`);
 		},
 	} as unknown as PublicClient;
 
-	return { client, counts, simulateCalls };
+	return { client, counts, simulateCalls, traceCalls, estimateCalls };
 }
 
 // ── Validator factories ──────────────────────────────────────────────────────
@@ -1063,9 +1093,14 @@ describe("flash loan proposal simulation", () => {
 		expect(inner.args[3][0]).toEqual(record.preInteractions);
 		expect(inner.args[3][2]).toEqual(record.postInteractions);
 	});
-	it("uses a custom router and real submitter without fabricating permissions", async () => {
-		setupAuctionState(flashloanRecord());
-		const node = fakeNode();
+	it("preserves a custom router, real submitter and hooks through the trace fallback", async () => {
+		const record = flashloanRecord();
+		setupAuctionState(record);
+		const node = fakeNode({
+			simulateV1: async () => {
+				throw { code: -32601 };
+			},
+		});
 		const customRouter = "0x5555555555555555555555555555555555555555";
 		const submitter = "0x6666666666666666666666666666666666666666";
 		const validator = validatorAt(node, 0n, 0n, 10_000n, 10n ** 36n, 0n, customRouter, submitter);
@@ -1078,6 +1113,21 @@ describe("flash loan proposal simulation", () => {
 		const block = request.params[0].blockStateCalls[0];
 		expect(block.calls[0]).toMatchObject({ to: customRouter, from: submitter });
 		expect(block.stateOverrides).toBeUndefined();
+		const trace = node.traceCalls[0] as {
+			params: [
+				{ from: Address; to: Address; data: Hex; gas: Hex },
+				string,
+				{ stateOverrides?: unknown },
+			];
+		};
+		expect(trace.params[0]).toMatchObject({ from: submitter, to: customRouter, gas: "0x30d40" });
+		expect(trace.params[2].stateOverrides).toBeUndefined();
+		const outer = decodeFunctionData({ abi: FlashLoanRouterAbi, data: trace.params[0].data });
+		const inner = decodeFunctionData({ abi: GPv2SettlementAbi, data: outer.args[1] });
+		expect(inner.args[3][0]).toEqual(record.preInteractions);
+		expect(inner.args[3][2]).toEqual(record.postInteractions);
+		expect(node.estimateCalls).toHaveLength(1);
+		expect((node.estimateCalls[0] as { params: unknown[] }).params).toHaveLength(2);
 	});
 	it("rejects an outer loan/repayment failure even when the RPC includes inner Executed logs", async () => {
 		setupAuctionState(flashloanRecord());
@@ -1171,4 +1221,227 @@ it("routes the real BNB Aave collateral swap through the router without env conf
 	expect(inner.args[3][2]).toEqual(
 		record.postInteractions.map((i) => ({ ...i, target: getAddress(i.target) })),
 	);
+});
+
+describe("callTracer simulation fallback", () => {
+	function setup() {
+		setupAuctionState(
+			sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount - 10_000n })),
+		);
+	}
+	const unavailable = async (): Promise<never> => {
+		throw {
+			cause: { code: 19, message: "Temporary internal error. Please retry, trace-id: example" },
+		};
+	};
+
+	it("falls back on dRPC's wrapped internal error and keeps measured output, gas and replay context", async () => {
+		setup();
+		const delta = submittedProposal().quoteBuyAmount - 1n;
+		const node = fakeNode({ chainId: 43114, simulateV1: unavailable, delta });
+		const verdict = await validatorAt(node).validate(submittedProposal());
+		expect(verdict).toMatchObject({
+			kind: "accept",
+			simulation: {
+				gasUsed: 100_000n,
+				simulationBuyAmount: delta,
+				simulationParams: { chainId: 43114, blockNumber: "1000" },
+			},
+		});
+		const primary = node.simulateCalls[0] as {
+			params: [{ blockStateCalls: [{ calls: [unknown]; stateOverrides: unknown }] }, string];
+		};
+		const transaction = primary.params[0].blockStateCalls[0].calls[0];
+		const stateOverrides = primary.params[0].blockStateCalls[0].stateOverrides;
+		expect(node.estimateCalls).toEqual([
+			{ method: "eth_estimateGas", params: [transaction, "latest", stateOverrides] },
+		]);
+		expect(node.traceCalls).toEqual([
+			{
+				method: "debug_traceCall",
+				params: [
+					{ ...(transaction as object), gas: "0x30d40" },
+					"latest",
+					{ tracer: "callTracer", tracerConfig: { withLog: true }, timeout: "2s", stateOverrides },
+				],
+			},
+		]);
+	});
+
+	it.each([
+		new HttpRequestError({ url: "https://rpc.example", status: 503 }),
+		{ code: -32601, message: "method not found" },
+	])("falls back on supported availability errors: %j", async (error) => {
+		setup();
+		const node = fakeNode({
+			simulateV1: async () => {
+				throw error;
+			},
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({ kind: "accept" });
+		expect(node.traceCalls).toHaveLength(1);
+	});
+
+	it("does not call tracing or estimation after a successful simulation", async () => {
+		setup();
+		const node = fakeNode();
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({ kind: "accept" });
+		expect(node.traceCalls).toEqual([]);
+		expect(node.estimateCalls).toEqual([]);
+	});
+
+	it("does not fall back after a simulation revert", async () => {
+		setup();
+		const node = fakeNode({ simulateV1: async () => simulateRevert() });
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+			kind: "simFailed",
+		});
+		expect(node.traceCalls).toEqual([]);
+		expect(node.estimateCalls).toEqual([]);
+	});
+
+	it.each([
+		{ code: -32602, message: "invalid params" },
+		{ code: 3, message: "execution reverted" },
+		{ code: 429, message: "rate limit" },
+		{ status: 500, cause: { code: 3, message: "execution reverted" } },
+		{ code: 19, message: "unrelated provider error" },
+	])("does not hide non-availability errors: %j", async (error) => {
+		setup();
+		const node = fakeNode({
+			simulateV1: async () => {
+				throw error;
+			},
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toBeNull();
+		expect(node.traceCalls).toEqual([]);
+	});
+
+	it("rejects a reverted outer wrapper even when its child emitted Executed", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			traceCall: async () => ({
+				type: "CALL",
+				gasUsed: "0x186a0",
+				output: "0x",
+				error: "execution reverted",
+				revertReason: "repayment failed",
+				calls: [
+					{
+						type: "CALL",
+						gasUsed: "0x100",
+						logs: [buildExecutedLog(TRAMPOLINE, submittedProposal().orderUidHash, 1_000_000n)],
+					},
+				],
+			}),
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+			kind: "simFailed",
+			revertReason: "repayment failed",
+		});
+	});
+
+	it("ignores Executed logs under reverted ancestors", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			traceCall: async () => ({
+				type: "CALL",
+				gasUsed: "0x186a0",
+				calls: [
+					{
+						type: "CALL",
+						gasUsed: "0x100",
+						error: "execution reverted",
+						calls: [
+							{
+								type: "CALL",
+								gasUsed: "0x100",
+								logs: [buildExecutedLog(TRAMPOLINE, submittedProposal().orderUidHash, 1_000_000n)],
+							},
+						],
+					},
+				],
+			}),
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+			kind: "reject",
+			reason: "SimulationMissingExecutedEvent",
+		});
+	});
+
+	it.each([
+		null,
+		{},
+		{ gasUsed: "invalid" },
+		{ type: "CALL", gasUsed: "0x0" },
+		{ type: "DELEGATECALL", gasUsed: "0x100" },
+	])("defers malformed traces: %j", async (trace) => {
+		setup();
+		const node = fakeNode({ simulateV1: unavailable, traceCall: async () => trace });
+		expect(await validatorAt(node).validate(submittedProposal())).toBeNull();
+	});
+
+	it("defers when fallback RPC fails", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			traceCall: async () => {
+				throw new Error("trace unavailable");
+			},
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toBeNull();
+	});
+
+	it.each(["0x0", "not-hex", null])("defers invalid gas estimates: %j", async (gas) => {
+		setup();
+		const node = fakeNode({ simulateV1: unavailable, estimateGas: async () => gas });
+		expect(await validatorAt(node).validate(submittedProposal())).toBeNull();
+		expect(node.traceCalls).toEqual([]);
+	});
+
+	it("defers gas estimation transport errors without tracing", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			estimateGas: async () => {
+				throw new Error("estimate unavailable");
+			},
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toBeNull();
+		expect(node.traceCalls).toEqual([]);
+	});
+
+	it("applies profitability to the observed trace delta rather than the quote", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			delta: submittedProposal().quoteBuyAmount - 10_000n,
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toEqual({
+			kind: "reject",
+			reason: "Unprofitable",
+		});
+	});
+
+	it("keeps an execution revert from gas estimation as a simulation failure", async () => {
+		setup();
+		const node = fakeNode({
+			simulateV1: unavailable,
+			estimateGas: async () => {
+				throw {
+					cause: {
+						code: 3,
+						data: `0x08c379a0${encodeAbiParameters([{ type: "string" }], ["GPv2: order filled"]).slice(2)}`,
+					},
+				};
+			},
+		});
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+			kind: "simFailed",
+			revertReason: "GPv2: order filled",
+		});
+		expect(node.traceCalls).toEqual([]);
+	});
 });
