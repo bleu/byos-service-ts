@@ -1,3 +1,4 @@
+import pino from "pino";
 import type { PublicClient } from "viem";
 import { describe, expect, it } from "vitest";
 import type { Proposal } from "../../../domain/proposal.js";
@@ -57,6 +58,35 @@ function validatorWith(client: PublicClient): EscrowValidator {
 }
 
 describe("EscrowValidator — floor gate (single proposal)", () => {
+	it("logs escrow RPC failures while preserving the unavailable verdict", async () => {
+		const lines: string[] = [];
+		const logger = pino(
+			{},
+			{
+				write: (line) => {
+					lines.push(line);
+				},
+			},
+		);
+		const client = {
+			multicall: async () => {
+				throw new Error("escrow RPC unavailable");
+			},
+		} as unknown as PublicClient;
+		const proposal = submittedProposal();
+		const validator = new EscrowValidator(client, ESCROW, MIN_COLLATERAL, logger);
+
+		expect(await validator.validate(proposal)).toBeNull();
+		expect(JSON.parse(lines[0] ?? "")).toMatchObject({
+			level: 40,
+			proposalId: proposal.id,
+			orderUid: proposal.orderUid,
+			subSolver: proposal.subSolver,
+			stage: "escrow-balance",
+			error: { message: "escrow RPC unavailable" },
+		});
+	});
+
 	it("accepts when balance equals min collateral", async () => {
 		const verdict = await validatorWith(clientWithBalance(MIN_COLLATERAL)).validate(
 			submittedProposal(),

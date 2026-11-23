@@ -19,6 +19,7 @@ import { getAuctionState } from "../auction-state.js";
 import type { Candidate } from "../candidate-store.js";
 import { CandidateStore } from "../candidate-store.js";
 import * as store from "../storage.js";
+import { logValidationUnavailable } from "../validation-log.js";
 import {
 	parseCreateProposalRequest,
 	proposalToGetResponse,
@@ -250,16 +251,18 @@ export function createPublicRoutes(config: RoutesConfig) {
 			"proposal received — validating inline",
 		);
 
-		// Run validation inline. A null verdict means auction state is unavailable — defer.
+		// A null verdict can mean unavailable auction state or a validation dependency failure.
 		let verdict: Verdict | null;
 		try {
 			verdict = await config.validator.validate(proposalForValidation);
-		} catch {
+		} catch (err) {
+			logValidationUnavailable(log, proposalForValidation, "validation-exception", err);
 			verdict = null;
 		}
 		if (!verdict) {
-			// Auction state unavailable — write to log as rejected (AuctionClosed)
-			// so the sub-solver gets clear feedback. Don't silently discard.
+			logValidationUnavailable(log, proposalForValidation, "validation-verdict");
+			// Preserve the existing rejection response for an unavailable verdict.
+			// The validator logs the underlying failure separately.
 			await store.writeToLog(
 				config.db,
 				id,

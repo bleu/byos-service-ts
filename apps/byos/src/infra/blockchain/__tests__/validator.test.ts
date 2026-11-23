@@ -9,6 +9,7 @@ import {
 	SigningScheme,
 	TrampolineAbi,
 } from "@byos/common";
+import pino, { type Logger } from "pino";
 import {
 	type Address,
 	decodeFunctionData,
@@ -256,6 +257,7 @@ function validatorAt(
 	_minCollateral = 10n ** 16n,
 	flashLoanRouter?: Address,
 	submitter?: Address,
+	logger?: Logger,
 ): SimulationValidator {
 	// Gas price lives in auction state. Patch the local state so tests that
 	// pass a non-zero gasPrice still exercise the profitability gate.
@@ -271,7 +273,7 @@ function validatorAt(
 		0n, // collateralRatioBps = 0 → Gate 2 exposure is 0, always passes
 		0n, // minCollateral = 0 → penaltyCap = 0
 		async () => ({ proposals: [], bufferBalance: 0n }), // fetchInflightData: no siblings
-		undefined,
+		logger,
 		submitter,
 		undefined,
 		flashLoanRouter,
@@ -589,6 +591,55 @@ describe("SimulationValidator", () => {
 		expect(request.params[1]).toBe("0x3e8");
 		expect(Object.keys(params?.stateOverrides ?? {})).toHaveLength(2);
 	});
+
+	it.each(["simulation", "trampoline", "authenticator"] as const)(
+		"logs the underlying %s RPC failure with proposal context",
+		async (stage) => {
+			const lines: string[] = [];
+			const logger = pino(
+				{ level: "warn" },
+				{
+					write: (line) => {
+						lines.push(line);
+					},
+				},
+			);
+			const fail = async (): Promise<never> => {
+				throw { code: 429, message: "rate limit exceeded" };
+			};
+			const node = fakeNode({
+				simulateV1: stage === "simulation" ? fail : undefined,
+				addressOf: stage === "trampoline" ? fail : undefined,
+				authenticator: stage === "authenticator" ? fail : undefined,
+			});
+			setupAuctionState(sampleRecord(sampleOrder()));
+			const proposal = { ...submittedProposal(), trampoline: null, auctionId: 1 };
+			const validator = validatorAt(
+				node,
+				0n,
+				0n,
+				10_000n,
+				10n ** 36n,
+				0n,
+				undefined,
+				undefined,
+				logger,
+			);
+
+			expect(await validator.validate(proposal)).toBeNull();
+			expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+				expect.objectContaining({
+					level: 40,
+					proposalId: proposal.id,
+					auctionId: 1,
+					orderUid: proposal.orderUid,
+					subSolver: proposal.subSolver,
+					stage: stage === "simulation" ? "eth_simulateV1" : `${stage}-resolution`,
+					error: expect.objectContaining({ code: 429, message: "rate limit exceeded" }),
+				}),
+			);
+		},
+	);
 
 	it("simulation transport error defers judgment", async () => {
 		const node = fakeNode({

@@ -156,7 +156,12 @@ export async function buildContext(config: Config, logger: Logger): Promise<AppC
 		(config.SETTLEMENT_ADDRESS as Address | undefined) ?? settlementAddressFor(config.CHAIN_ID);
 
 	// Escrow validator
-	const escrowValidator = new EscrowValidator(publicClient, escrowAddress, minCollateralWei);
+	const escrowValidator = new EscrowValidator(
+		publicClient,
+		escrowAddress,
+		minCollateralWei,
+		logger.child({ component: "escrow" }),
+	);
 
 	// Resolve protocol deployment metadata once, outside /solve and validation.
 	const flashLoanRouter = await resolveFlashLoanRouter(

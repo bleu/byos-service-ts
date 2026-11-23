@@ -1,8 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { EscrowAbi } from "@byos/common";
+import type { Logger } from "pino";
 import type { Address, PublicClient } from "viem";
 import type { Proposal } from "../../domain/proposal.js";
 import type { ValidateProposal, Verdict } from "../../domain/validator.js";
+import { logValidationUnavailable } from "../validation-log.js";
 
 export class EscrowValidator implements ValidateProposal {
 	private cache = new Map<string, Promise<bigint>>();
@@ -13,6 +15,7 @@ export class EscrowValidator implements ValidateProposal {
 		publicClient: PublicClient,
 		escrowAddress: Address,
 		private readonly minCollateral: bigint,
+		private readonly logger?: Logger,
 	) {
 		this.readBalance = createBatchedEscrowBalanceReader(publicClient, escrowAddress);
 		this.readBalanceBatch = createEscrowBalanceReader(publicClient, escrowAddress);
@@ -69,7 +72,8 @@ export class EscrowValidator implements ValidateProposal {
 			}
 
 			return { kind: "accept", simulation: null };
-		} catch {
+		} catch (err) {
+			logValidationUnavailable(this.logger, proposal, "escrow-balance", err);
 			// All RPC errors → defer
 			return null;
 		}
