@@ -1,6 +1,6 @@
 # Simulation
 
-Status: accepted; revised 2026-10-01 (eth_simulateV1, simulationBuyAmount, slippage gap check)
+Status: accepted; revised 2026-11-23 (callTracer availability fallback)
 
 Spec: docs/shared/design-document.md#simulation
       https://bleu.github.io/byos-docs/design-document#simulation
@@ -30,6 +30,34 @@ Since COW-1297, simulation uses `eth_simulateV1` (Geth's `blockStateCalls` API) 
 3. **Same trip count.** A single `eth_simulateV1` replaces a single `eth_estimateGas`.
 
 The `stateOverrides` map in `eth_simulateV1` uses the Geth object format `{ [address]: { code?, stateDiff: { [slot]: value } } }` — stateDiff is an object keyed by slot, not an array.
+
+### Why fall back to callTracer
+
+Avalanche staging's dRPC endpoint returned HTTP 500 with JSON-RPC code 19 for
+`eth_simulateV1`, including a plain USDC read. Public endpoints tested returned
+method-not-found. The same dRPC endpoint supports `debug_traceCall` with
+`callTracer`, event logs (`withLog`), and state overrides. This preserves observed
+output rather than replacing it with the signed floor or quote.
+
+Fallback is limited to HTTP 5xx, method-not-found, and the observed dRPC code 19
+with its temporary-internal-error message. Reverts and invalid parameters do not
+qualify. Explicit request retries are disabled so a fallback does not sit behind
+viem's retry backoff. The trace has a two-second server execution timeout; network
+latency is still governed by the existing HTTP transport timeout.
+
+Estimate gas for the identical transaction before tracing, then supply that limit.
+Avalanche's [gas accounting](https://build.avax.network/docs/rpcs/other/guides/txn-fees)
+charges at least half the supplied gas limit: a large default tracing limit can
+inflate reported usage enough to reject otherwise profitable proposals. Use the
+trace root's `gasUsed`, which includes its descendants, rather than summing frames.
+Only logs from successful call paths can supply the trampoline's `Executed` delta;
+logs below reverted ancestors are discarded even when their parent caught the error.
+A failed outer settlement or flash loan wrapper remains a simulation failure.
+
+This adds two RPC requests only when the preferred method is unavailable. A trace
+without a usable `Executed` event still cannot become a candidate. Gas estimation
+alone is never enough to accept a proposal. Exact replay remains best-effort since
+each request uses `latest`.
 
 ### Why simulate at latest
 
