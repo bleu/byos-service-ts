@@ -16,6 +16,7 @@ import {
 } from "../../domain/scoring.js";
 import type { SimulationFailureParams, ValidateProposal, Verdict } from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
+import { logValidationUnavailable } from "../validation-log.js";
 import { createBatchedEscrowBalanceReader, type EscrowValidator } from "./escrow.js";
 import { DEFAULT_FLASH_LOAN_ROUTER } from "./flash-loan-router.js";
 import { buildSimulation } from "./simulation.js";
@@ -249,7 +250,10 @@ export class SimulationValidator implements ValidateProposal {
 		// Order data, prices, and gas price come from the auction state populated
 		// by /solve. If absent the auction already closed — defer.
 		const auctionState = await getAuctionState();
-		if (!auctionState) return null;
+		if (!auctionState) {
+			logValidationUnavailable(this.logger, proposal, "auction-state");
+			return null;
+		}
 
 		const gasPrice = auctionState.gasPrice;
 
@@ -315,9 +319,18 @@ export class SimulationValidator implements ValidateProposal {
 					kind: "simFailed",
 					revertReason: extractRevertReasonFromThrown(error) ?? undefined,
 				};
+			logValidationUnavailable(this.logger, proposal, "trampoline-resolution", error);
 			return null;
 		}
-		if (authenticatorResult.status === "rejected") return null;
+		if (authenticatorResult.status === "rejected") {
+			logValidationUnavailable(
+				this.logger,
+				proposal,
+				"authenticator-resolution",
+				authenticatorResult.reason,
+			);
+			return null;
+		}
 		const trampoline = trampolineResult.value;
 		const authenticator = authenticatorResult.value;
 
@@ -361,9 +374,11 @@ export class SimulationValidator implements ValidateProposal {
 		let blockNumber: bigint;
 		const stateOverrides = toSimulateV1StateOverrides(sim.stateOverride);
 		const simulationStarted = performance.now();
+		let rpcMethod = "eth_blockNumber";
 		try {
 			// Pin the base block so retained diagnostics replay the same state.
 			blockNumber = await this.publicClient.getBlockNumber({ cacheTime: 0 });
+			rpcMethod = "eth_simulateV1";
 			result = await this.publicClient.request({
 				method: "eth_simulateV1" as never,
 				params: [
@@ -384,7 +399,8 @@ export class SimulationValidator implements ValidateProposal {
 					toHex(blockNumber),
 				] as never,
 			});
-		} catch {
+		} catch (err) {
+			logValidationUnavailable(this.logger, proposal, rpcMethod, err);
 			return null; // transport error, defer
 		}
 		this.logger?.debug(
@@ -396,7 +412,12 @@ export class SimulationValidator implements ValidateProposal {
 			? (result as { calls?: SimulateV1CallResult[] }[])[0]
 			: undefined;
 		if (!firstBlock || !Array.isArray(firstBlock.calls) || !firstBlock.calls[0]) {
-			this.logger?.error({ proposalId: proposal.id }, "eth_simulateV1 unexpected response shape");
+			logValidationUnavailable(
+				this.logger,
+				proposal,
+				"simulation-response",
+				new Error("eth_simulateV1 unexpected response shape"),
+			);
 			return null;
 		}
 		const call = firstBlock.calls[0];
@@ -475,6 +496,12 @@ export class SimulationValidator implements ValidateProposal {
 		//   summed over all active proposals for this subsolver, including this one.
 		{
 			const [inflightResult, balanceResult] = await collateralReads;
+			if (inflightResult.status === "rejected") {
+				logValidationUnavailable(this.logger, proposal, "inflight-data", inflightResult.reason);
+			}
+			if (balanceResult.status === "rejected") {
+				logValidationUnavailable(this.logger, proposal, "collateral-balance", balanceResult.reason);
+			}
 			if (inflightResult.status === "rejected" || balanceResult.status === "rejected") return null;
 			const inflightData = inflightResult.value;
 			const escrowBalance = balanceResult.value;
