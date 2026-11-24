@@ -47,3 +47,27 @@ including the native BNB sentinel. Provider chain and order restrictions still a
 
 Staking tokens may have accruing exchange rates. Basket membership does not
 guarantee parity or available liquidity; tighter slippage can reduce successful fills.
+
+## Alternative routes
+
+Multiple alternatives are enabled only when the remaining sell amount is worth
+**strictly more than one native token**. The shared pipeline uses
+`nativeSellValue = sellAmount * sellToken.referencePrice / 10^18` (native wei),
+calculated from the `/solve` token reference prices, and compares it with
+`10^18`. An order at or below the threshold, or with no reference price, sends
+one route. The threshold uses the remaining auction sell amount, not the
+original full amount of a partially filled order. Other discovery modes use
+their available native valuation and default to one route when it is missing.
+
+The sub-solver builds the SWAP-mode quotes independently and submits the
+route with the shortest swap calldata, or up to three distinct viable routes
+with the shortest calldata when the native-value threshold is exceeded.
+Routes below the order's limit are excluded. A failed build or a rejected
+proposal does not discard the other alternatives. Each alternative is signed
+with its own nonce and consumes one BYOS submission-budget slot.
+
+BYOS simulates each proposal and selects the best eligible score using delivered
+output and gas. Submission does not cancel older proposals for the same order;
+withdraw a specific candidate with the existing signed `DELETE /proposal/{id}`.
+The local live-order map tracks a refresh cooldown, not exclusive ownership of
+one proposal ID. HTTP 429 stops further submissions until the retry window.

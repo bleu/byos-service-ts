@@ -45,6 +45,42 @@ export interface RoutesConfig {
 	logger?: Logger;
 }
 
+function candidateForResponse(candidate: Candidate) {
+	return {
+		id: candidate.id,
+		subSolver: candidate.subSolver,
+		orderUid: candidate.orderUid,
+		orderUidHash: candidate.orderUidHash,
+		sellAmount: candidate.sellAmount,
+		minBuyAmount: candidate.minBuyAmount,
+		quoteBuyAmount: candidate.quoteBuyAmount,
+		sellToken: candidate.sellToken,
+		buyToken: candidate.buyToken,
+		interactions: candidate.interactions,
+		interactionsHash: candidate.interactionsHash,
+		validUntil: candidate.validUntil,
+		nonce: candidate.nonce,
+		signature: candidate.signature,
+		status: "candidate" as const,
+		rejectionReason: null,
+		gasUsed: candidate.gasUsed,
+		trampoline: candidate.trampoline,
+		settlementTxHash: null,
+		penaltyTxHash: null,
+		sellTokenRefPrice: candidate.sellTokenRefPrice,
+		buyTokenRefPrice: null,
+		surplusTokenRefPrice: null,
+		auctionGasPrice: null,
+		clearingPrices: null,
+		simulationBuyAmount: candidate.simulationBuyAmount,
+		simulationFailureParams: null,
+		settlementPenaltyCap: null,
+		auctionId: candidate.auctionId,
+		createdAt: candidate.createdAt,
+		statusChangedAt: candidate.createdAt,
+	};
+}
+
 export function createPublicRoutes(config: RoutesConfig) {
 	const app = new Hono();
 	const domain = byosDomain(config.chainId, config.trampolineFactory);
@@ -332,7 +368,8 @@ export function createPublicRoutes(config: RoutesConfig) {
 			throw new AppError(Kind.ProposalRejected, isFilled ? "SolverOutbid" : "SimFailed");
 		}
 
-		// verdict.kind === "accept" — hold as candidate in memory
+		// verdict.kind === "accept" — keep this alternative alongside its siblings.
+		// A new POST never implicitly cancels another proposal for the same order.
 		const sim = verdict.simulation;
 		if (!sim) {
 			// Shouldn't happen: accept always has simulation data
@@ -475,39 +512,7 @@ export function createPublicRoutes(config: RoutesConfig) {
 			: config.candidateStore
 					.getAll()
 					.filter((c) => c.subSolver.toLowerCase() === reader.toLowerCase())
-					.map((candidate) => ({
-						id: candidate.id,
-						subSolver: candidate.subSolver,
-						orderUid: candidate.orderUid,
-						orderUidHash: candidate.orderUidHash,
-						sellAmount: candidate.sellAmount,
-						minBuyAmount: candidate.minBuyAmount,
-						quoteBuyAmount: candidate.quoteBuyAmount,
-						sellToken: candidate.sellToken,
-						buyToken: candidate.buyToken,
-						interactions: candidate.interactions,
-						interactionsHash: candidate.interactionsHash,
-						validUntil: candidate.validUntil,
-						nonce: candidate.nonce,
-						signature: candidate.signature,
-						status: "candidate" as const,
-						rejectionReason: null,
-						gasUsed: candidate.gasUsed,
-						trampoline: candidate.trampoline,
-						settlementTxHash: null,
-						penaltyTxHash: null,
-						sellTokenRefPrice: candidate.sellTokenRefPrice,
-						buyTokenRefPrice: null,
-						surplusTokenRefPrice: null,
-						auctionGasPrice: null,
-						clearingPrices: null,
-						simulationBuyAmount: candidate.simulationBuyAmount,
-						simulationFailureParams: null,
-						settlementPenaltyCap: null,
-						auctionId: candidate.auctionId,
-						createdAt: candidate.createdAt,
-						statusChangedAt: candidate.createdAt,
-					}));
+					.map(candidateForResponse);
 
 		return c.json(proposalToListResponse([...candidateProposals, ...dbProposals]));
 	});
@@ -532,7 +537,17 @@ export function createPublicRoutes(config: RoutesConfig) {
 			reader,
 			includeArchived,
 		);
-		return c.json(proposalToListResponse(proposals));
+		const candidates = includeArchived
+			? []
+			: config.candidateStore
+					.getAll()
+					.filter(
+						(candidate) =>
+							candidate.orderUid.toLowerCase() === orderUid.toLowerCase() &&
+							candidate.subSolver.toLowerCase() === reader.toLowerCase(),
+					)
+					.map(candidateForResponse);
+		return c.json(proposalToListResponse([...candidates, ...proposals]));
 	});
 
 	// GET /buffer-balance — Off-chain buffer accounting (owner-scoped)

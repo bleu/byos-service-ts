@@ -296,3 +296,168 @@ describe("/solve", () => {
 		expect(resp.status).toBe(200);
 	});
 });
+
+describe("same-sub-solver alternatives", () => {
+	it("simulates alternatives independently and selects by delivered output and gas rather than arrival order", async () => {
+		const validated: bigint[] = [];
+		const local = await createTestApp({
+			validator: {
+				validate: async (proposal) => {
+					validated.push(proposal.nonce);
+					if (proposal.nonce === 7002n) return { kind: "simFailed", revertReason: "bad route" };
+					const verdict = await acceptAll.validate(proposal);
+					if (verdict.kind !== "accept" || !verdict.simulation)
+						throw new Error("expected simulation");
+					return {
+						kind: "accept",
+						simulation: {
+							...verdict.simulation,
+							gasUsed: proposal.nonce === 7000n ? 100_000n : 200_000n,
+							simulationBuyAmount: proposal.nonce === 7000n ? 11n * 10n ** 17n : 2n * 10n ** 18n,
+						},
+					};
+				},
+			},
+		});
+		try {
+			const orderUid = `0x${"71".repeat(56)}` as const;
+			const ids: number[] = [];
+			for (const [nonce, amount] of [
+				[7000n, 3n],
+				[7001n, 2n],
+				[7002n, 4n],
+			] as const) {
+				const { response } = await signAndSubmitProposal(local.publicApp, {
+					orderUid,
+					nonce,
+					sellToken: SELL_TOKEN,
+					buyToken: BUY_TOKEN,
+					sellAmount: 10n ** 18n,
+					minBuyAmount: 10n ** 18n,
+					quoteBuyAmount: amount * 10n ** 18n,
+				});
+				if (nonce === 7002n) {
+					expect(response.status).toBe(400);
+					expect(await response.json()).toMatchObject({
+						kind: "ProposalRejected",
+						description: "SimFailed",
+					});
+				} else {
+					expect(response.status).toBe(200);
+					ids.push((await response.json()).id);
+				}
+			}
+			expect(validated).toEqual([7000n, 7001n, 7002n]);
+			const auth = await readAuthHeader();
+			for (const id of ids) {
+				const response = await local.publicApp.request(`/proposal/${id}`, {
+					headers: { "X-Signature": auth },
+				});
+				expect((await response.json()).status).toBe("candidate");
+			}
+			const { body, status } = await postSolve(solvableAuction(orderUid), local);
+			expect(status).toBe(200);
+			expect(body.solutions).toHaveLength(1);
+			expect(body.solutions[0]?.id).toBe(ids[1]);
+			expect((await store.get(local.ctx.db, ids[1]!))?.status).toBe("submitted");
+		} finally {
+			await local.ctx.cleanup();
+		}
+	});
+
+	it("cancels only the explicitly signed proposal and keeps its sibling eligible", async () => {
+		const local = await createTestApp();
+		try {
+			const orderUid = `0x${"72".repeat(56)}` as const;
+			const ids: number[] = [];
+			for (const nonce of [7100n, 7101n, 7102n]) {
+				const { response } = await signAndSubmitProposal(local.publicApp, {
+					orderUid,
+					nonce,
+					sellToken: SELL_TOKEN,
+					buyToken: BUY_TOKEN,
+					sellAmount: 10n ** 18n,
+					minBuyAmount: 2n * 10n ** 18n,
+					quoteBuyAmount: 2n * 10n ** 18n,
+				});
+				ids.push((await response.json()).id);
+			}
+			const { cancelSignatureHeader } = await import("./helpers.js");
+			const signature = await cancelSignatureHeader(ids[1]!);
+			const cancel = await local.publicApp.request(`/proposal/${ids[1]}`, {
+				method: "DELETE",
+				headers: { "X-Signature": signature },
+			});
+			expect(cancel.status).toBe(204);
+			const auth = await readAuthHeader();
+			const states = await Promise.all(
+				ids.map(async (id) => {
+					const response = await local.publicApp.request(`/proposal/${id}`, {
+						headers: { "X-Signature": auth },
+					});
+					return (await response.json()).status;
+				}),
+			);
+			expect(states).toEqual(["candidate", "cancelled", "candidate"]);
+			const { body } = await postSolve(solvableAuction(orderUid), local);
+			expect(body.solutions).toHaveLength(1);
+			expect(body.solutions[0]?.id).toBe(ids[0]);
+		} finally {
+			await local.ctx.cleanup();
+		}
+	});
+
+	it("keeps both alternatives when an older submission finishes validation last", async () => {
+		let release = () => {};
+		let entered = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const local = await createTestApp({
+			validator: {
+				validate: async (proposal) => {
+					if (proposal.nonce === 7200n) {
+						entered();
+						await gate;
+					}
+					return acceptAll.validate(proposal);
+				},
+			},
+		});
+		try {
+			const orderUid = `0x${"73".repeat(56)}` as const;
+			const first = signAndSubmitProposal(local.publicApp, { orderUid, nonce: 7200n });
+			await started;
+			const second = await signAndSubmitProposal(local.publicApp, { orderUid, nonce: 7201n });
+			release();
+			const older = await first;
+			expect(older.response.status).toBe(200);
+			expect(second.response.status).toBe(200);
+			const auth = await readAuthHeader();
+			const response = await local.publicApp.request(`/proposals/${orderUid}`, {
+				headers: { "X-Signature": auth },
+			});
+			const body = await response.json();
+			expect(body.proposals).toHaveLength(2);
+			expect(body.proposals.every((p: { status: string }) => p.status === "candidate")).toBe(true);
+			const { otherReadAuthHeader } = await import("./helpers.js");
+			const other = await local.publicApp.request(`/proposals/${orderUid}`, {
+				headers: { "X-Signature": await otherReadAuthHeader() },
+			});
+			expect((await other.json()).proposals).toHaveLength(0);
+			const archived = await local.publicApp.request(
+				`/proposals/${orderUid}?includeArchived=true`,
+				{
+					headers: { "X-Signature": auth },
+				},
+			);
+			expect((await archived.json()).proposals).toHaveLength(0);
+		} finally {
+			release();
+			await local.ctx.cleanup();
+		}
+	});
+});

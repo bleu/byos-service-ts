@@ -9,6 +9,8 @@ export interface CandidateOrder {
 	buyToken: Address;
 	remainingSell: bigint;
 	scaledLimitBuy: bigint;
+	/** Remaining sell amount valued in native wei using auction reference prices. */
+	nativeSellValue?: bigint;
 }
 
 /** A route a provider has quoted but not yet signed or submitted. */
@@ -25,6 +27,8 @@ export interface ProviderRoute {
 export interface RouteProvider {
 	readonly name: string;
 	quote(order: CandidateOrder): Promise<ProviderRoute | null>;
+	/** Independently executable alternatives for the same order. */
+	quoteMany?(order: CandidateOrder): Promise<ProviderRoute[]>;
 }
 
 export interface QuoteResult {
@@ -46,7 +50,7 @@ export async function quoteBatch(
 	if (!Number.isInteger(concurrency) || concurrency < 1) {
 		throw new Error("quote concurrency must be a positive integer");
 	}
-	const results: QuoteResult[] = new Array(orders.length);
+	const results: QuoteResult[][] = new Array(orders.length);
 	let cursor = 0;
 	const worker = async () => {
 		while (true) {
@@ -54,12 +58,17 @@ export async function quoteBatch(
 			const order = orders[index];
 			if (!order) return;
 			try {
-				results[index] = { order, route: await provider.quote(order) };
+				const routes =
+					provider.quoteMany && (order.nativeSellValue ?? 0n) > 10n ** 18n
+						? await provider.quoteMany(order)
+						: [await provider.quote(order)];
+				results[index] =
+					routes.length > 0 ? routes.map((route) => ({ order, route })) : [{ order, route: null }];
 			} catch (error) {
-				results[index] = { order, route: null, error };
+				results[index] = [{ order, route: null, error }];
 			}
 		}
 	};
 	await Promise.all(Array.from({ length: Math.min(concurrency, orders.length) }, worker));
-	return results;
+	return results.flat();
 }

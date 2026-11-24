@@ -14,6 +14,8 @@ export interface PollOrder {
 	executedSellAmount: bigint;
 	/** Auction-estimated native-token surplus, used only for quote ordering. */
 	estimatedNativeSurplus?: bigint;
+	/** Remaining sell value in native wei, calculated by the discovery client. */
+	nativeSellValue?: bigint;
 }
 
 export interface RankedCandidate {
@@ -42,6 +44,7 @@ export function toCandidateOrder(order: PollOrder): CandidateOrder | null {
 		sellToken: order.sellToken,
 		buyToken: order.buyToken,
 		remainingSell,
+		...(order.nativeSellValue !== undefined ? { nativeSellValue: order.nativeSellValue } : {}),
 		scaledLimitBuy: ceilDiv(order.fullBuyAmount * remainingSell, order.fullSellAmount),
 	};
 }

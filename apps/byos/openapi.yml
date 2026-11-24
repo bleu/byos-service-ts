@@ -47,6 +47,12 @@ info:
     means validation failed; the `reason` field carries the typed rejection
     reason. Use `GET /proposal/{id}` to track subsequent state changes.
 
+    A sub-solver may submit multiple independently signed alternatives for the
+    same order, each with its own nonce. A new submission does not cancel older
+    alternatives, including when validation finishes out of order. BYOS selects
+    the best eligible candidate using simulated output and gas. To withdraw an
+    alternative, explicitly cancel its proposal id with a signed `DELETE`.
+
     Candidates are held in memory only — they are not written to the database
     until `/solve` selects them. When `/solve` runs, the selected candidate is
     inserted into the database as **`submitted`** (sent to the driver) and
@@ -128,8 +134,10 @@ paths:
         Returns `400 ProposalRejected` with a typed `reason` when validation
         fails. Returns `400 noActiveAuction` when no auction is running.
 
-        Proposals are immutable — there is no update operation. Replacement
-        is a new `POST`, optionally preceded by a `DELETE` of the old one.
+        Proposals are immutable — there is no update operation. Multiple
+        alternatives for the same order may coexist. A new `POST` does not
+        cancel older alternatives; withdraw a specific candidate with a signed
+        `DELETE /proposal/{id}`.
       security: []
       requestBody:
         required: true
@@ -231,7 +239,8 @@ paths:
         in the `X-Signature` header. The recovered signer must be the
         proposal's sub-solver; a non-owner gets the same `404` as a genuine
         miss. Only in-memory candidates (status `candidate`) can be
-        cancelled.
+        cancelled. Cancellation affects only the signed proposal id; siblings
+        for the same order remain eligible.
       security:
         - cancelAuth: []
       responses:

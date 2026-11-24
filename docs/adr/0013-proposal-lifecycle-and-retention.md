@@ -30,21 +30,27 @@ At `/solve` time we don't yet know we won. The window between the autopilot pick
 
 If the order was actually consumed (our tx landed but the notification was lost, or the order was filled externally), the next re-simulation reverts and the proposal dies as `SimFailed`. Re-simulation is the truth-teller. The executing timeout (default 5 minutes) covers lost notifications and restarts mid-settlement.
 
-### Why replacement cancels older live proposals
+### Why alternatives coexist until selection or explicit cancellation
 
 Spec: docs/shared/design-document.md#proposal-lifecycle
 
-Routes are immutable, so refreshing is a new signed proposal. The older route
-must remain eligible until the replacement passes validation; then one
-transaction activates the new route and marks older Submitted or Active routes
-as `Cancelled`. `Executing` is deliberately left alone because the driver may
-still report its outcome. An abandoned execution returns to `Active`; the
-replacement flow never changes an executing proposal.
+This revises the earlier replacement decision: a new proposal for the same
+`(subSolver, orderUid)` must not cancel its siblings. A sub-solver can offer
+several immutable routes, and BYOS already owns the full settlement simulation
+and scoring context. Keeping alternatives lets a successful route compete even
+when another route reverts, without duplicating simulation in every sub-solver.
+Validation completion order is not a measure of route quality.
 
-The unique `(subSolver, nonce)` constraint makes retries safe. The complete
-signed payload is canonically fingerprinted at ingestion: an exact replay
-returns the existing id without a new audit event, while different content is a
-conflict attached to the original proposal's audit trail.
+Cancellation remains explicit and signed for an individual proposal ID. An
+owner can list its proposals for an order and cancel the particular alternatives
+it wants to withdraw. This preserves viable older routes during a refresh and
+keeps a failing new submission from withdrawing them implicitly. Candidates
+already sent to the driver are not cancellable through the public API.
+
+Only the best eligible candidate per order is sent to the driver; alternatives
+do not multiply driver encoding work. Auction closure and settlement outcomes
+still perform their existing cleanup. Each alternative consumes the normal
+submission and simulation budget, so sub-solvers bound the number they submit.
 
 ### Why simulation stops at the first revert
 
@@ -86,6 +92,7 @@ An audit event is emitted only after its proposal write commits, so a crash betw
 
 ## Alternatives considered
 
+- **Implicit replacement on POST.** Reversed: arrival order does not identify the best executable route. Signed cancellation expresses withdrawal without discarding viable siblings.
 - **"Lost auction" as a proposal state.** Rejected — the proposal would bounce `Active -> Lost -> Active` every auction while remaining fully valid.
 - **Enter `Executing` at `/solve` time.** Rejected — we don't know we won; every non-winning round would need an unwind path.
 - **N-strikes or never-terminal `SimFailed`.** Rejected — a once-reverted proposal at `/solve` risks a penalty; never-terminal burns an RPC call per tick on dead orders.

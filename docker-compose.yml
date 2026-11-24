@@ -56,7 +56,7 @@ services:
         condition: service_started
 
   fynd:
-    image: ghcr.io/propeller-heads/fynd:0.99.17@sha256:84c1f4641f6ab5988bafd37544305150dd6224f975311c4b928937e263912f14
+    image: ghcr.io/propeller-heads/fynd:0.125.2@sha256:9e2e9b62003280326b0a70eed45bf626fb8a97c84633eea7af5418934aa68011
     profiles: ["fynd-subsolver"]
     command: ["serve", "--chain", "bsc"]
     environment:
