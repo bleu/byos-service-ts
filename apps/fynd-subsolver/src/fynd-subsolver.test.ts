@@ -162,7 +162,7 @@ describe("Fynd alternative submissions", () => {
 			.mockResolvedValueOnce(3);
 		const solver = new FyndSubsolver(
 			config,
-			{ solvableOrders: async () => [order(1)] },
+			{ solvableOrders: async () => [{ ...order(1), nativeSellValue: 10n ** 18n + 1n }] },
 			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
 			{ ready: async () => true, quoteMany } as unknown as FyndProvider,
 			byosDomain(56, factory),
@@ -187,7 +187,7 @@ describe("Fynd alternative submissions", () => {
 		const submit = vi.fn<ByosClient["submit"]>().mockRejectedValue(new ByosRateLimitError(60_000));
 		const solver = new FyndSubsolver(
 			config,
-			{ solvableOrders: async () => [order(1)] },
+			{ solvableOrders: async () => [{ ...order(1), nativeSellValue: 10n ** 18n + 1n }] },
 			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
 			{
 				ready: async () => true,
@@ -204,12 +204,38 @@ describe("Fynd alternative submissions", () => {
 		expect(submit).toHaveBeenCalledTimes(1);
 	});
 
+	it.each([0n, 10n ** 18n - 1n, 10n ** 18n, 10n ** 18n + 1n])(
+		"uses the native sell-value threshold %s for single or triple submissions",
+		async (nativeSellValue) => {
+			const route = { minBuyAmount: 110n, quoteBuyAmount: 110n, interactions: [] };
+			const quote = vi.fn(async () => route);
+			const quoteMany = vi.fn(async () => [route, route, route]);
+			const submit = vi.fn<ByosClient["submit"]>(async () => 1);
+			const solver = new FyndSubsolver(
+				config,
+				{ solvableOrders: async () => [{ ...order(1), nativeSellValue }] },
+				{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
+				{ ready: async () => true, quote, quoteMany } as unknown as FyndProvider,
+				byosDomain(56, factory),
+				async () => "0x",
+				logger,
+				new RequestBudget(),
+				new OrderFilter({ closeToExecutionTopN: 20 }),
+			);
+			await solver.pollOnce(100n);
+			const large = nativeSellValue > 10n ** 18n;
+			expect(submit).toHaveBeenCalledTimes(large ? 3 : 1);
+			expect(quoteMany).toHaveBeenCalledTimes(large ? 1 : 0);
+			expect(quote).toHaveBeenCalledTimes(large ? 0 : 1);
+		},
+	);
+
 	it("counts each alternative against the submission budget", async () => {
 		const route = { minBuyAmount: 110n, quoteBuyAmount: 110n, interactions: [] };
 		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
 		const solver = new FyndSubsolver(
 			config,
-			{ solvableOrders: async () => [order(1)] },
+			{ solvableOrders: async () => [{ ...order(1), nativeSellValue: 10n ** 18n + 1n }] },
 			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
 			{
 				ready: async () => true,

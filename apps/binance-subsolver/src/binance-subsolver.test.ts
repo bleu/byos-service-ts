@@ -217,7 +217,12 @@ describe("Binance correlated slippage", () => {
 
 describe("Binance route alternatives", () => {
 	function setup(
-		options: { failSubmission?: boolean; rateLimited?: boolean; budget?: RequestBudget } = {},
+		options: {
+			failSubmission?: boolean;
+			rateLimited?: boolean;
+			budget?: RequestBudget;
+			nativeSellValue?: bigint;
+		} = {},
 	) {
 		const quotes = ["long", "third", "broken", "short", "second", "duplicate", "below-limit"];
 		const getQuotes = vi.fn(async () =>
@@ -253,7 +258,11 @@ describe("Binance route alternatives", () => {
 		});
 		const solver = new BinanceSubsolver(
 			config,
-			{ solvableOrders: async () => [order(1)] },
+			{
+				solvableOrders: async () => [
+					{ ...order(1), nativeSellValue: options.nativeSellValue ?? 10n ** 18n + 1n },
+				],
+			},
 			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
 			{ getQuotes, buildSwap } as unknown as BinanceClient,
 			trampolineAddress,
@@ -279,6 +288,17 @@ describe("Binance route alternatives", () => {
 		await solver.pollOnce(101n);
 		expect(submit).toHaveBeenCalledTimes(3);
 	});
+
+	it.each([0n, 10n ** 18n - 1n, 10n ** 18n])(
+		"submits only the shortest-calldata route for native sell value %s",
+		async (nativeSellValue) => {
+			const { solver, submit } = setup({ nativeSellValue });
+			await solver.pollOnce(100n);
+			expect(submit.mock.calls.map(([proposal]) => proposal.interactions[1]?.callData)).toEqual([
+				"0x11",
+			]);
+		},
+	);
 
 	it("still submits siblings after one proposal fails BYOS simulation", async () => {
 		const { solver, submit } = setup({ failSubmission: true });

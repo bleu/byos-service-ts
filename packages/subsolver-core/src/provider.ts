@@ -9,6 +9,8 @@ export interface CandidateOrder {
 	buyToken: Address;
 	remainingSell: bigint;
 	scaledLimitBuy: bigint;
+	/** Remaining sell amount valued in native wei using auction reference prices. */
+	nativeSellValue?: bigint;
 }
 
 /** A route a provider has quoted but not yet signed or submitted. */
@@ -56,9 +58,10 @@ export async function quoteBatch(
 			const order = orders[index];
 			if (!order) return;
 			try {
-				const routes = provider.quoteMany
-					? await provider.quoteMany(order)
-					: [await provider.quote(order)];
+				const routes =
+					provider.quoteMany && (order.nativeSellValue ?? 0n) > 10n ** 18n
+						? await provider.quoteMany(order)
+						: [await provider.quote(order)];
 				results[index] =
 					routes.length > 0 ? routes.map((route) => ({ order, route })) : [{ order, route: null }];
 			} catch (error) {

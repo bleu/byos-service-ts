@@ -50,8 +50,18 @@ guarantee parity or available liquidity; tighter slippage can reduce successful 
 
 ## Alternative routes
 
-For each order, the sub-solver builds the SWAP-mode quotes independently and
-submits up to three distinct viable routes with the shortest swap calldata.
+Multiple alternatives are enabled only when the remaining sell amount is worth
+**strictly more than one native token**. The shared pipeline uses
+`nativeSellValue = sellAmount * sellToken.referencePrice / 10^18` (native wei),
+calculated from the `/solve` token reference prices, and compares it with
+`10^18`. An order at or below the threshold, or with no reference price, sends
+one route. The threshold uses the remaining auction sell amount, not the
+original full amount of a partially filled order. Other discovery modes use
+their available native valuation and default to one route when it is missing.
+
+The sub-solver builds the SWAP-mode quotes independently and submits the
+route with the shortest swap calldata, or up to three distinct viable routes
+with the shortest calldata when the native-value threshold is exceeded.
 Routes below the order's limit are excluded. A failed build or a rejected
 proposal does not discard the other alternatives. Each alternative is signed
 with its own nonce and consumes one BYOS submission-budget slot.

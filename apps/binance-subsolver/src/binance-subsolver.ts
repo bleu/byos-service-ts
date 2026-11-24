@@ -41,10 +41,14 @@ class BinanceProvider implements RouteProvider {
 	) {}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
-		return (await this.quoteMany(order))[0] ?? null;
+		return (await this.findRoutes(order, 1))[0] ?? null;
 	}
 
 	async quoteMany(order: CandidateOrder): Promise<ProviderRoute[]> {
+		return this.findRoutes(order, 3);
+	}
+
+	private async findRoutes(order: CandidateOrder, limit: number): Promise<ProviderRoute[]> {
 		const slippageBps = selectSlippageBps({
 			chainId: this.config.chainId,
 			sellToken: order.sellToken,
@@ -126,7 +130,7 @@ class BinanceProvider implements RouteProvider {
 				minBuyAmount,
 				interactions,
 			});
-			if (routes.length === 3) break;
+			if (routes.length === limit) break;
 		}
 		return routes;
 	}

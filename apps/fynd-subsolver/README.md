@@ -42,9 +42,18 @@ guarantee parity or available liquidity; tighter slippage can reduce successful 
 
 ## Alternative routes
 
-Fynd returns one best route per request. For each order, the sub-solver makes up
-to three requests: the first is unrestricted, and subsequent requests exclude
-all pools used by earlier responses. It submits up to three distinct viable
+Multiple alternatives are enabled only when the remaining sell amount is worth
+**strictly more than one native token**. The shared pipeline uses
+`nativeSellValue = sellAmount * sellToken.referencePrice / 10^18` (native wei),
+calculated from the `/solve` token reference prices, and compares it with
+`10^18`. An order at or below the threshold, or with no reference price, sends
+one route. The threshold uses the remaining auction sell amount, not the
+original full amount of a partially filled order. Other discovery modes use
+their available native valuation and default to one route when it is missing.
+
+Fynd returns one best route per request. Above the native-value threshold, the
+sub-solver makes up to three requests: the first is unrestricted, and subsequent
+requests exclude all pools used by earlier responses. It submits up to three distinct viable
 routes; this is a bounded search for pool-disjoint alternatives, not a guarantee
 of Fynd's global top three routes. A later quote failure preserves earlier usable
 results. Duplicate calldata is not submitted repeatedly, and quote age is checked
