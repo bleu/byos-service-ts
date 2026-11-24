@@ -103,3 +103,28 @@ describe("health listener config", () => {
 		},
 	);
 });
+
+describe("auction pipeline limits", () => {
+	it("defaults to three submissions and a one-second deadline margin", () => {
+		expect(parseConfig({ ...base, SUBSOLVER_BEARER: "secret" })).toMatchObject({
+			byosSubmissionConcurrency: 3,
+			deadlineBufferMs: 1000,
+		});
+		expect(
+			parseConfig({
+				...base,
+				SUBSOLVER_BEARER: "secret",
+				BYOS_SUBMISSION_CONCURRENCY: "2",
+				SUBSOLVER_DEADLINE_BUFFER_MS: "750",
+			}),
+		).toMatchObject({ byosSubmissionConcurrency: 2, deadlineBufferMs: 750 });
+	});
+	it.each([
+		["BYOS_SUBMISSION_CONCURRENCY", "0"],
+		["BYOS_SUBMISSION_CONCURRENCY", "1.5"],
+		["SUBSOLVER_DEADLINE_BUFFER_MS", "249"],
+		["SUBSOLVER_DEADLINE_BUFFER_MS", "NaN"],
+	])("rejects invalid %s=%s", (key, value) => {
+		expect(() => parseConfig({ ...base, SUBSOLVER_BEARER: "secret", [key]: value })).toThrow(key);
+	});
+});

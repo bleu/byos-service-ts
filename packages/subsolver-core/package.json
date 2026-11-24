@@ -12,7 +12,8 @@
 		"@byos/common": "workspace:*",
 		"@kayibal/fynd-client": "0.125.2",
 		"hono": "^4.0.0",
-		"viem": "^2.0.0"
+		"viem": "^2.0.0",
+		"zod": "^3.0.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

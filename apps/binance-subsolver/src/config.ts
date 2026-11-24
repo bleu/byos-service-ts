@@ -23,6 +23,8 @@ const envSchema = z.object({
 		.max(10_000)
 		.default(DEFAULT_CORRELATED_SLIPPAGE_BPS),
 	BINANCE_QUOTE_CONCURRENCY: z.coerce.number().int().positive().default(32),
+	BYOS_SUBMISSION_CONCURRENCY: z.coerce.number().int().positive().default(3),
+	SUBSOLVER_DEADLINE_BUFFER_MS: z.coerce.number().int().min(250).default(1000),
 	BYOS_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(100),
 	BYOS_READ_RESERVE: z.coerce.number().int().nonnegative().default(10),
 	PROPOSAL_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
@@ -54,6 +56,8 @@ interface BaseConfig {
 	binanceSlippageBps: number;
 	correlatedSlippageBps: number;
 	binanceQuoteConcurrency: number;
+	byosSubmissionConcurrency?: number;
+	deadlineBufferMs?: number;
 	byosRequestsPerMinute: number;
 	byosReadReserve: number;
 	proposalRefreshIntervalSeconds: number;
@@ -99,6 +103,8 @@ export function parseConfig(env: Record<string, string | undefined> = process.en
 		binanceSlippageBps: result.data.BINANCE_SLIPPAGE_BPS,
 		correlatedSlippageBps: result.data.CORRELATED_SLIPPAGE_BPS,
 		binanceQuoteConcurrency: result.data.BINANCE_QUOTE_CONCURRENCY,
+		byosSubmissionConcurrency: result.data.BYOS_SUBMISSION_CONCURRENCY,
+		deadlineBufferMs: result.data.SUBSOLVER_DEADLINE_BUFFER_MS,
 		byosRequestsPerMinute: result.data.BYOS_REQUESTS_PER_MINUTE,
 		byosReadReserve: result.data.BYOS_READ_RESERVE,
 		proposalRefreshIntervalSeconds: result.data.PROPOSAL_REFRESH_INTERVAL_SECONDS,

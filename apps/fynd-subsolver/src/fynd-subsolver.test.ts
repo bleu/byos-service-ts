@@ -1,6 +1,11 @@
 import { byosDomain } from "@byos/common";
 import type { ByosClient, FyndProvider, OrderbookOrder } from "@byos/subsolver-core";
-import { ByosRateLimitError, OrderFilter, RequestBudget } from "@byos/subsolver-core";
+import {
+	ByosRateLimitError,
+	createAuctionWork,
+	OrderFilter,
+	RequestBudget,
+} from "@byos/subsolver-core";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import type { Config } from "./config.js";
@@ -201,7 +206,7 @@ describe("Fynd alternative submissions", () => {
 		);
 		await solver.pollOnce(100n);
 		await solver.pollOnce(101n);
-		expect(submit).toHaveBeenCalledTimes(1);
+		expect(submit).toHaveBeenCalledTimes(3);
 	});
 
 	it.each([0n, 10n ** 18n - 1n, 10n ** 18n, 10n ** 18n + 1n])(
@@ -249,5 +254,152 @@ describe("Fynd alternative submissions", () => {
 		);
 		await solver.pollOnce(100n);
 		expect(submit).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("streaming and bounded submissions", () => {
+	function setupPipeline(options: {
+		concurrency?: number;
+		slowQuote?: Promise<void>;
+		submit: ByosClient["submit"];
+		sign?: () => Promise<`0x${string}`>;
+	}) {
+		const orders = [1, 2, 3, 4].map((id) => ({
+			...order(id),
+			sellAmount: BigInt(99 + id),
+			fullSellAmount: BigInt(99 + id),
+		}));
+		const byos = {
+			proposals: async () => [],
+			isTerminal: () => false,
+			submit: options.submit,
+		} as unknown as ByosClient;
+		return new FyndSubsolver(
+			{ ...config, fyndQuoteConcurrency: 8, byosSubmissionConcurrency: options.concurrency ?? 2 },
+			{ solvableOrders: async () => orders },
+			byos,
+			{
+				ready: async () => true,
+				quote: async (candidate: { remainingSell: bigint }) => {
+					if (options.slowQuote && candidate.remainingSell === 100n) await options.slowQuote;
+					return { minBuyAmount: 110n, quoteBuyAmount: 110n, interactions: [] };
+				},
+			} as unknown as FyndProvider,
+			byosDomain(56, factory),
+			options.sign ?? (async () => "0x"),
+			logger,
+			new RequestBudget(),
+			new OrderFilter({ closeToExecutionTopN: 20 }),
+		);
+	}
+
+	it("allows two submissions in flight and never exceeds the configured limit", async () => {
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let active = 0;
+		let maximum = 0;
+		const submit = vi.fn<ByosClient["submit"]>(async () => {
+			active++;
+			maximum = Math.max(maximum, active);
+			try {
+				await gate;
+				return 1;
+			} finally {
+				active--;
+			}
+		});
+		const solver = setupPipeline({ submit });
+		const cycle = solver.pollOnce(100n);
+		try {
+			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2), { timeout: 500 });
+			expect(maximum).toBe(2);
+		} finally {
+			release();
+			await cycle;
+		}
+		expect(submit).toHaveBeenCalledTimes(4);
+		expect(maximum).toBe(2);
+	});
+
+	it("submits a completed order while an earlier quote is still blocked", async () => {
+		let release = () => {};
+		const slowQuote = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
+		const cycle = setupPipeline({ submit, slowQuote }).pollOnce(100n);
+		try {
+			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(3), { timeout: 500 });
+			expect(submit.mock.calls.every(([proposal]) => proposal.orderUid !== order(1).uid)).toBe(
+				true,
+			);
+		} finally {
+			release();
+			await cycle;
+		}
+		expect(submit).toHaveBeenCalledTimes(4);
+	});
+
+	it("never posts a signed proposal after its auction was superseded", async () => {
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const sign = vi.fn(async () => {
+			await gate;
+			return "0x" as const;
+		});
+		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
+		const scope = createAuctionWork({
+			auctionId: "1",
+			deadlineMs: Date.now() + 10000,
+			receivedAtMs: Date.now(),
+			deadlineBufferMs: 1000,
+		});
+		const cycle = setupPipeline({ submit, sign }).pollOnce(100n, scope.work);
+		try {
+			await vi.waitFor(() => expect(sign).toHaveBeenCalled(), { timeout: 500 });
+			scope.abort();
+			await cycle;
+			expect(submit).not.toHaveBeenCalled();
+		} finally {
+			release();
+			scope.dispose();
+			await cycle;
+		}
+	});
+
+	it("drops queued submissions when the remaining deadline margin is exhausted", async () => {
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const initial = Date.now();
+		const clock = vi.spyOn(Date, "now").mockReturnValue(initial);
+		const scope = createAuctionWork({
+			auctionId: "1",
+			deadlineMs: initial + 10000,
+			receivedAtMs: initial,
+			deadlineBufferMs: 1000,
+		});
+		const submit = vi.fn<ByosClient["submit"]>(async () => {
+			await gate;
+			return 1;
+		});
+		const cycle = setupPipeline({ submit, concurrency: 1 }).pollOnce(100n, scope.work);
+		try {
+			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1), { timeout: 500 });
+			clock.mockReturnValue(initial + 9500);
+			release();
+			await cycle;
+			expect(submit).toHaveBeenCalledTimes(1);
+		} finally {
+			release();
+			clock.mockRestore();
+			scope.dispose();
+			await cycle;
+		}
 	});
 });

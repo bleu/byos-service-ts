@@ -1,3 +1,11 @@
+export {
+	type AuctionWork,
+	canQuote,
+	canSubmit,
+	createAuctionWork,
+	requestSignal,
+	untilAborted,
+} from "./auction-work.js";
 export { AwsOrderbookClient } from "./aws-orderbook-client.js";
 export { ByosClient, ByosRateLimitError, type ProposalMetadata } from "./byos-client.js";
 export {
@@ -5,6 +13,7 @@ export {
 	FyndProvider,
 	type FyndProviderConfig,
 } from "./fynd-provider.js";
+export { createFyndRoutingClient } from "./fynd-routing-client.js";
 export { createHealthApp } from "./health-app.js";
 export { randomNonce } from "./nonce.js";
 export { OrderFilter, type OrderFilterOptions } from "./order-filter.js";
@@ -28,8 +37,10 @@ export {
 	type QuoteResult,
 	quoteBatch,
 	type RouteProvider,
+	streamQuotes,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
 export { DEFAULT_CORRELATED_SLIPPAGE_BPS, selectSlippageBps } from "./slippage.js";
 export { createSolveApp } from "./solve-app.js";
 export { SolveOrderbookClient } from "./solve-orderbook-client.js";
+export { createTaskPool } from "./task-pool.js";

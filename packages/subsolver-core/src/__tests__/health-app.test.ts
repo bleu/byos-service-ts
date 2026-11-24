@@ -39,7 +39,7 @@ describe("sub-solver health endpoint", () => {
 		const cycle = app.request("/solve", {
 			method: "POST",
 			headers: { Authorization: "Bearer secret", "Content-Type": "application/json" },
-			body: JSON.stringify({ orders: [] }),
+			body: JSON.stringify({ id: "1", deadline: "2030-01-01T00:00:00Z", orders: [{}] }),
 		});
 		await cycleStarted;
 		try {
