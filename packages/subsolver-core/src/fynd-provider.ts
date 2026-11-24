@@ -4,8 +4,10 @@ import {
 	type FyndClient,
 	type InstanceInfo,
 	type Quote,
+	type QuoteParams,
 } from "@kayibal/fynd-client";
 import { encodeFunctionData } from "viem";
+import { type AuctionWork, canQuote, requestSignal, untilAborted } from "./auction-work.js";
 import type { CandidateOrder, ProviderRoute, RouteProvider } from "./provider.js";
 import { DEFAULT_CORRELATED_SLIPPAGE_BPS, selectSlippageBps } from "./slippage.js";
 
@@ -16,7 +18,9 @@ export interface FyndProviderLogger {
 }
 
 export interface FyndProviderConfig {
-	client: Pick<FyndClient, "quote" | "health" | "info">;
+	client: Pick<FyndClient, "health" | "info"> & {
+		quote: (params: QuoteParams, work?: AuctionWork) => Promise<Quote>;
+	};
 	chainId: number;
 	trampoline: Address;
 	settlement: Address;
@@ -59,21 +63,27 @@ export class FyndProvider implements RouteProvider {
 		if (!this.info) this.info = this.checkedInfo(await this.config.client.info());
 	}
 
-	async ready(): Promise<boolean> {
+	async ready(work?: AuctionWork): Promise<boolean> {
 		await this.initialize();
-		const health = await this.config.client.health();
+		const signal = work ? requestSignal(work) : undefined;
+		const checking = this.config.client.health();
+		const health = await (signal ? untilAborted(checking, signal) : checking);
 		return health.healthy;
 	}
 
-	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
-		return (await this.findRoutes(order, 1))[0] ?? null;
+	async quote(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute | null> {
+		return (await this.findRoutes(order, 1, work))[0] ?? null;
 	}
 
-	async quoteMany(order: CandidateOrder): Promise<ProviderRoute[]> {
-		return this.findRoutes(order, 3);
+	async quoteMany(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute[]> {
+		return this.findRoutes(order, 3, work);
 	}
 
-	private async findRoutes(order: CandidateOrder, limit: number): Promise<ProviderRoute[]> {
+	private async findRoutes(
+		order: CandidateOrder,
+		limit: number,
+		work?: AuctionWork,
+	): Promise<ProviderRoute[]> {
 		if (
 			order.chainId !== 56 ||
 			order.remainingSell <= 0n ||
@@ -102,10 +112,10 @@ export class FyndProvider implements RouteProvider {
 		const routes: { route: ProviderRoute; timestamp: number }[] = [];
 		const excludedPools = new Set<string>();
 		const seen = new Set<string>();
-		for (let attempt = 0; attempt < limit; attempt++) {
+		for (let attempt = 0; attempt < limit && canQuote(work); attempt++) {
 			let quote: Quote;
 			try {
-				quote = await this.config.client.quote({
+				const params: QuoteParams = {
 					order: {
 						tokenIn: order.sellToken,
 						tokenOut,
@@ -121,7 +131,12 @@ export class FyndProvider implements RouteProvider {
 							? { routeFilter: { excludePools: [...excludedPools] } }
 							: {}),
 					},
-				});
+				};
+				const signal = work ? requestSignal(work) : undefined;
+				const quoting = work
+					? this.config.client.quote(params, work)
+					: this.config.client.quote(params);
+				quote = await (signal ? untilAborted(quoting, signal) : quoting);
 			} catch (error) {
 				if (routes.length === 0) throw error;
 				this.config.logger?.debug?.(

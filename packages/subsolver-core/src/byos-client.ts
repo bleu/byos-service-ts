@@ -1,5 +1,6 @@
 import { isTerminalStatus, signCancellation, signReadAuth } from "@byos/common";
 import type { Hex, TypedDataDomain } from "viem";
+import { type AuctionWork, requestSignal } from "./auction-work.js";
 import type { SignedProposal } from "./proposal.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: viem's signTypedData is overloaded.
@@ -49,9 +50,10 @@ export class ByosClient {
 		return this.cachedReadAuth;
 	}
 
-	async submit(proposal: SignedProposal): Promise<number> {
+	async submit(proposal: SignedProposal, work?: AuctionWork): Promise<number> {
 		const response = await fetch(`${this.baseUrl}/proposals`, {
 			method: "POST",
+			signal: requestSignal(work, "submit"),
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				orderUid: proposal.orderUid,
@@ -89,8 +91,9 @@ export class ByosClient {
 		return (await response.json()) as ProposalView;
 	}
 
-	async proposals(): Promise<ProposalMetadata[]> {
+	async proposals(work?: AuctionWork): Promise<ProposalMetadata[]> {
 		const response = await fetch(`${this.baseUrl}/proposals/by-sub-solver`, {
+			signal: requestSignal(work, "submit"),
 			headers: { "X-Signature": await this.readAuth() },
 		});
 		if (response.status === 429) throw rateLimitError(response);

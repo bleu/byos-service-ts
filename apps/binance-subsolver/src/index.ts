@@ -74,13 +74,18 @@ async function main() {
 	);
 	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
 	if (config.discoveryMethod === "solve" && solveClient) {
-		const app = createSolveApp(solveClient, config.subsolverBearer, async () => {
-			try {
-				await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
-			} catch (error) {
-				logger.warn({ err: error }, "solve cycle failed");
-			}
-		});
+		const app = createSolveApp(
+			solveClient,
+			config.subsolverBearer,
+			async (work) => {
+				try {
+					await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)), work);
+				} catch (error) {
+					logger.warn({ err: error }, "solve cycle failed");
+				}
+			},
+			{ deadlineBufferMs: config.deadlineBufferMs, logger },
+		);
 		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
 			logger.info({ port: info.port }, "solve discovery listener started");
 		});

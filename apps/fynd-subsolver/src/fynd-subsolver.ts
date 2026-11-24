@@ -1,15 +1,20 @@
 import type { byosDomain } from "@byos/common";
 import {
+	type AuctionWork,
 	type ByosClient,
 	ByosRateLimitError,
 	buildProposalFromRoute,
+	canQuote,
+	canSubmit,
+	createTaskPool,
 	type FyndProvider,
 	type OrderbookOrder,
 	type OrderFilter,
 	prioritizeCandidates,
-	quoteBatch,
 	type RequestBudget,
 	randomNonce,
+	streamQuotes,
+	untilAborted,
 } from "@byos/subsolver-core";
 import { FyndError } from "@kayibal/fynd-client";
 import type pino from "pino";
@@ -30,6 +35,7 @@ export class FyndSubsolver {
 	private hasSynchronized = true;
 	private nextSynchronizationAt = 0n;
 	private retryAtMs = 0;
+	private readonly submissions: ReturnType<typeof createTaskPool>;
 
 	constructor(
 		private readonly config: Config,
@@ -41,13 +47,15 @@ export class FyndSubsolver {
 		private readonly logger: pino.Logger,
 		private readonly budget: RequestBudget,
 		private readonly orderFilter: OrderFilter,
-	) {}
+	) {
+		this.submissions = createTaskPool(config.byosSubmissionConcurrency ?? 3);
+	}
 
-	async synchronize(now: bigint): Promise<boolean> {
+	async synchronize(now: bigint, work?: AuctionWork): Promise<boolean> {
 		if (!this.budget.consumeRead()) return false;
 		try {
 			const next = new Map<string, Live>();
-			for (const proposal of await this.byos.proposals()) {
+			for (const proposal of await this.byos.proposals(work)) {
 				if (this.byos.isTerminal(proposal.status) || proposal.validUntil < now) continue;
 				const uid = proposal.orderUid.toLowerCase();
 				const previous = next.get(uid);
@@ -64,6 +72,7 @@ export class FyndSubsolver {
 			this.nextSynchronizationAt = now + BigInt(this.config.proposalRefreshIntervalSeconds);
 			return true;
 		} catch (error) {
+			if (work?.signal.aborted) return false;
 			if (this.hasSynchronized) {
 				this.nextSynchronizationAt = now + BigInt(this.config.proposalRefreshIntervalSeconds);
 			}
@@ -72,7 +81,8 @@ export class FyndSubsolver {
 		}
 	}
 
-	async pollOnce(now: bigint): Promise<void> {
+	async pollOnce(now: bigint, work?: AuctionWork): Promise<void> {
+		if (!canQuote(work)) return;
 		let orders: OrderbookOrder[];
 		try {
 			const raw = await this.orderbook.solvableOrders();
@@ -83,9 +93,9 @@ export class FyndSubsolver {
 		}
 		if (Date.now() < this.retryAtMs) return;
 		if (!this.hasSynchronized) {
-			if (!(await this.synchronize(now))) return;
+			if (!(await this.synchronize(now, work))) return;
 		} else if (now >= this.nextSynchronizationAt) {
-			await this.synchronize(now);
+			await this.synchronize(now, work);
 		}
 		for (const [uid, live] of this.live) if (live.validUntil < now) this.live.delete(uid);
 
@@ -105,18 +115,23 @@ export class FyndSubsolver {
 		);
 		if (candidates.length === 0) return;
 		try {
-			if (!(await this.fynd.ready())) {
+			if (!(await this.fynd.ready(work))) {
 				this.logger.warn("Fynd sidecar is not ready; skipping this polling cycle");
 				return;
 			}
 		} catch (error) {
+			if (!canQuote(work)) return;
 			this.logger.warn({ err: error }, "Fynd sidecar health check failed");
 			return;
 		}
-		await this.submitRoutes(candidates, now);
+		if (canQuote(work)) await this.submitRoutes(candidates, now, work);
 	}
 
-	private async submitRoutes(orders: readonly OrderbookOrder[], now: bigint): Promise<void> {
+	private async submitRoutes(
+		orders: readonly OrderbookOrder[],
+		now: bigint,
+		work?: AuctionWork,
+	): Promise<void> {
 		const byUid = new Map(orders.map((order) => [order.uid.toLowerCase(), order]));
 		const candidates = prioritizeCandidates(
 			orders.map((order) => ({
@@ -127,89 +142,109 @@ export class FyndSubsolver {
 			(uid) => this.live.has(uid.toLowerCase()),
 		).map((ranked) => ranked.candidate);
 		this.logger.debug({ count: candidates.length }, "sending candidates to Fynd for quoting");
-		const results = await quoteBatch(this.fynd, candidates, this.config.fyndQuoteConcurrency);
 		let routesFound = 0;
 		let noRoute = 0;
 		let errors = 0;
-		for (const result of results) {
-			const order = byUid.get(result.order.uid.toLowerCase());
-			if (!order) continue;
-			if (result.error) {
-				this.logQuoteError(result.error, order.uid);
-				errors++;
-				continue;
-			}
-			if (!result.route) {
-				noRoute++;
-				continue;
-			}
-			routesFound++;
-			this.logger.debug(
-				{
-					orderUid: order.uid,
-					sellToken: order.sellToken,
-					buyToken: order.buyToken,
-					remainingSell: result.order.remainingSell.toString(),
-					scaledLimitBuy: result.order.scaledLimitBuy.toString(),
-					minBuyAmount: result.route.minBuyAmount.toString(),
-					quoteBuyAmount: result.route.quoteBuyAmount.toString(),
-					interactions: result.route.interactions.length,
-				},
-				"Fynd route found",
-			);
-			if (!this.budget.consumeSubmission()) {
-				this.logger.info("BYOS submission budget reserved for proposal state reads");
-				return;
-			}
-			try {
-				const validUntil = now + BigInt(this.config.proposalTtlSeconds);
-				const proposal = await buildProposalFromRoute(
-					{
-						...order,
-						sellAmount: result.order.remainingSell,
-						buyAmount: result.order.scaledLimitBuy,
-					},
-					result.route,
-					validUntil,
-					randomNonce(),
-					this.domain,
-					this.signFn,
-				);
-				if (!proposal) {
-					this.logger.debug(
-						{
-							orderUid: order.uid,
-							minBuyAmount: result.route.minBuyAmount.toString(),
-							scaledLimitBuy: result.order.scaledLimitBuy.toString(),
-						},
-						"proposal rejected by buildProposalFromRoute (minBuyAmount < scaledLimitBuy or buy-order kind)",
-					);
-					continue;
+		let submissionErrors = 0;
+		let stopped = false;
+		await streamQuotes(
+			this.fynd,
+			candidates,
+			async (result) => {
+				const order = byUid.get(result.order.uid.toLowerCase());
+				if (!order) return;
+				if (result.error) {
+					this.logQuoteError(result.error, order.uid);
+					errors++;
+					return;
 				}
+				const route = result.route;
+				if (!route) {
+					noRoute++;
+					return;
+				}
+				routesFound++;
 				this.logger.debug(
 					{
-						orderUid: proposal.orderUid,
-						sellToken: proposal.sellToken,
-						buyToken: proposal.buyToken,
-						sellAmount: proposal.sellAmount.toString(),
-						minBuyAmount: proposal.minBuyAmount.toString(),
-						quoteBuyAmount: proposal.quoteBuyAmount.toString(),
-						validUntil: proposal.validUntil.toString(),
-						nonce: proposal.nonce.toString(),
-						interactions: proposal.interactions.length,
+						orderUid: order.uid,
+						auctionId: work?.auctionId,
+						nativeSellValue: result.order.nativeSellValue?.toString(),
+						quoteElapsedMs: result.quoteElapsedMs,
+						minBuyAmount: route.minBuyAmount.toString(),
+						quoteBuyAmount: route.quoteBuyAmount.toString(),
 					},
-					"submitting proposal to BYOS",
+					"Fynd route found",
 				);
-				const id = await this.byos.submit(proposal);
-				this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
-				this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
-			} catch (error) {
-				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
-				if (error instanceof ByosRateLimitError) return;
-			}
-		}
+				await this.submissions.run(async () => {
+					const blocked = () => stopped || Date.now() < this.retryAtMs || !canSubmit(work);
+					if (blocked()) return;
+					try {
+						const validUntil = now + BigInt(this.config.proposalTtlSeconds);
+						const signing = buildProposalFromRoute(
+							{
+								...order,
+								sellAmount: result.order.remainingSell,
+								buyAmount: result.order.scaledLimitBuy,
+							},
+							route,
+							validUntil,
+							randomNonce(),
+							this.domain,
+							this.signFn,
+						);
+						const proposal = await (work ? untilAborted(signing, work.signal) : signing);
+						if (!proposal) return;
+						if (blocked()) return;
+						if (!this.budget.consumeSubmission()) {
+							stopped = true;
+							this.logger.info("BYOS submission budget reserved for proposal state reads");
+							return;
+						}
+						const startedAt = Date.now();
+						this.logger.debug(
+							{
+								orderUid: order.uid,
+								auctionId: work?.auctionId,
+								nonce: proposal.nonce.toString(),
+								remainingMs: work ? work.deadlineMs - startedAt : undefined,
+							},
+							"submitting proposal to BYOS",
+						);
+						const sending = this.byos.submit(proposal, work);
+						const id = await (work ? untilAborted(sending, work.signal) : sending);
+						this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
+						this.logger.info(
+							{
+								id,
+								orderUid: order.uid,
+								auctionId: work?.auctionId,
+								quoteElapsedMs: result.quoteElapsedMs,
+								postElapsedMs: Date.now() - startedAt,
+								remainingMs: work ? work.deadlineMs - Date.now() : undefined,
+							},
+							"Fynd proposal submitted",
+						);
+					} catch (error) {
+						if (work?.signal.aborted) return;
+						submissionErrors++;
+						this.handleByosError(error, "Fynd proposal submission failed", order.uid);
+						if (error instanceof ByosRateLimitError) stopped = true;
+					}
+				});
+			},
+			this.config.fyndQuoteConcurrency,
+			work,
+		);
 		this.logger.info(
-			{ routesFound, noRoute, errors, total: candidates.length },
+			{
+				auctionId: work?.auctionId,
+				deadlineMs: work?.deadlineMs,
+				routesFound,
+				noRoute,
+				errors,
+				submissionErrors,
+				total: candidates.length,
+			},
 			"poll cycle complete",
 		);
 	}
