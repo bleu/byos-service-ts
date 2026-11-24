@@ -16,8 +16,8 @@ import type pino from "pino";
 import type { Hex } from "viem";
 import type { Config } from "./config.js";
 
+/** Per-order refresh cooldown; individual alternatives remain owned by BYOS. */
 interface Live {
-	id: number;
 	validUntil: bigint;
 	lastSubmitted: bigint;
 }
@@ -49,9 +49,13 @@ export class FyndSubsolver {
 			const next = new Map<string, Live>();
 			for (const proposal of await this.byos.proposals()) {
 				if (this.byos.isTerminal(proposal.status) || proposal.validUntil < now) continue;
-				next.set(proposal.orderUid.toLowerCase(), {
-					id: proposal.id,
-					validUntil: proposal.validUntil,
+				const uid = proposal.orderUid.toLowerCase();
+				const previous = next.get(uid);
+				next.set(uid, {
+					validUntil:
+						previous && previous.validUntil > proposal.validUntil
+							? previous.validUntil
+							: proposal.validUntil,
 					lastSubmitted: now,
 				});
 			}
@@ -197,10 +201,11 @@ export class FyndSubsolver {
 					"submitting proposal to BYOS",
 				);
 				const id = await this.byos.submit(proposal);
-				this.live.set(order.uid.toLowerCase(), { id, validUntil, lastSubmitted: now });
+				this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
 				this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
 			} catch (error) {
 				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
+				if (error instanceof ByosRateLimitError) return;
 			}
 		}
 		this.logger.info(

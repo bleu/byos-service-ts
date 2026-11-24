@@ -10,7 +10,7 @@
 	},
 	"dependencies": {
 		"@byos/common": "workspace:*",
-		"@kayibal/fynd-client": "0.99.17",
+		"@kayibal/fynd-client": "0.125.2",
 		"hono": "^4.0.0",
 		"viem": "^2.0.0"
 	},

@@ -37,3 +37,33 @@ describe("quoteBatch", () => {
 		expect(results[1]?.error).toBeInstanceOf(Error);
 	});
 });
+
+describe("alternative route quoting", () => {
+	it("keeps alternatives together, handles empty results, and isolates order errors", async () => {
+		const route = { quoteBuyAmount: 2n, minBuyAmount: 1n, interactions: [] };
+		const results = await quoteBatch(
+			{
+				name: "alternatives",
+				quote: async () => {
+					throw new Error("single-route API must not be used");
+				},
+				quoteMany: async (order) => {
+					if (order.uid === "empty") return [];
+					if (order.uid === "error") throw new Error("failed");
+					return [route, { ...route, quoteBuyAmount: 3n }];
+				},
+			},
+			[candidate("first"), candidate("empty"), candidate("error"), candidate("last")],
+			2,
+		);
+		expect(results.map(({ order, route }) => [order.uid, route?.quoteBuyAmount])).toEqual([
+			["first", 2n],
+			["first", 3n],
+			["empty", undefined],
+			["error", undefined],
+			["last", 2n],
+			["last", 3n],
+		]);
+		expect(results[3]?.error).toBeInstanceOf(Error);
+	});
+});

@@ -1,6 +1,6 @@
 import { byosDomain } from "@byos/common";
 import type { ByosClient, OrderbookOrder } from "@byos/subsolver-core";
-import { OrderFilter, RequestBudget } from "@byos/subsolver-core";
+import { ByosRateLimitError, OrderFilter, RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import type { BinanceClient } from "./binance-client.js";
@@ -213,4 +213,90 @@ describe("Binance correlated slippage", () => {
 			}
 		},
 	);
+});
+
+describe("Binance route alternatives", () => {
+	function setup(
+		options: { failSubmission?: boolean; rateLimited?: boolean; budget?: RequestBudget } = {},
+	) {
+		const quotes = ["long", "third", "broken", "short", "second", "duplicate", "below-limit"];
+		const getQuotes = vi.fn(async () =>
+			quotes.map((quoteId) => ({
+				quoteId,
+				approveTarget: factory,
+			})),
+		);
+		const data: Record<string, `0x${string}`> = {
+			long: "0x11111111",
+			third: "0x333333",
+			short: "0x11",
+			second: "0x2222",
+			duplicate: "0x11",
+			"below-limit": "0x",
+		};
+		const buildSwap = vi.fn(async (quoteId: string) => {
+			if (quoteId === "broken") throw new Error("vendor unavailable");
+			return {
+				from: trampolineAddress,
+				to: factory,
+				data: data[quoteId],
+				value: "0",
+				minReceiveAmount: quoteId === "below-limit" ? "80" : "110",
+			};
+		});
+		let submissionCount = 0;
+		const submit = vi.fn<ByosClient["submit"]>(async () => {
+			submissionCount++;
+			if (options.rateLimited) throw new ByosRateLimitError(60_000);
+			if (options.failSubmission && submissionCount === 1) throw new Error("SimFailed");
+			return submissionCount;
+		});
+		const solver = new BinanceSubsolver(
+			config,
+			{ solvableOrders: async () => [order(1)] },
+			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
+			{ getQuotes, buildSwap } as unknown as BinanceClient,
+			trampolineAddress,
+			byosDomain(56, factory),
+			async () => "0x",
+			logger,
+			options.budget ?? new RequestBudget(),
+			new OrderFilter({ closeToExecutionTopN: 20 }),
+		);
+		return { solver, submit };
+	}
+
+	it("submits three distinct viable routes with the shortest calldata, despite a failed build", async () => {
+		const { solver, submit } = setup();
+		await solver.pollOnce(100n);
+		expect(submit.mock.calls.map(([p]) => p.interactions[1]?.callData)).toEqual([
+			"0x11",
+			"0x2222",
+			"0x333333",
+		]);
+		expect(new Set(submit.mock.calls.map(([p]) => p.nonce)).size).toBe(3);
+		expect(submit.mock.calls.every(([p]) => p.orderUid === order(1).uid)).toBe(true);
+		await solver.pollOnce(101n);
+		expect(submit).toHaveBeenCalledTimes(3);
+	});
+
+	it("still submits siblings after one proposal fails BYOS simulation", async () => {
+		const { solver, submit } = setup({ failSubmission: true });
+		await solver.pollOnce(100n);
+		expect(submit).toHaveBeenCalledTimes(3);
+	});
+
+	it("stops sibling submissions on HTTP 429 and observes the retry window", async () => {
+		const { solver, submit } = setup({ rateLimited: true });
+		await solver.pollOnce(100n);
+		expect(submit).toHaveBeenCalledTimes(1);
+		await solver.pollOnce(101n);
+		expect(submit).toHaveBeenCalledTimes(1);
+	});
+
+	it("charges the submission budget for each alternative", async () => {
+		const { solver, submit } = setup({ budget: new RequestBudget(4, 1) });
+		await solver.pollOnce(100n);
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
 });

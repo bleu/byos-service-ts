@@ -66,13 +66,21 @@ export class FyndProvider implements RouteProvider {
 	}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
+		return (await this.findRoutes(order, 1))[0] ?? null;
+	}
+
+	async quoteMany(order: CandidateOrder): Promise<ProviderRoute[]> {
+		return this.findRoutes(order, 3);
+	}
+
+	private async findRoutes(order: CandidateOrder, limit: number): Promise<ProviderRoute[]> {
 		if (
 			order.chainId !== 56 ||
 			order.remainingSell <= 0n ||
 			order.sellToken.toLowerCase() === order.buyToken.toLowerCase() ||
 			order.sellToken.toLowerCase() === BUY_ETH_ADDRESS.toLowerCase()
 		)
-			return null;
+			return [];
 		const slippageBps = selectSlippageBps({
 			chainId: this.config.chainId,
 			sellToken: order.sellToken,
@@ -91,18 +99,54 @@ export class FyndProvider implements RouteProvider {
 			info = this.checkedInfo(await this.config.client.info());
 			this.info = info;
 		}
-		const quote = await this.config.client.quote({
-			order: {
-				tokenIn: order.sellToken,
-				tokenOut,
-				amount: order.remainingSell,
-				side: "sell",
-				sender: this.config.trampoline,
-				receiver: this.config.settlement,
-			},
-			options: { timeoutMs: 5000, encodingOptions: encodingOptions(slippageBps / 10_000) },
-		});
-		return this.toRoute(order, info.routerAddress, quote, tokenOut);
+		const routes: { route: ProviderRoute; timestamp: number }[] = [];
+		const excludedPools = new Set<string>();
+		const seen = new Set<string>();
+		for (let attempt = 0; attempt < limit; attempt++) {
+			let quote: Quote;
+			try {
+				quote = await this.config.client.quote({
+					order: {
+						tokenIn: order.sellToken,
+						tokenOut,
+						amount: order.remainingSell,
+						side: "sell",
+						sender: this.config.trampoline,
+						receiver: this.config.settlement,
+					},
+					options: {
+						timeoutMs: 5000,
+						encodingOptions: encodingOptions(slippageBps / 10_000),
+						...(excludedPools.size > 0
+							? { routeFilter: { excludePools: [...excludedPools] } }
+							: {}),
+					},
+				});
+			} catch (error) {
+				if (routes.length === 0) throw error;
+				this.config.logger?.debug?.(
+					{ uid: order.uid, err: error },
+					"Fynd alternative quote failed",
+				);
+				break;
+			}
+			const route = this.toRoute(order, info.routerAddress, quote, tokenOut);
+			if (route && quote.transaction) {
+				const key = `${quote.transaction.data.toLowerCase()}:${route.minBuyAmount}`;
+				if (!seen.has(key)) {
+					seen.add(key);
+					routes.push({ route, timestamp: quote.block.timestamp });
+				}
+			}
+			const previousSize = excludedPools.size;
+			for (const swap of quote.route?.swaps ?? []) excludedPools.add(swap.componentId);
+			// Without another pool to exclude, repeating the request adds no diversity.
+			if (excludedPools.size === previousSize) break;
+		}
+		// Earlier quotes can age out while the alternatives are being requested.
+		return routes
+			.filter(({ timestamp }) => this.now() - timestamp <= this.maxQuoteAgeSeconds)
+			.map(({ route }) => route);
 	}
 
 	private assertBscRouter(

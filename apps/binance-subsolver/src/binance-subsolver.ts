@@ -19,8 +19,8 @@ import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
 import type { BinanceClient } from "./binance-client.js";
 import type { Config } from "./config.js";
 
+/** Per-order refresh cooldown; individual alternatives remain owned by BYOS. */
 interface Live {
-	id: number;
 	validUntil: bigint;
 	lastSubmitted: bigint;
 }
@@ -41,6 +41,10 @@ class BinanceProvider implements RouteProvider {
 	) {}
 
 	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
+		return (await this.quoteMany(order))[0] ?? null;
+	}
+
+	async quoteMany(order: CandidateOrder): Promise<ProviderRoute[]> {
 		const slippageBps = selectSlippageBps({
 			chainId: this.config.chainId,
 			sellToken: order.sellToken,
@@ -55,74 +59,76 @@ class BinanceProvider implements RouteProvider {
 			this.trampoline,
 			slippageBps,
 		);
-		if (quotes.length === 0) return null;
+		if (quotes.length === 0) return [];
 
-		// Build swap txs for all quotes in parallel, then pick the one with the
-		// smallest calldata — simpler routes are less likely to revert.
-		const swapTxs = await Promise.all(
-			quotes.map((q) =>
-				this.client.buildSwap(
-					q.quoteId,
+		// Build independently: a vendor failure must not discard another route.
+		const built = await Promise.allSettled(
+			quotes.map(async (quote) => ({
+				quote,
+				swapTx: await this.client.buildSwap(
+					quote.quoteId,
 					order.sellToken,
 					order.buyToken,
 					order.remainingSell,
 					this.trampoline,
 					slippageBps,
 				),
-			),
+			})),
 		);
-		// Zip quotes with their swap txs and pick the one with the smallest calldata.
-		const pairs = quotes.map((q, i) => ({ quote: q, swapTx: swapTxs[i] }));
-		const best = pairs.reduce((a, b) =>
-			(b.swapTx?.data.length ?? Number.MAX_SAFE_INTEGER) <
-			(a.swapTx?.data.length ?? Number.MAX_SAFE_INTEGER)
-				? b
-				: a,
-		);
-		if (!best.swapTx) return null;
-		const { quote, swapTx } = best;
+		const pairs = built.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+		pairs.sort((a, b) => a.swapTx.data.length - b.swapTx.data.length);
+		const routes: ProviderRoute[] = [];
+		const seen = new Set<string>();
+		for (const { quote, swapTx } of pairs) {
+			if (BigInt(swapTx.minReceiveAmount) < order.scaledLimitBuy) continue;
+			const key = `${quote.approveTarget.toLowerCase()}:${swapTx.to.toLowerCase()}:${swapTx.value}:${swapTx.data.toLowerCase()}:${swapTx.minReceiveAmount}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
 
-		// approveTarget is the contract that pulls sellTokens during the swap.
-		const interactions: ProviderRoute["interactions"] = [
-			{
-				target: order.sellToken,
+			// approveTarget is the contract that pulls sellTokens during the swap.
+			const interactions: ProviderRoute["interactions"] = [
+				{
+					target: order.sellToken,
+					value: 0n,
+					callData: encodeFunctionData({
+						abi: erc20Abi,
+						functionName: "approve",
+						args: [quote.approveTarget, maxUint256],
+					}),
+				},
+			];
+
+			const minBuyAmount = BigInt(swapTx.minReceiveAmount);
+
+			interactions.push({
+				target: swapTx.to,
+				value: BigInt(swapTx.value || "0"),
+				callData: swapTx.data,
+			});
+
+			// Binance sends buyTokens to userWalletAddress (trampoline), not to
+			// settlement. Transfer the guaranteed minimum to settlement so the
+			// Trampoline's floor check (settlement buy balance delta) passes.
+			// Any surplus above minReceiveAmount stays in the trampoline and can
+			// be recovered via claimToken.
+			interactions.push({
+				target: order.buyToken,
 				value: 0n,
 				callData: encodeFunctionData({
 					abi: erc20Abi,
-					functionName: "approve",
-					args: [quote.approveTarget, maxUint256],
+					functionName: "transfer",
+					args: [this.settlement, minBuyAmount],
 				}),
-			},
-		];
+			});
 
-		const minBuyAmount = BigInt(swapTx.minReceiveAmount);
-
-		interactions.push({
-			target: swapTx.to,
-			value: BigInt(swapTx.value || "0"),
-			callData: swapTx.data,
-		});
-
-		// Binance sends buyTokens to userWalletAddress (trampoline), not to
-		// settlement. Transfer the guaranteed minimum to settlement so the
-		// Trampoline's floor check (settlement buy balance delta) passes.
-		// Any surplus above minReceiveAmount stays in the trampoline and can
-		// be recovered via claimToken.
-		interactions.push({
-			target: order.buyToken,
-			value: 0n,
-			callData: encodeFunctionData({
-				abi: erc20Abi,
-				functionName: "transfer",
-				args: [this.settlement, minBuyAmount],
-			}),
-		});
-
-		return {
-			quoteBuyAmount: minBuyAmount,
-			minBuyAmount,
-			interactions,
-		};
+			routes.push({
+				quoteBuyAmount: minBuyAmount,
+				minBuyAmount,
+				interactions,
+			});
+			if (routes.length === 3) break;
+		}
+		return routes;
 	}
 }
 
@@ -155,9 +161,13 @@ export class BinanceSubsolver {
 			const next = new Map<string, Live>();
 			for (const proposal of await this.byos.proposals()) {
 				if (this.byos.isTerminal(proposal.status) || proposal.validUntil < now) continue;
-				next.set(proposal.orderUid.toLowerCase(), {
-					id: proposal.id,
-					validUntil: proposal.validUntil,
+				const uid = proposal.orderUid.toLowerCase();
+				const previous = next.get(uid);
+				next.set(uid, {
+					validUntil:
+						previous && previous.validUntil > proposal.validUntil
+							? previous.validUntil
+							: proposal.validUntil,
 					lastSubmitted: now,
 				});
 			}
@@ -297,10 +307,11 @@ export class BinanceSubsolver {
 					"submitting proposal to BYOS",
 				);
 				const id = await this.byos.submit(proposal);
-				this.live.set(order.uid.toLowerCase(), { id, validUntil, lastSubmitted: now });
+				this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
 				this.logger.info({ id, orderUid: order.uid }, "Binance proposal submitted");
 			} catch (error) {
 				this.handleByosError(error, "Binance proposal submission failed", order.uid);
+				if (error instanceof ByosRateLimitError) return;
 			}
 		}
 		this.logger.info(

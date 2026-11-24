@@ -13,7 +13,7 @@
 		"@byos/common": "workspace:*",
 		"@byos/subsolver-core": "workspace:^",
 		"@hono/node-server": "^1.0.0",
-		"@kayibal/fynd-client": "0.99.17",
+		"@kayibal/fynd-client": "0.125.2",
 		"dotenv": "^16.0.0",
 		"hono": "^4.0.0",
 		"pino": "^9.0.0",

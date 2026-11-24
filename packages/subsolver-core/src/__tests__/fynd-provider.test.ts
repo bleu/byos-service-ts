@@ -7,7 +7,13 @@ import type { CandidateOrder } from "../provider.js";
 const router = "0x0000000000000000000000000000000000000003" as const;
 const wrappedNative = "0x0000000000000000000000000000000000000009" as const;
 const client = {
-	info: async () => ({ chainId: 56, routerAddress: router, permit2Address: router }),
+	info: async () => ({
+		chainId: 56,
+		routerAddress: router,
+		permit2Address: router,
+		jitRouterAddress: null,
+		toAddress: router,
+	}),
 	health: async () => ({ healthy: true, lastUpdateMs: 1, numSolverPools: 1 }),
 	quote: async () => ({
 		orderId: "quote-1",
@@ -201,7 +207,13 @@ describe("FyndProvider", () => {
 		const provider = new FyndProvider({
 			client: {
 				...client,
-				info: async () => ({ chainId: 1, routerAddress: null, permit2Address: router }),
+				info: async () => ({
+					chainId: 1,
+					routerAddress: null,
+					permit2Address: router,
+					jitRouterAddress: null,
+					toAddress: null,
+				}),
 			},
 			chainId: 56,
 			trampoline: "0x0000000000000000000000000000000000000005",
@@ -281,5 +293,96 @@ describe("Fynd correlated slippage", () => {
 				},
 			}),
 		);
+	});
+});
+
+describe("Fynd alternatives", () => {
+	const order: CandidateOrder = {
+		uid: "0x01",
+		chainId: 56,
+		sellToken: "0x0000000000000000000000000000000000000001",
+		buyToken: "0x0000000000000000000000000000000000000002",
+		remainingSell: 100n,
+		scaledLimitBuy: 100n,
+	};
+	function provider(quote: FyndClient["quote"], now = () => 105) {
+		return new FyndProvider({
+			client: { ...client, quote },
+			chainId: 56,
+			trampoline: "0x0000000000000000000000000000000000000005",
+			settlement: "0x0000000000000000000000000000000000000004",
+			wrappedNative,
+			now,
+		});
+	}
+	async function alternative(index: number) {
+		const q = await client.quote();
+		return {
+			...q,
+			transaction: { ...q.transaction, data: `0x0${index}` as `0x${string}` },
+			route: {
+				swaps: [
+					{
+						componentId: `pool-${index}`,
+						protocol: "pancakeswap_v3",
+						tokenIn: order.sellToken,
+						tokenOut: order.buyToken,
+						amountIn: 100n,
+						amountOut: 120n,
+						gasEstimate: 1n,
+					},
+				],
+			},
+		};
+	}
+	it("requests three distinct routes, excluding all pools already used", async () => {
+		let index = 0;
+		const quote = vi.fn<FyndClient["quote"]>(async () => alternative(++index));
+		const routes = await provider(quote).quoteMany(order);
+		expect(routes.map((route) => route.interactions[1]?.callData)).toEqual([
+			"0x01",
+			"0x02",
+			"0x03",
+		]);
+		expect(quote.mock.calls.map(([request]) => request.options?.routeFilter)).toEqual([
+			undefined,
+			{ excludePools: ["pool-1"] },
+			{ excludePools: ["pool-1", "pool-2"] },
+		]);
+		for (const [request] of quote.mock.calls) expect(request.order.amount).toBe(100n);
+	});
+	it("keeps earlier alternatives when a later quote fails", async () => {
+		const quote = vi
+			.fn<FyndClient["quote"]>()
+			.mockResolvedValueOnce(await alternative(1))
+			.mockRejectedValueOnce(new Error("no liquidity"));
+		expect(await provider(quote).quoteMany(order)).toHaveLength(1);
+	});
+	it("does not submit duplicates if a sidecar ignores pool exclusions", async () => {
+		const quote = vi.fn<FyndClient["quote"]>(async () => alternative(1));
+		expect(await provider(quote).quoteMany(order)).toHaveLength(1);
+		expect(quote).toHaveBeenCalledTimes(2);
+	});
+	it("rechecks quote age after fetching alternatives", async () => {
+		let index = 0;
+		let now = 105;
+		const quote = vi.fn<FyndClient["quote"]>(async () => {
+			const q = await alternative(++index);
+			now = index === 3 ? 111 : 105;
+			return { ...q, block: { ...q.block, timestamp: index === 1 ? 100 : 105 } };
+		});
+		expect(
+			(await provider(quote, () => now).quoteMany(order)).map((r) => r.interactions[1]?.callData),
+		).toEqual(["0x02", "0x03"]);
+	});
+	it("validates each alternative and excludes invalid routes from submission", async () => {
+		let index = 0;
+		const quote = vi.fn<FyndClient["quote"]>(async () => {
+			const q = await alternative(++index);
+			return index === 2 ? { ...q, transaction: { ...q.transaction, value: 1n } } : q;
+		});
+		expect(
+			(await provider(quote).quoteMany(order)).map((r) => r.interactions[1]?.callData),
+		).toEqual(["0x01", "0x03"]);
 	});
 });

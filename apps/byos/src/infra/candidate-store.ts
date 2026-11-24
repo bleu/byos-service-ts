@@ -35,6 +35,8 @@ export interface Candidate {
 export class CandidateStore {
 	private readonly candidates = new Map<number, Candidate>();
 
+	/** Adding an alternative never replaces or cancels a sibling for the same order.
+	 * Cancellation is explicit by proposal ID; /solve ranks all validated candidates. */
 	add(candidate: Candidate): void {
 		this.candidates.set(candidate.id, candidate);
 	}

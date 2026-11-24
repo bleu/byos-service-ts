@@ -223,8 +223,8 @@ importers:
         specifier: ^1.0.0
         version: 1.19.17(hono@4.13.0)
       '@kayibal/fynd-client':
-        specifier: 0.99.17
-        version: 0.99.17(typescript@5.9.3)(zod@3.25.76)
+        specifier: 0.125.2
+        version: 0.125.2(typescript@5.9.3)(zod@3.25.76)
       dotenv:
         specifier: ^16.0.0
         version: 16.6.1
@@ -313,8 +313,8 @@ importers:
         specifier: workspace:*
         version: link:../common
       '@kayibal/fynd-client':
-        specifier: 0.99.17
-        version: 0.99.17(typescript@5.9.3)(zod@3.25.76)
+        specifier: 0.125.2
+        version: 0.125.2(typescript@5.9.3)(zod@3.25.76)
       hono:
         specifier: ^4.0.0
         version: 4.13.0
@@ -1432,8 +1432,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kayibal/fynd-client@0.99.17':
-    resolution: {integrity: sha512-YgL90EKrPOW7cvIjpdi4q8xN8WeEPq4drhdFC2Pn5o9bWKB6VOsIPedo4BdO6RqRIUxU5wLZ3WBWifshceVEBg==}
+  '@kayibal/fynd-client@0.125.2':
+    resolution: {integrity: sha512-dCfQzXF71C2cyrACTB4HRB3vzEThrNNDCxO58qdEsw6Wk/zxpBVkliOpUf+UQj3ciDEyodAn3aG/OP2eK8CfJQ==}
 
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
@@ -5051,7 +5051,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@kayibal/fynd-client@0.99.17(typescript@5.9.3)(zod@3.25.76)':
+  '@kayibal/fynd-client@0.125.2(typescript@5.9.3)(zod@3.25.76)':
     dependencies:
       openapi-fetch: 0.17.0
       viem: 2.46.3(typescript@5.9.3)(zod@3.25.76)

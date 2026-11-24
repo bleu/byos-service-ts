@@ -40,7 +40,7 @@
 		}
 	},
 	"files": {
-		"includes": ["**/*.ts", "**/*.json", "**/*.yml"],
+		"includes": ["**/*.ts", "**/*.json", "**/*.yml", "!docs/shared"],
 		"ignoreUnknown": true
 	},
 	"overrides": [
