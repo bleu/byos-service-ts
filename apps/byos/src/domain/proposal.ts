@@ -1,4 +1,4 @@
-import type { ContractInteraction, RejectionReason, Status } from "@byos/common";
+import type { ContractInteraction, Status } from "@byos/common";
 import type { Address, Hex } from "viem";
 import { hexToBytes } from "viem";
 
@@ -23,7 +23,7 @@ export interface Proposal {
 	nonce: bigint;
 	signature: Hex;
 	status: ProposalStatus;
-	rejectionReason: RejectionReason | null;
+	rejectionReason: string | null;
 	gasUsed: bigint | null;
 	trampoline: Address | null;
 	settlementTxHash: Hex | null;

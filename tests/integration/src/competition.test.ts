@@ -10,6 +10,7 @@
  */
 
 import type { Auction } from "@byos/byos/src/infra/api/types.js";
+import * as store from "@byos/byos/src/infra/storage.js";
 import { RejectionReason, signProposal } from "@byos/common";
 import type { Address } from "viem";
 import { type Hex, keccak256 } from "viem";
@@ -299,11 +300,51 @@ describe("SolverOutbid", () => {
 			expect(await detail.json()).toMatchObject({
 				status: "simFailed",
 				simulationFailureParams: params,
+				rejectionReason: "ERC20: insufficient allowance",
 			});
 		} finally {
 			await simFailApp.ctx.cleanup();
 		}
 	});
+
+	it.each([
+		["x".repeat(200), "x".repeat(200)],
+		["x".repeat(201), `${"x".repeat(200)}...`],
+		["😀".repeat(201), `${"😀".repeat(200)}...`],
+		["0xdeadbeef", "0xdeadbeef"],
+		[`0x${"ab".repeat(200)}`, `0x${"ab".repeat(99)}...`],
+		["bad\0token", "bad\\0token"],
+		[undefined, "execution reverted"],
+	])(
+		"persists bounded simulation reason %# in the permanent log and audit",
+		async (reason, expected) => {
+			const isolated = await createTestApp({
+				validator: { validate: async () => ({ kind: "simFailed" as const, revertReason: reason }) },
+			});
+			try {
+				const orderUid = `0x${"f4".repeat(56)}` as const;
+				await signAndSubmitProposal(isolated.publicApp, { orderUid, nonce: 2002n });
+				const { proposals } = await (
+					await isolated.publicApp.request(`/proposals/${orderUid}?includeArchived=true`, {
+						headers: { "X-Signature": await readAuthHeader() },
+					})
+				).json();
+				expect(proposals[0]).toMatchObject({ status: "simFailed", rejectionReason: expected });
+				const row = await store.getIncludingLog(isolated.ctx.db, proposals[0].id);
+				expect(row?.rejectionReason).toBe(expected);
+				expect(
+					isolated.auditEvents.some(
+						(event) =>
+							event.kind.type === "statusChanged" &&
+							event.kind.to === "simFailed" &&
+							event.kind.rejectionReason === expected,
+					),
+				).toBe(true);
+			} finally {
+				await isolated.ctx.cleanup();
+			}
+		},
+	);
 
 	it("simFailed with no revert reason → 400 SimFailed", async () => {
 		const orderUid = `0x${"f3".repeat(56)}` as const;

@@ -2,7 +2,7 @@ import type { SettlementWrapper } from "@byos/common";
 import { flashLoanWrapper, OrderKind, TrampolineAbi, TrampolineFactoryAbi } from "@byos/common";
 import type { Logger } from "pino";
 import type { Address, Hex, PublicClient } from "viem";
-import { decodeEventLog } from "viem";
+import { decodeErrorResult, decodeEventLog, parseAbi } from "viem";
 import { availableCollateral, penaltyCap, perProposalCL } from "../../domain/collateral.js";
 import { checkEnvelope, checkProposalSlippage } from "../../domain/order.js";
 import { effectiveBuyAmount, type Proposal } from "../../domain/proposal.js";
@@ -111,16 +111,20 @@ function toSimulateV1StateOverrides(
 
 /**
  * Extracts a human-readable revert reason from raw revert bytes.
- * Handles Error(string) — selector 0x08c379a0.
+ * Handles Error(string), Panic(uint256), and errors in the Trampoline ABI.
  */
 function extractRevertReasonFromHex(data: Hex | undefined): string | null {
 	if (!data || data === "0x") return null;
-	if (!data.startsWith("0x08c379a0")) return null;
 	try {
-		const hex = data.slice(10);
-		const buf = Buffer.from(hex, "hex");
-		const len = Number(BigInt(`0x${buf.slice(32, 64).toString("hex")}`));
-		return buf.slice(64, 64 + len).toString("utf8");
+		const decoded = decodeErrorResult({
+			abi: [
+				...TrampolineAbi,
+				...parseAbi(["error Error(string message)", "error Panic(uint256 code)"]),
+			],
+			data,
+		});
+		if (decoded.errorName === "Error") return String(decoded.args[0]);
+		return `${decoded.errorName}(${decoded.args?.map(String).join(", ") ?? ""})`;
 	} catch {
 		return null;
 	}
@@ -521,7 +525,10 @@ export class SimulationValidator implements ValidateProposal {
 		if (call.status === "0x0") {
 			const revertData = revertDataFrom(call);
 			const revertReason =
-				extractRevertReasonFromHex(revertData) ?? call.error?.message ?? "execution reverted";
+				extractRevertReasonFromHex(revertData) ??
+				revertData ??
+				call.error?.message ??
+				"execution reverted";
 
 			if (this.logger) {
 				const tenderlyUrl = simulationFailureParams
@@ -686,8 +693,13 @@ function extractRevertReasonFromThrown(e: unknown): string | null {
 		return err.reason;
 	}
 
-	if (err.code === 3 && typeof err.data === "string" && err.data.startsWith("0x08c379a0")) {
-		return extractRevertReasonFromHex(err.data as Hex);
+	if (
+		err.code === 3 &&
+		typeof err.data === "string" &&
+		err.data.startsWith("0x") &&
+		err.data !== "0x"
+	) {
+		return extractRevertReasonFromHex(err.data as Hex) ?? err.data;
 	}
 
 	if ("cause" in err) return extractRevertReasonFromThrown(err.cause);

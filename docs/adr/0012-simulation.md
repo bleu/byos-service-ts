@@ -180,3 +180,15 @@ is an address resolution policy, not proof of a deployment or its authorization.
 General Atomic Bundles use a different contract interface and require preservation of
 opaque wrapper chains. Until that path is implemented, declining these orders at both
 validation and selection avoids bidding a settlement that omits required operations.
+
+### Persist bounded revert diagnostics
+
+Logging a decoded revert without persisting it left `simFailed` rows unhelpful for
+SQL analysis. Store that diagnostic in the existing `rejection_reason` text column
+and audit event rather than adding another reason field. Decode standard Solidity
+errors and known Trampoline errors; retain unknown or malformed revert bytes as hex.
+Use the RPC message, then `execution reverted`, only when revert bytes are absent.
+Bound stored text to the first 200 Unicode characters plus `...` on truncation,
+and escape NUL because Postgres text cannot store it. Apply the bound at ingestion
+so validator verdicts, competitive classification, and runtime logs retain the
+original diagnostic. Historical null rows are not reconstructed automatically.

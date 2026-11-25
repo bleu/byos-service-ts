@@ -612,6 +612,18 @@ components:
         - SettlementReverted
         - ProposedSlippageOutrange
         - SimulationMissingExecutedEvent
+    ProposalRejectionReason:
+      description: |
+        A predefined lifecycle rejection reason, or, for `simFailed`, the decoded
+        EVM revert message. Undecodable revert data is stored as its original
+        0x-prefixed hex. With no data or message, the value is `execution reverted`.
+        Simulation diagnostics retain the first 200 Unicode characters, followed
+        by `...` when truncated (203 characters total). NUL is escaped as `\0`.
+        Historical simulation failures may omit this field.
+      anyOf:
+        - $ref: "#/components/schemas/RejectionReason"
+        - type: string
+          maxLength: 203
     Interaction:
       description: |
         One arbitrary call executed inside the sub-solver's Trampoline at
@@ -766,13 +778,13 @@ components:
           example: "2025-07-01T12:00:05.000Z"
         rejectionReason:
           description: |
-            Present when `status` is `rejected`, `cancelled`, or `lost`.
+            Present for `simFailed` diagnostics and lifecycle rejection reasons.
             For `lost`: `SolverOutbid` (on-chain Trade event found for the
             order) or `UnknownOutput` (no trade found in the observation
             window). For `cancelled` at auction close: `SubsolverOutbid`
             or `AuctionClosed`.
           allOf:
-            - $ref: "#/components/schemas/RejectionReason"
+            - $ref: "#/components/schemas/ProposalRejectionReason"
         gasUsed:
           description: |
             Gas estimate from the settlement simulation. Present once the
@@ -896,9 +908,9 @@ components:
           format: date-time
           example: "2025-07-01T12:00:05.000Z"
         rejectionReason:
-          description: Only present when `status` is `rejected`.
+          description: Lifecycle rejection reason or bounded simulation revert diagnostic for `simFailed`.
           allOf:
-            - $ref: "#/components/schemas/RejectionReason"
+            - $ref: "#/components/schemas/ProposalRejectionReason"
         gasUsed:
           description: |
             Gas estimate from the settlement simulation. Only present once

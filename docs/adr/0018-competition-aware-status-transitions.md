@@ -43,4 +43,9 @@ The shared lifecycle specification needs to incorporate this recovery edge; its 
 - `simFailed` proposals will no longer carry `"GPv2: order filled"` as their stored reason — operators monitoring `simFailed` counts should see a reduction in false-positive noise.
 - A sub-solver whose proposal is selected as runner-up (while a better same-solver proposal is in flight) will not be prematurely outbid. If that better proposal later fails, the runner-up remains eligible.
 - The small window between `/solve` completing and `rejectOutbidProposals` committing means a losing proposal might briefly appear `active` to a racing poll request. This is accepted as an eventual-consistency trade-off.
-- **Data note**: an earlier version of this feature (before `SolverOutbid` was introduced) stored raw contract revert strings directly into the `rejection_reason` column of `simFailed` proposals via an unsafe cast. Those rows have non-enum values in `rejection_reason` and will surface a `rejectionReason` field in API responses even though their `status` is `simFailed`. A one-off migration (`UPDATE proposals SET rejection_reason = NULL WHERE status = 'simFailed' AND rejection_reason IS NOT NULL`) clears the pollution; the same applies to `proposals_log`.
+- **Revised diagnostic storage (2026-11-25):** retain bounded simulation revert
+  diagnostics in `rejection_reason` so operators can group failures directly in
+  Postgres. The earlier instruction to clear non-enum simulation reasons is
+  superseded. Persistence and response types explicitly allow diagnostic strings;
+  lifecycle rejection reasons remain a strict enum. This avoids the previous
+  unsafe cast while keeping `SolverOutbid` attribution intact.

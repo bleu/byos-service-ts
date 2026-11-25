@@ -14,6 +14,7 @@ import {
 	type Address,
 	decodeFunctionData,
 	encodeAbiParameters,
+	encodeErrorResult,
 	encodeEventTopics,
 	getAddress,
 	type Hex,
@@ -694,6 +695,64 @@ describe("SimulationValidator", () => {
 		const verdict = await validatorAt(node).validate(submittedProposal());
 		expect(verdict).toMatchObject({ kind: "simFailed" });
 	});
+
+	it.each([
+		[
+			`0x08c379a0${encodeAbiParameters([{ type: "string" }], ["Pancake: TRANSFER_FAILED"]).slice(2)}`,
+			"Pancake: TRANSFER_FAILED",
+		],
+		[`0x4e487b71${encodeAbiParameters([{ type: "uint256" }], [17n]).slice(2)}`, "Panic(17)"],
+		[
+			encodeErrorResult({
+				abi: TrampolineAbi,
+				errorName: "Trampoline_FloorNotMet",
+				args: [1n, 2n],
+			}),
+			"Trampoline_FloorNotMet(1, 2)",
+		],
+		["0xdeadbeef", "0xdeadbeef"],
+	])("decodes Solidity revert data %s", async (data, expected) => {
+		const node = fakeNode({ simulateV1: async () => simulateRevert(data as Hex) });
+		setupAuctionState(sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount })));
+		expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+			kind: "simFailed",
+			revertReason: expected,
+		});
+	});
+
+	it("preserves undecodable bytes from a thrown trampoline revert", async () => {
+		const node = fakeNode({
+			addressOf: async () => {
+				throw { code: 3, data: "0xdeadbeef" };
+			},
+		});
+		setupAuctionState(sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount })));
+		expect(
+			await validatorAt(node).validate({ ...submittedProposal(), trampoline: null }),
+		).toMatchObject({
+			kind: "simFailed",
+			revertReason: "0xdeadbeef",
+		});
+	});
+
+	it.each(["0xdeadbeef", "0x08c379a0", "0x08c379a000"])(
+		"preserves undecodable revert data %s instead of the generic RPC message",
+		async (data) => {
+			const node = fakeNode({
+				simulateV1: async () => ({
+					...simulateRevert(data as Hex),
+					error: { message: "execution reverted", code: 3, data: data as Hex },
+				}),
+			});
+			setupAuctionState(
+				sampleRecord(sampleOrder({ buyAmount: submittedProposal().quoteBuyAmount })),
+			);
+			expect(await validatorAt(node).validate(submittedProposal())).toMatchObject({
+				kind: "simFailed",
+				revertReason: data,
+			});
+		},
+	);
 
 	it("rate limit error defers rather than failing the simulation", async () => {
 		const node = fakeNode({
