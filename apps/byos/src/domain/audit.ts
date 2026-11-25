@@ -1,4 +1,4 @@
-import type { RejectionReason, Status } from "@byos/common";
+import type { Status } from "@byos/common";
 import type { Address, Hex } from "viem";
 import type { Proposal } from "./proposal.js";
 
@@ -19,7 +19,7 @@ export type AuditKind =
 			orderUid: string;
 			from: Status;
 			to: Status;
-			rejectionReason: RejectionReason | null;
+			rejectionReason: string | null;
 			settlementTxHash: Hex | null;
 	  }
 	| {

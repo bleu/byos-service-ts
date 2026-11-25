@@ -252,3 +252,40 @@ describe("historical rejection compatibility", () => {
 		},
 	);
 });
+
+describe("simulation rejection response compatibility", () => {
+	const response = {
+		id: 1,
+		subSolver: `0x${"ab".repeat(20)}`,
+		orderUid: `0x${"ab".repeat(56)}`,
+		sellAmount: "100",
+		minBuyAmount: "99",
+		quoteBuyAmount: "99",
+		validUntil: "1750000000",
+	};
+	it.each(["ERC20: insufficient allowance", "0xdeadbeef", `${"😀".repeat(200)}...`])(
+		"accepts simulation diagnostic %s",
+		(rejectionReason) => {
+			expect(
+				getProposalResponseSchema.safeParse({ ...response, status: "simFailed", rejectionReason })
+					.success,
+			).toBe(true);
+		},
+	);
+	it("rejects oversized simulation diagnostics and unknown lifecycle reasons", () => {
+		expect(
+			getProposalResponseSchema.safeParse({
+				...response,
+				status: "simFailed",
+				rejectionReason: "x".repeat(204),
+			}).success,
+		).toBe(false);
+		expect(
+			getProposalResponseSchema.safeParse({
+				...response,
+				status: "rejected",
+				rejectionReason: "not-a-lifecycle-reason",
+			}).success,
+		).toBe(false);
+	});
+});

@@ -14,7 +14,11 @@ import type { Address } from "viem";
 import _openapiYaml from "../../../openapi.yml";
 import type { Db } from "../../db/index.js";
 import type { AuditEvent } from "../../domain/audit.js";
-import type { ValidateProposal, Verdict } from "../../domain/validator.js";
+import {
+	simulationRejectionReason,
+	type ValidateProposal,
+	type Verdict,
+} from "../../domain/validator.js";
 import { getAuctionState } from "../auction-state.js";
 import type { Candidate } from "../candidate-store.js";
 import { CandidateStore } from "../candidate-store.js";
@@ -342,7 +346,9 @@ export function createPublicRoutes(config: RoutesConfig) {
 			// Promote to rejected: SolverOutbid so sub-solvers get a clear signal.
 			const isFilled = verdict.revertReason === "GPv2: order filled";
 			const toStatus = isFilled ? ("rejected" as const) : ("simFailed" as const);
-			const rejectionReason = isFilled ? ("SolverOutbid" as const) : null;
+			const rejectionReason = isFilled
+				? "SolverOutbid"
+				: simulationRejectionReason(verdict.revertReason);
 			log?.info({ id, subSolver, revertReason: verdict.revertReason }, "proposal sim failed");
 			await store.writeToLog(
 				config.db,

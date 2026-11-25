@@ -173,19 +173,38 @@ export type ProposalMetadata = z.infer<typeof proposalMetadataSchema>;
 
 // --- Get Proposal Response ---
 
-export const getProposalResponseSchema = z.object({
-	id: z.number(),
-	subSolver: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-	orderUid: z.string(),
-	sellAmount: z.string(),
-	minBuyAmount: z.string(),
-	quoteBuyAmount: z.string(),
-	validUntil: z.string(),
-	status: statusSchema,
-	rejectionReason: rejectionReasonSchema.optional(),
-	settlementTxHash: z.string().optional(),
-	penaltyTxHash: z.string().optional(),
-});
+export const getProposalResponseSchema = z
+	.object({
+		id: z.number(),
+		subSolver: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+		orderUid: z.string(),
+		sellAmount: z.string(),
+		minBuyAmount: z.string(),
+		quoteBuyAmount: z.string(),
+		validUntil: z.string(),
+		status: statusSchema,
+		rejectionReason: z.string().optional(),
+		settlementTxHash: z.string().optional(),
+		penaltyTxHash: z.string().optional(),
+	})
+	.superRefine((proposal, ctx) => {
+		const reason = proposal.rejectionReason;
+		if (reason === undefined) return;
+		if (proposal.status === "simFailed") {
+			if (Array.from(reason).length > 203)
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["rejectionReason"],
+					message: "Simulation reason exceeds 203 characters",
+				});
+		} else if (!rejectionReasonSchema.safeParse(reason).success) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["rejectionReason"],
+				message: "Unknown rejection reason",
+			});
+		}
+	});
 
 export type GetProposalResponse = z.infer<typeof getProposalResponseSchema>;
 

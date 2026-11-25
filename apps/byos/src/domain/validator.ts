@@ -64,3 +64,9 @@ export const acceptAll: ValidateProposal = {
 		};
 	},
 };
+
+/** Bound persisted diagnostics by Unicode characters; Postgres text cannot contain NUL. */
+export function simulationRejectionReason(reason?: string): string {
+	const characters = Array.from((reason || "execution reverted").replaceAll("\0", "\\0"));
+	return characters.length > 200 ? `${characters.slice(0, 200).join("")}...` : characters.join("");
+}

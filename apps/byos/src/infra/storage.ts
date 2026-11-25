@@ -320,7 +320,7 @@ function rowToProposal(row: ProposalRow): Proposal {
 		nonce: BigInt(row.nonce),
 		signature: row.signature as Hex,
 		status: row.status as Status,
-		rejectionReason: (row.rejectionReason as RejectionReason) ?? null,
+		rejectionReason: row.rejectionReason ?? null,
 		gasUsed: row.gasUsed != null ? BigInt(row.gasUsed) : null,
 		trampoline: (row.trampoline as Address) ?? null,
 		settlementTxHash: (row.settlementTxHash as Hex) ?? null,
@@ -421,7 +421,7 @@ export async function writeToLog(
 	id: number,
 	proposal: ProposalInput,
 	status: Status,
-	rejectionReason: RejectionReason | null,
+	rejectionReason: string | null,
 	simulationFailureParams: unknown | null,
 ): Promise<void> {
 	const now = new Date();
