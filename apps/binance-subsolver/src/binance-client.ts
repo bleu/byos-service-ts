@@ -1,5 +1,4 @@
 import * as crypto from "node:crypto";
-import { type AuctionWork, requestSignal } from "@byos/subsolver-core";
 import type { Address, Hex } from "viem";
 
 const BASE_URL = "https://web3.binance.com/build";
@@ -73,15 +72,11 @@ export class BinanceClient {
 		};
 	}
 
-	private async apiGet<T>(
-		path: string,
-		params: Record<string, string>,
-		work?: AuctionWork,
-	): Promise<T> {
+	private async apiGet<T>(path: string, params: Record<string, string>): Promise<T> {
 		const queryString = new URLSearchParams(params).toString();
 		const headers = this.makeHeaders("GET", path, queryString);
 		const url = `${BASE_URL}${path}?${queryString}`;
-		const res = await fetch(url, { headers, signal: requestSignal(work) });
+		const res = await fetch(url, { headers });
 		const json = (await res.json()) as ApiResponse<T>;
 		if (!json.success) {
 			throw new Error(`Binance API error [${json.code}]: ${json.message}`);
@@ -99,21 +94,16 @@ export class BinanceClient {
 		sellAmount: bigint,
 		walletAddress: Address,
 		slippageBps: number,
-		work?: AuctionWork,
 	): Promise<QuoteData[]> {
 		const slippagePercent = (slippageBps / 100).toString();
-		const quotes = await this.apiGet<QuoteData[]>(
-			"/api/v1/dex/aggregator/quote",
-			{
-				binanceChainId: this.chainId.toString(),
-				amount: sellAmount.toString(),
-				fromTokenAddress: fromToken,
-				toTokenAddress: toToken,
-				userWalletAddress: walletAddress,
-				slippagePercent,
-			},
-			work,
-		);
+		const quotes = await this.apiGet<QuoteData[]>("/api/v1/dex/aggregator/quote", {
+			binanceChainId: this.chainId.toString(),
+			amount: sellAmount.toString(),
+			fromTokenAddress: fromToken,
+			toTokenAddress: toToken,
+			userWalletAddress: walletAddress,
+			slippagePercent,
+		});
 		return quotes.filter((q) => q.executionMode === "SWAP");
 	}
 
@@ -127,22 +117,17 @@ export class BinanceClient {
 		sellAmount: bigint,
 		walletAddress: Address,
 		slippageBps: number,
-		work?: AuctionWork,
 	): Promise<SwapTx> {
 		const slippagePercent = (slippageBps / 100).toString();
-		const data = await this.apiGet<SwapData>(
-			"/api/v1/dex/aggregator/swap",
-			{
-				binanceChainId: this.chainId.toString(),
-				amount: sellAmount.toString(),
-				fromTokenAddress: fromToken,
-				toTokenAddress: toToken,
-				userWalletAddress: walletAddress,
-				quoteId,
-				slippagePercent,
-			},
-			work,
-		);
+		const data = await this.apiGet<SwapData>("/api/v1/dex/aggregator/swap", {
+			binanceChainId: this.chainId.toString(),
+			amount: sellAmount.toString(),
+			fromTokenAddress: fromToken,
+			toTokenAddress: toToken,
+			userWalletAddress: walletAddress,
+			quoteId,
+			slippagePercent,
+		});
 		return data.tx;
 	}
 }

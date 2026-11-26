@@ -65,15 +65,14 @@ function setup() {
 		new OrderFilter({ closeToExecutionTopN: config.closeToExecutionTopN }),
 	);
 	let now = 100n;
-	let auctionId = 100n;
-	const app = createSolveApp(client, "secret", (work) => subsolver.pollOnce(now++, work));
+	const app = createSolveApp(client, "secret", () => subsolver.pollOnce(now++));
 	const push = async (orders: ReturnType<typeof order>[], token = "secret") => {
 		quote.mockClear();
 		return app.request("/solve", {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 			body: JSON.stringify({
-				id: String(auctionId++),
+				id: String(now),
 				deadline: "2030-01-01T00:00:00Z",
 				effectiveGasPrice: "1",
 				tokens: {
@@ -128,7 +127,7 @@ describe("solve discovery pipeline with mocked external services", () => {
 		expect(quotedSellAmounts()).toEqual([]);
 
 		expect((await push([top, excluded, buy, fresh])).status).toBe(200);
-		expect(quotedSellAmounts()).toEqual(["101"]);
+		expect(quotedSellAmounts()).toEqual(["101", "102", "104"].sort());
 		expect(submit).not.toHaveBeenCalled();
 	});
 

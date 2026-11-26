@@ -1,23 +1,18 @@
 import type { byosDomain } from "@byos/common";
 import {
-	type AuctionWork,
 	type ByosClient,
 	ByosRateLimitError,
 	buildProposalFromRoute,
 	type CandidateOrder,
-	canQuote,
-	canSubmit,
-	createTaskPool,
 	type OrderbookOrder,
 	type OrderFilter,
 	type ProviderRoute,
 	prioritizeCandidates,
+	quoteBatch,
 	type RequestBudget,
 	type RouteProvider,
 	randomNonce,
 	selectSlippageBps,
-	streamQuotes,
-	untilAborted,
 } from "@byos/subsolver-core";
 import type pino from "pino";
 import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from "viem";
@@ -45,19 +40,15 @@ class BinanceProvider implements RouteProvider {
 		>,
 	) {}
 
-	async quote(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute | null> {
-		return (await this.findRoutes(order, 1, work))[0] ?? null;
+	async quote(order: CandidateOrder): Promise<ProviderRoute | null> {
+		return (await this.findRoutes(order, 1))[0] ?? null;
 	}
 
-	async quoteMany(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute[]> {
-		return this.findRoutes(order, 3, work);
+	async quoteMany(order: CandidateOrder): Promise<ProviderRoute[]> {
+		return this.findRoutes(order, 3);
 	}
 
-	private async findRoutes(
-		order: CandidateOrder,
-		limit: number,
-		work?: AuctionWork,
-	): Promise<ProviderRoute[]> {
+	private async findRoutes(order: CandidateOrder, limit: number): Promise<ProviderRoute[]> {
 		const slippageBps = selectSlippageBps({
 			chainId: this.config.chainId,
 			sellToken: order.sellToken,
@@ -71,7 +62,6 @@ class BinanceProvider implements RouteProvider {
 			order.remainingSell,
 			this.trampoline,
 			slippageBps,
-			work,
 		);
 		if (quotes.length === 0) return [];
 
@@ -86,7 +76,6 @@ class BinanceProvider implements RouteProvider {
 					order.remainingSell,
 					this.trampoline,
 					slippageBps,
-					work,
 				),
 			})),
 		);
@@ -153,7 +142,6 @@ export class BinanceSubsolver {
 	private hasSynchronized = true;
 	private nextSynchronizationAt = 0n;
 	private retryAtMs = 0;
-	private readonly submissions: ReturnType<typeof createTaskPool>;
 	private readonly provider: BinanceProvider;
 
 	constructor(
@@ -168,15 +156,14 @@ export class BinanceSubsolver {
 		private readonly budget: RequestBudget,
 		private readonly orderFilter: OrderFilter,
 	) {
-		this.submissions = createTaskPool(config.byosSubmissionConcurrency ?? 3);
 		this.provider = new BinanceProvider(binanceClient, trampoline, config.gpv2Settlement, config);
 	}
 
-	async synchronize(now: bigint, work?: AuctionWork): Promise<boolean> {
+	async synchronize(now: bigint): Promise<boolean> {
 		if (!this.budget.consumeRead()) return false;
 		try {
 			const next = new Map<string, Live>();
-			for (const proposal of await this.byos.proposals(work)) {
+			for (const proposal of await this.byos.proposals()) {
 				if (this.byos.isTerminal(proposal.status) || proposal.validUntil < now) continue;
 				const uid = proposal.orderUid.toLowerCase();
 				const previous = next.get(uid);
@@ -193,7 +180,6 @@ export class BinanceSubsolver {
 			this.nextSynchronizationAt = now + BigInt(this.config.proposalRefreshIntervalSeconds);
 			return true;
 		} catch (error) {
-			if (work?.signal.aborted) return false;
 			if (this.hasSynchronized) {
 				this.nextSynchronizationAt = now + BigInt(this.config.proposalRefreshIntervalSeconds);
 			}
@@ -202,8 +188,7 @@ export class BinanceSubsolver {
 		}
 	}
 
-	async pollOnce(now: bigint, work?: AuctionWork): Promise<void> {
-		if (!canQuote(work)) return;
+	async pollOnce(now: bigint): Promise<void> {
 		let orders: OrderbookOrder[];
 		try {
 			const raw = await this.orderbook.solvableOrders();
@@ -214,9 +199,9 @@ export class BinanceSubsolver {
 		}
 		if (Date.now() < this.retryAtMs) return;
 		if (!this.hasSynchronized) {
-			if (!(await this.synchronize(now, work))) return;
+			if (!(await this.synchronize(now))) return;
 		} else if (now >= this.nextSynchronizationAt) {
-			await this.synchronize(now, work);
+			await this.synchronize(now);
 		}
 		for (const [uid, live] of this.live) if (live.validUntil < now) this.live.delete(uid);
 		this.logger.debug(
@@ -234,14 +219,10 @@ export class BinanceSubsolver {
 			"filtered candidates (excluding recently submitted)",
 		);
 		if (candidates.length === 0) return;
-		if (canQuote(work)) await this.submitRoutes(candidates, now, work);
+		await this.submitRoutes(candidates, now);
 	}
 
-	private async submitRoutes(
-		orders: readonly OrderbookOrder[],
-		now: bigint,
-		work?: AuctionWork,
-	): Promise<void> {
+	private async submitRoutes(orders: readonly OrderbookOrder[], now: bigint): Promise<void> {
 		const byUid = new Map(orders.map((order) => [order.uid.toLowerCase(), order]));
 		const candidates = prioritizeCandidates(
 			orders.map((order) => ({
@@ -252,112 +233,93 @@ export class BinanceSubsolver {
 			(uid) => this.live.has(uid.toLowerCase()),
 		).map((ranked) => ranked.candidate);
 		this.logger.debug({ count: candidates.length }, "sending candidates to Binance for quoting");
+		const results = await quoteBatch(
+			this.provider,
+			candidates,
+			this.config.binanceQuoteConcurrency,
+		);
 		let routesFound = 0;
 		let noRoute = 0;
 		let errors = 0;
-		let submissionErrors = 0;
-		let stopped = false;
-		await streamQuotes(
-			this.provider,
-			candidates,
-			async (result) => {
-				const order = byUid.get(result.order.uid.toLowerCase());
-				if (!order) return;
-				if (result.error) {
-					this.logger.warn(
-						{ err: result.error, orderUid: order.uid, auctionId: work?.auctionId },
-						"Binance quote failed",
+		for (const result of results) {
+			const order = byUid.get(result.order.uid.toLowerCase());
+			if (!order) continue;
+			if (result.error) {
+				this.logger.warn({ err: result.error, orderUid: order.uid }, "Binance quote failed");
+				errors++;
+				continue;
+			}
+			if (!result.route) {
+				noRoute++;
+				continue;
+			}
+			routesFound++;
+			this.logger.debug(
+				{
+					orderUid: order.uid,
+					sellToken: order.sellToken,
+					buyToken: order.buyToken,
+					remainingSell: result.order.remainingSell.toString(),
+					scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+					minBuyAmount: result.route.minBuyAmount.toString(),
+					quoteBuyAmount: result.route.quoteBuyAmount.toString(),
+					interactions: result.route.interactions.length,
+				},
+				"Binance route found",
+			);
+			if (!this.budget.consumeSubmission()) {
+				this.logger.info("BYOS submission budget reserved for proposal state reads");
+				return;
+			}
+			try {
+				const validUntil = now + BigInt(this.config.proposalTtlSeconds);
+				const proposal = await buildProposalFromRoute(
+					{
+						...order,
+						sellAmount: result.order.remainingSell,
+						buyAmount: result.order.scaledLimitBuy,
+					},
+					result.route,
+					validUntil,
+					randomNonce(),
+					this.domain,
+					this.signFn,
+				);
+				if (!proposal) {
+					this.logger.debug(
+						{
+							orderUid: order.uid,
+							minBuyAmount: result.route.minBuyAmount.toString(),
+							scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+						},
+						"proposal rejected by buildProposalFromRoute (minBuyAmount < scaledLimitBuy or buy-order kind)",
 					);
-					errors++;
-					return;
+					continue;
 				}
-				const route = result.route;
-				if (!route) {
-					noRoute++;
-					return;
-				}
-				routesFound++;
 				this.logger.debug(
 					{
-						orderUid: order.uid,
-						auctionId: work?.auctionId,
-						nativeSellValue: result.order.nativeSellValue?.toString(),
-						quoteElapsedMs: result.quoteElapsedMs,
-						minBuyAmount: route.minBuyAmount.toString(),
-						quoteBuyAmount: route.quoteBuyAmount.toString(),
+						orderUid: proposal.orderUid,
+						sellToken: proposal.sellToken,
+						buyToken: proposal.buyToken,
+						sellAmount: proposal.sellAmount.toString(),
+						minBuyAmount: proposal.minBuyAmount.toString(),
+						quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+						validUntil: proposal.validUntil.toString(),
+						nonce: proposal.nonce.toString(),
+						interactions: proposal.interactions.length,
 					},
-					"Binance route found",
+					"submitting proposal to BYOS",
 				);
-				await this.submissions.run(async () => {
-					const blocked = () => stopped || Date.now() < this.retryAtMs || !canSubmit(work);
-					if (blocked()) return;
-					try {
-						const validUntil = now + BigInt(this.config.proposalTtlSeconds);
-						const signing = buildProposalFromRoute(
-							{
-								...order,
-								sellAmount: result.order.remainingSell,
-								buyAmount: result.order.scaledLimitBuy,
-							},
-							route,
-							validUntil,
-							randomNonce(),
-							this.domain,
-							this.signFn,
-						);
-						const proposal = await (work ? untilAborted(signing, work.signal) : signing);
-						if (!proposal) return;
-						if (blocked()) return;
-						if (!this.budget.consumeSubmission()) {
-							stopped = true;
-							this.logger.info("BYOS submission budget reserved for proposal state reads");
-							return;
-						}
-						const startedAt = Date.now();
-						this.logger.debug(
-							{
-								orderUid: order.uid,
-								auctionId: work?.auctionId,
-								nonce: proposal.nonce.toString(),
-								remainingMs: work ? work.deadlineMs - startedAt : undefined,
-							},
-							"submitting proposal to BYOS",
-						);
-						const sending = this.byos.submit(proposal, work);
-						const id = await (work ? untilAborted(sending, work.signal) : sending);
-						this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
-						this.logger.info(
-							{
-								id,
-								orderUid: order.uid,
-								auctionId: work?.auctionId,
-								quoteElapsedMs: result.quoteElapsedMs,
-								postElapsedMs: Date.now() - startedAt,
-								remainingMs: work ? work.deadlineMs - Date.now() : undefined,
-							},
-							"Binance proposal submitted",
-						);
-					} catch (error) {
-						if (work?.signal.aborted) return;
-						submissionErrors++;
-						this.handleByosError(error, "Binance proposal submission failed", order.uid);
-						if (error instanceof ByosRateLimitError) stopped = true;
-					}
-				});
-			},
-			this.config.binanceQuoteConcurrency,
-			work,
-		);
+				const id = await this.byos.submit(proposal);
+				this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
+				this.logger.info({ id, orderUid: order.uid }, "Binance proposal submitted");
+			} catch (error) {
+				this.handleByosError(error, "Binance proposal submission failed", order.uid);
+				if (error instanceof ByosRateLimitError) return;
+			}
+		}
 		this.logger.info(
-			{
-				auctionId: work?.auctionId,
-				deadlineMs: work?.deadlineMs,
-				routesFound,
-				noRoute,
-				errors,
-				submissionErrors,
-				total: candidates.length,
-			},
+			{ routesFound, noRoute, errors, total: candidates.length },
 			"poll cycle complete",
 		);
 	}

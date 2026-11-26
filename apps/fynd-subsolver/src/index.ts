@@ -3,7 +3,6 @@ import { byosDomain, TrampolineFactoryAbi } from "@byos/common";
 import {
 	AwsOrderbookClient,
 	ByosClient,
-	createFyndRoutingClient,
 	createHealthApp,
 	createSolveApp,
 	FyndConfigurationError,
@@ -14,6 +13,7 @@ import {
 	SolveOrderbookClient,
 } from "@byos/subsolver-core";
 import { serve } from "@hono/node-server";
+import { FyndClient } from "@kayibal/fynd-client";
 import pino from "pino";
 import type { Address } from "viem";
 import { createPublicClient, createWalletClient, http } from "viem";
@@ -57,7 +57,7 @@ async function main() {
 	const wallet = createWalletClient({ account, transport });
 	const signFn = (params: unknown) => wallet.signTypedData(params as never);
 	const fynd = new FyndProvider({
-		client: createFyndRoutingClient(config.fyndUrl),
+		client: new FyndClient({ baseUrl: config.fyndUrl, timeoutMs: 7000, retry: { maxAttempts: 2 } }),
 		chainId: config.chainId,
 		trampoline: trampoline as Address,
 		settlement: config.gpv2Settlement,
@@ -99,18 +99,13 @@ async function main() {
 	);
 	await subsolver.synchronize(BigInt(Math.floor(Date.now() / 1000)));
 	if (config.discoveryMethod === "solve" && solveClient) {
-		const app = createSolveApp(
-			solveClient,
-			config.subsolverBearer,
-			async (work) => {
-				try {
-					await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)), work);
-				} catch (error) {
-					logger.warn({ err: error }, "solve cycle failed");
-				}
-			},
-			{ deadlineBufferMs: config.deadlineBufferMs, logger },
-		);
+		const app = createSolveApp(solveClient, config.subsolverBearer, async () => {
+			try {
+				await subsolver.pollOnce(BigInt(Math.floor(Date.now() / 1000)));
+			} catch (error) {
+				logger.warn({ err: error }, "solve cycle failed");
+			}
+		});
 		serve({ fetch: app.fetch, port: config.solvePort }, (info) => {
 			logger.info({ port: info.port }, "solve discovery listener started");
 		});
