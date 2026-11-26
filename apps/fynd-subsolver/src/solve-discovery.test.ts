@@ -61,15 +61,20 @@ function setup() {
 		new OrderFilter({ closeToExecutionTopN: config.closeToExecutionTopN }),
 	);
 	let now = 100n;
-	let auctionId = 100n;
-	const app = createSolveApp(client, "secret", (work) => subsolver.pollOnce(now++, work));
+	// Pushes are acknowledged immediately; tests await the background cycle.
+	let cycle: Promise<void> = Promise.resolve();
+	const app = createSolveApp(client, "secret", () => {
+		cycle = subsolver.pollOnce(now++);
+		return cycle;
+	});
 	const push = async (orders: ReturnType<typeof order>[], token = "secret") => {
 		quote.mockClear();
-		return app.request("/solve", {
+		cycle = Promise.resolve();
+		const response = await app.request("/solve", {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 			body: JSON.stringify({
-				id: String(auctionId++),
+				id: String(now),
 				deadline: "2030-01-01T00:00:00Z",
 				effectiveGasPrice: "1",
 				tokens: {
@@ -79,6 +84,8 @@ function setup() {
 				orders,
 			}),
 		});
+		await cycle;
+		return response;
 	};
 	const quotedUids = () => quote.mock.calls.map(([candidate]) => candidate.uid).sort();
 	return { push, quotedUids, submit };
@@ -105,7 +112,7 @@ describe("solve discovery pipeline with mocked external services", () => {
 		expect(quotedUids()).toEqual([]);
 
 		expect((await push([top, excluded, buy, fresh])).status).toBe(200);
-		expect(quotedUids()).toEqual([top.uid]);
+		expect(quotedUids()).toEqual([top.uid, excluded.uid, fresh.uid].sort());
 		expect(submit).not.toHaveBeenCalled();
 	});
 

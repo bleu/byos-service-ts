@@ -1,6 +1,6 @@
 # Deadline-aware sub-solver auction processing
 
-Status: accepted
+Status: superseded by [ADR-0023](0023-subsolver-late-routes.md)
 
 Spec: docs/shared/guides/sub-solver-integration.md#the-post-response-is-the-verdict
 

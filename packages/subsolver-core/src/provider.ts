@@ -1,5 +1,3 @@
-import { type AuctionWork, canQuote, untilAborted } from "./auction-work.js";
-
 type Address = `0x${string}`;
 type ContractInteraction = { target: Address; value: bigint; callData: `0x${string}` };
 
@@ -28,59 +26,56 @@ export interface ProviderRoute {
  */
 export interface RouteProvider {
 	readonly name: string;
-	quote(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute | null>;
+	quote(order: CandidateOrder): Promise<ProviderRoute | null>;
 	/** Independently executable alternatives for the same order. */
-	quoteMany?(order: CandidateOrder, work?: AuctionWork): Promise<ProviderRoute[]>;
+	quoteMany?(order: CandidateOrder): Promise<ProviderRoute[]>;
 }
 
 export interface QuoteResult {
 	order: CandidateOrder;
 	route: ProviderRoute | null;
 	error?: unknown;
-	quoteElapsedMs?: number;
 }
 
 /**
- * Quotes independent orders with bounded all-settled concurrency. Provider
- * failures are deliberately isolated: one bad order cannot suppress an
- * otherwise valid batch.
+ * Quotes independent orders with bounded all-settled concurrency and hands each
+ * order's results to `onResult` as soon as that order is quoted, so a slow
+ * order never holds back the submission of routes that are already ready.
+ * Provider failures are deliberately isolated: one bad order cannot suppress
+ * an otherwise valid batch.
  */
 export async function streamQuotes(
 	provider: RouteProvider,
 	orders: readonly CandidateOrder[],
 	onResult: (result: QuoteResult) => Promise<void>,
 	concurrency = 32,
-	work?: AuctionWork,
 ): Promise<void> {
-	if (!Number.isInteger(concurrency) || concurrency < 1)
+	if (!Number.isInteger(concurrency) || concurrency < 1) {
 		throw new Error("quote concurrency must be a positive integer");
+	}
 	let cursor = 0;
 	const worker = async () => {
-		while (canQuote(work)) {
+		while (true) {
 			const order = orders[cursor++];
 			if (!order) return;
-			const startedAt = Date.now();
 			let results: QuoteResult[];
 			try {
-				const quoting =
+				const routes =
 					provider.quoteMany && (order.nativeSellValue ?? 0n) > 10n ** 18n
-						? provider.quoteMany(order, work)
-						: provider.quote(order, work).then((route) => (route ? [route] : []));
-				const routes = await (work ? untilAborted(quoting, work.signal) : quoting);
-				results = routes.length
-					? routes.map((route) => ({ order, route, quoteElapsedMs: Date.now() - startedAt }))
-					: [{ order, route: null }];
+						? await provider.quoteMany(order)
+						: [await provider.quote(order)];
+				results =
+					routes.length > 0 ? routes.map((route) => ({ order, route })) : [{ order, route: null }];
 			} catch (error) {
-				if (work?.signal.aborted) return;
 				results = [{ order, route: null, error }];
 			}
-			await Promise.all(results.map(onResult));
+			for (const result of results) await onResult(result);
 		}
 	};
 	await Promise.all(Array.from({ length: Math.min(concurrency, orders.length) }, worker));
 }
 
-/** Compatibility collector for consumers that need the complete result set. */
+/** Collects every result, in input order, for consumers that need the full batch. */
 export async function quoteBatch(
 	provider: RouteProvider,
 	orders: readonly CandidateOrder[],

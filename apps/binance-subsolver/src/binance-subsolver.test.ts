@@ -1,14 +1,9 @@
 import { byosDomain } from "@byos/common";
 import type { ByosClient, OrderbookOrder } from "@byos/subsolver-core";
-import {
-	ByosRateLimitError,
-	createAuctionWork,
-	OrderFilter,
-	RequestBudget,
-} from "@byos/subsolver-core";
+import { ByosRateLimitError, OrderFilter, RequestBudget } from "@byos/subsolver-core";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
-import { BinanceClient } from "./binance-client.js";
+import type { BinanceClient } from "./binance-client.js";
 import { BinanceSubsolver } from "./binance-subsolver.js";
 import type { Config } from "./config.js";
 
@@ -200,14 +195,7 @@ describe("Binance correlated slippage", () => {
 				[usdc, expected],
 				[wbnb, 80],
 			] as const) {
-				expect(getQuotes).toHaveBeenCalledWith(
-					usdt,
-					buyToken,
-					100n,
-					trampolineAddress,
-					bps,
-					undefined,
-				);
+				expect(getQuotes).toHaveBeenCalledWith(usdt, buyToken, 100n, trampolineAddress, bps);
 				for (const quote of quotes) {
 					expect(buildSwap).toHaveBeenCalledWith(
 						quote.quoteId,
@@ -216,7 +204,6 @@ describe("Binance correlated slippage", () => {
 						100n,
 						trampolineAddress,
 						bps,
-						undefined,
 					);
 				}
 			}
@@ -322,9 +309,9 @@ describe("Binance route alternatives", () => {
 	it("stops sibling submissions on HTTP 429 and observes the retry window", async () => {
 		const { solver, submit } = setup({ rateLimited: true });
 		await solver.pollOnce(100n);
-		expect(submit).toHaveBeenCalledTimes(3);
+		expect(submit).toHaveBeenCalledTimes(1);
 		await solver.pollOnce(101n);
-		expect(submit).toHaveBeenCalledTimes(3);
+		expect(submit).toHaveBeenCalledTimes(1);
 	});
 
 	it("charges the submission budget for each alternative", async () => {
@@ -334,30 +321,29 @@ describe("Binance route alternatives", () => {
 	});
 });
 
-describe("auction pipeline scheduling", () => {
-	it("submits a ready order without waiting for another order's quote", async () => {
-		let release = () => {};
-		const slow = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
+describe("Binance overlapping auction cycles", () => {
+	function setup(orders: OrderbookOrder[]) {
+		const gates = new Map<bigint, () => void>();
 		const getQuotes = vi.fn(async (_sell: string, _buy: string, amount: bigint) => {
-			if (amount === 100n) await slow;
-			return [{ quoteId: "route", approveTarget: factory }];
+			// Orders with a gated amount wait until the test releases them.
+			if (gates.has(amount)) await new Promise<void>((resolve) => gates.set(amount, resolve));
+			return [{ quoteId: `q-${amount}`, approveTarget: factory }];
 		});
+		const buildSwap = vi.fn(async () => ({
+			from: trampolineAddress,
+			to: factory,
+			data: "0x11",
+			value: "0",
+			minReceiveAmount: "1000",
+		}));
+		let submitted = 0;
+		const submit = vi.fn<ByosClient["submit"]>(async () => ++submitted);
+		const proposals = vi.fn(async () => []);
 		const solver = new BinanceSubsolver(
 			{ ...config, binanceQuoteConcurrency: 2 },
-			{
-				solvableOrders: async () => [
-					order(1),
-					{ ...order(2), sellAmount: 101n, fullSellAmount: 101n },
-				],
-			},
-			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
-			{
-				getQuotes,
-				buildSwap: async () => ({ to: factory, data: "0x01", value: "0", minReceiveAmount: "110" }),
-			} as unknown as BinanceClient,
+			{ solvableOrders: async () => orders },
+			{ proposals, isTerminal: () => false, submit } as unknown as ByosClient,
+			{ getQuotes, buildSwap } as unknown as BinanceClient,
 			trampolineAddress,
 			byosDomain(56, factory),
 			async () => "0x",
@@ -365,224 +351,39 @@ describe("auction pipeline scheduling", () => {
 			new RequestBudget(),
 			new OrderFilter({ closeToExecutionTopN: 20 }),
 		);
-		const cycle = solver.pollOnce(100n);
-		try {
-			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1), { timeout: 500 });
-			expect(submit.mock.calls[0]?.[0].orderUid).toBe(order(2).uid);
-		} finally {
-			release();
-			await cycle;
-		}
-	});
-});
-
-describe("streaming and bounded submissions", () => {
-	function setupPipeline(options: {
-		concurrency?: number;
-		slowQuote?: Promise<void>;
-		submit: ByosClient["submit"];
-		sign?: () => Promise<`0x${string}`>;
-	}) {
-		const orders = [1, 2, 3, 4].map((id) => ({
-			...order(id),
-			sellAmount: BigInt(99 + id),
-			fullSellAmount: BigInt(99 + id),
-		}));
-		const byos = {
-			proposals: async () => [],
-			isTerminal: () => false,
-			submit: options.submit,
-		} as unknown as ByosClient;
-		return new BinanceSubsolver(
-			{
-				...config,
-				binanceQuoteConcurrency: 8,
-				byosSubmissionConcurrency: options.concurrency ?? 2,
-			},
-			{ solvableOrders: async () => orders },
-			byos,
-			{
-				getQuotes: async (_sell: string, _buy: string, amount: bigint) => {
-					if (options.slowQuote && amount === 100n) await options.slowQuote;
-					return [{ quoteId: "route", approveTarget: factory }];
-				},
-				buildSwap: async () => ({ to: factory, data: "0x01", value: "0", minReceiveAmount: "110" }),
-			} as unknown as BinanceClient,
-			trampolineAddress,
-			byosDomain(56, factory),
-			options.sign ?? (async () => "0x"),
-			logger,
-			new RequestBudget(),
-			new OrderFilter({ closeToExecutionTopN: 20 }),
-		);
+		const gate = (amount: bigint) => gates.set(amount, () => {});
+		const release = (amount: bigint) => gates.get(amount)?.();
+		const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+		return { solver, getQuotes, submit, proposals, gate, release, settle };
 	}
 
-	it("allows two submissions in flight and never exceeds the configured limit", async () => {
-		let release = () => {};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		let active = 0;
-		let maximum = 0;
-		const submit = vi.fn<ByosClient["submit"]>(async () => {
-			active++;
-			maximum = Math.max(maximum, active);
-			try {
-				await gate;
-				return 1;
-			} finally {
-				active--;
-			}
-		});
-		const solver = setupPipeline({ submit });
+	it("does not re-quote an order that an earlier cycle is still quoting", async () => {
+		const { solver, getQuotes, submit, gate, release, settle } = setup([order(1)]);
+		gate(100n);
+		const first = solver.pollOnce(100n);
+		await settle();
+		await solver.pollOnce(101n);
+		expect(getQuotes).toHaveBeenCalledTimes(1);
+		release(100n);
+		await first;
+		expect(submit).toHaveBeenCalledTimes(1);
+	});
+
+	it("submits a ready route without waiting for a slower order", async () => {
+		const slow = { ...order(2), sellAmount: 200n, fullSellAmount: 200n };
+		const { solver, submit, gate, release, settle } = setup([order(1), slow]);
+		gate(200n);
 		const cycle = solver.pollOnce(100n);
-		try {
-			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(2), { timeout: 500 });
-			expect(maximum).toBe(2);
-		} finally {
-			release();
-			await cycle;
-		}
-		expect(submit).toHaveBeenCalledTimes(4);
-		expect(maximum).toBe(2);
+		await settle();
+		expect(submit.mock.calls.map(([proposal]) => proposal.orderUid)).toEqual([order(1).uid]);
+		release(200n);
+		await cycle;
+		expect(submit).toHaveBeenCalledTimes(2);
 	});
 
-	it("submits a completed order while an earlier quote is still blocked", async () => {
-		let release = () => {};
-		const slowQuote = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
-		const cycle = setupPipeline({ submit, slowQuote }).pollOnce(100n);
-		try {
-			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(3), { timeout: 500 });
-			expect(submit.mock.calls.every(([proposal]) => proposal.orderUid !== order(1).uid)).toBe(
-				true,
-			);
-		} finally {
-			release();
-			await cycle;
-		}
-		expect(submit).toHaveBeenCalledTimes(4);
-	});
-
-	it("never posts a signed proposal after its auction was superseded", async () => {
-		let release = () => {};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const sign = vi.fn(async () => {
-			await gate;
-			return "0x" as const;
-		});
-		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
-		const scope = createAuctionWork({
-			auctionId: "1",
-			deadlineMs: Date.now() + 10000,
-			receivedAtMs: Date.now(),
-			deadlineBufferMs: 1000,
-		});
-		const cycle = setupPipeline({ submit, sign }).pollOnce(100n, scope.work);
-		try {
-			await vi.waitFor(() => expect(sign).toHaveBeenCalled(), { timeout: 500 });
-			scope.abort();
-			await cycle;
-			expect(submit).not.toHaveBeenCalled();
-		} finally {
-			release();
-			scope.dispose();
-			await cycle;
-		}
-	});
-
-	it("drops queued submissions when the remaining deadline margin is exhausted", async () => {
-		let release = () => {};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const initial = Date.now();
-		const clock = vi.spyOn(Date, "now").mockReturnValue(initial);
-		const scope = createAuctionWork({
-			auctionId: "1",
-			deadlineMs: initial + 10000,
-			receivedAtMs: initial,
-			deadlineBufferMs: 1000,
-		});
-		const submit = vi.fn<ByosClient["submit"]>(async () => {
-			await gate;
-			return 1;
-		});
-		const cycle = setupPipeline({ submit, concurrency: 1 }).pollOnce(100n, scope.work);
-		try {
-			await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1), { timeout: 500 });
-			clock.mockReturnValue(initial + 9500);
-			release();
-			await cycle;
-			expect(submit).toHaveBeenCalledTimes(1);
-		} finally {
-			release();
-			clock.mockRestore();
-			scope.dispose();
-			await cycle;
-		}
-	});
-});
-
-describe("Binance build deadlines", () => {
-	it("selects completed calldata without waiting indefinitely for a hanging vendor build", async () => {
-		vi.useFakeTimers();
-		const context = createAuctionWork({
-			auctionId: "1",
-			deadlineMs: Date.now() + 1500,
-			receivedAtMs: Date.now(),
-			deadlineBufferMs: 1000,
-		});
-		const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-			const id = new URL(String(input)).searchParams.get("quoteId");
-			if (id === "slow")
-				return new Promise<Response>((_resolve, reject) => {
-					init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
-						once: true,
-					});
-				});
-			return Response.json({
-				success: true,
-				code: 0,
-				data: id
-					? { tx: { to: factory, data: "0x01", value: "0", minReceiveAmount: "110" } }
-					: ["fast", "slow"].map((quoteId) => ({
-							quoteId,
-							approveTarget: factory,
-							executionMode: "SWAP",
-						})),
-			});
-		});
-		vi.stubGlobal("fetch", fetch);
-		const submit = vi.fn<ByosClient["submit"]>(async () => 1);
-		const solver = new BinanceSubsolver(
-			config,
-			{ solvableOrders: async () => [{ ...order(1), nativeSellValue: 2n * 10n ** 18n }] },
-			{ proposals: async () => [], isTerminal: () => false, submit } as unknown as ByosClient,
-			new BinanceClient("key", "secret", 56),
-			trampolineAddress,
-			byosDomain(56, factory),
-			async () => "0x",
-			logger,
-			new RequestBudget(),
-			new OrderFilter({ closeToExecutionTopN: 20 }),
-		);
-		try {
-			const cycle = solver.pollOnce(100n, context.work);
-			await vi.advanceTimersByTimeAsync(401);
-			await cycle;
-			expect(submit).toHaveBeenCalledTimes(1);
-			expect(fetch).toHaveBeenCalledTimes(3);
-			expect(submit.mock.calls[0]?.[0].interactions[1]?.callData).toBe("0x01");
-		} finally {
-			context.abort();
-			context.dispose();
-			vi.unstubAllGlobals();
-			vi.useRealTimers();
-		}
+	it("shares one proposal-state read between overlapping cycles", async () => {
+		const { solver, proposals } = setup([]);
+		await Promise.all([solver.synchronize(100n), solver.synchronize(100n)]);
+		expect(proposals).toHaveBeenCalledTimes(1);
 	});
 });
