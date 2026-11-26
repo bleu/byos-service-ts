@@ -2,6 +2,8 @@ import * as crypto from "node:crypto";
 import type { Address, Hex } from "viem";
 
 const BASE_URL = "https://web3.binance.com/build";
+/** Bounds a hung request so its order is released for the next auction cycle. */
+const REQUEST_TIMEOUT_MS = 5_000;
 
 export interface QuoteData {
 	quoteId: string;
@@ -76,7 +78,7 @@ export class BinanceClient {
 		const queryString = new URLSearchParams(params).toString();
 		const headers = this.makeHeaders("GET", path, queryString);
 		const url = `${BASE_URL}${path}?${queryString}`;
-		const res = await fetch(url, { headers });
+		const res = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 		const json = (await res.json()) as ApiResponse<T>;
 		if (!json.success) {
 			throw new Error(`Binance API error [${json.code}]: ${json.message}`);

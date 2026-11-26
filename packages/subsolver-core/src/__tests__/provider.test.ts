@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { prioritizeCandidates } from "../polling.js";
-import { type CandidateOrder, quoteBatch, type RouteProvider } from "../provider.js";
+import { type CandidateOrder, quoteBatch, type RouteProvider, streamQuotes } from "../provider.js";
 import { SolveOrderbookClient } from "../solve-orderbook-client.js";
 
 const candidate = (uid: string): CandidateOrder => ({
@@ -135,5 +135,35 @@ describe("native-value threshold from /solve", () => {
 			]),
 		).toHaveLength(1);
 		expect(quoteMany).not.toHaveBeenCalled();
+	});
+});
+
+describe("streamQuotes", () => {
+	it("hands over each order's result before slower orders finish", async () => {
+		let release: () => void = () => {};
+		const slow = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const provider: RouteProvider = {
+			name: "test",
+			quote: async (order) => {
+				if (order.uid === "0x02") await slow;
+				return { quoteBuyAmount: 2n, minBuyAmount: 1n, interactions: [] };
+			},
+		};
+		const seen: string[] = [];
+		const done = streamQuotes(
+			provider,
+			[candidate("0x01"), candidate("0x02")],
+			async (result) => {
+				seen.push(result.order.uid);
+			},
+			2,
+		);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(seen).toEqual(["0x01"]);
+		release();
+		await done;
+		expect(seen).toEqual(["0x01", "0x02"]);
 	});
 });

@@ -28,6 +28,7 @@ export {
 	type QuoteResult,
 	quoteBatch,
 	type RouteProvider,
+	streamQuotes,
 } from "./provider.js";
 export { RequestBudget } from "./request-budget.js";
 export { DEFAULT_CORRELATED_SLIPPAGE_BPS, selectSlippageBps } from "./slippage.js";

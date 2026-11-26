@@ -53,49 +53,47 @@ describe("solve discovery cycles", () => {
 			body: JSON.stringify({ id, orders: [] }),
 		});
 
-	it("runs once per push and serializes overlapping auctions", async () => {
+	it("acknowledges a push without waiting for its cycle", async () => {
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const onAuction = vi.fn(() => gate);
+		const app = createSolveApp(new SolveOrderbookClient(), "secret", onAuction);
+		expect((await request(app, 1)).status).toBe(200);
+		expect(onAuction).toHaveBeenCalledTimes(1);
+		release();
+	});
+
+	it("starts overlapping cycles concurrently, each after receiving its own push", async () => {
 		const client = new SolveOrderbookClient();
 		const received: number[] = [];
 		vi.spyOn(client, "receive").mockImplementation((body) => {
 			received.push((body as { id: number }).id);
 		});
-		let release: () => void = () => {};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		let started: () => void = () => {};
-		const firstStarted = new Promise<void>((resolve) => {
-			started = resolve;
-		});
-		const onAuction = vi.fn(async () => {
-			if (received.length === 1) {
-				started();
-				await gate;
-				expect(received).toEqual([1]);
-			}
+		const seen: number[][] = [];
+		const onAuction = vi.fn(() => {
+			seen.push([...received]);
+			return new Promise<void>(() => {});
 		});
 		const app = createSolveApp(client, "secret", onAuction);
-		const first = request(app, 1);
-		await firstStarted;
-		const second = request(app, 2);
-		await Promise.resolve();
-		expect(onAuction).toHaveBeenCalledTimes(1);
-		release();
-		expect((await first).status).toBe(200);
-		expect((await second).status).toBe(200);
-		expect(received).toEqual([1, 2]);
-		expect(onAuction).toHaveBeenCalledTimes(2);
+		expect((await request(app, 1)).status).toBe(200);
+		expect((await request(app, 2)).status).toBe(200);
+		expect(seen).toEqual([[1], [1, 2]]);
 	});
 
-	it("processes the next push after a cycle fails", async () => {
+	it("logs a failed cycle and keeps accepting pushes", async () => {
+		const warn = vi.fn();
 		const onAuction = vi
 			.fn()
 			.mockRejectedValueOnce(new Error("quote failed"))
 			.mockResolvedValue(undefined);
-		const app = createSolveApp(new SolveOrderbookClient(), "secret", onAuction);
-		app.onError((_err, c) => c.body(null, 500));
-		expect((await request(app, 1)).status).toBe(500);
+		const app = createSolveApp(new SolveOrderbookClient(), "secret", onAuction, {
+			logger: { warn },
+		});
+		expect((await request(app, 1)).status).toBe(200);
 		expect((await request(app, 2)).status).toBe(200);
 		expect(onAuction).toHaveBeenCalledTimes(2);
+		expect(warn).toHaveBeenCalledWith({ err: expect.any(Error) }, "solve cycle failed");
 	});
 });

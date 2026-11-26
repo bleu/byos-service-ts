@@ -3,17 +3,26 @@ import { bearerAuth } from "hono/bearer-auth";
 import { createHealthApp } from "./health-app.js";
 import type { SolveOrderbookClient } from "./solve-orderbook-client.js";
 
-/** Authenticate auction pushes before they can replace discovery state. */
+interface SolveAppOptions {
+	logger?: { warn: (fields: object, message: string) => void };
+}
+
+/**
+ * Authenticate auction pushes and start one fire-and-forget cycle per push.
+ *
+ * Cycles run concurrently: BYOS validates each proposal against whichever
+ * auction is open when the POST arrives, so a route that outlives its auction
+ * still bids in the next one. Sub-solvers deduplicate orders that are already
+ * being quoted by an overlapping cycle.
+ */
 export function createSolveApp(
 	client: SolveOrderbookClient,
 	token: string,
 	onAuction: () => Promise<void>,
+	options: SolveAppOptions = {},
 ): Hono {
 	if (!token) throw new Error("SUBSOLVER_BEARER is required for solve discovery");
 	const app = createHealthApp();
-	// Serialize receipt and quoting together so a later push cannot replace the
-	// current cycle's orders while it is synchronizing proposal state.
-	let pending = Promise.resolve();
 	app.use("/solve", bearerAuth({ token }));
 	app.post("/solve", async (c) => {
 		let body: unknown;
@@ -22,13 +31,12 @@ export function createSolveApp(
 		} catch {
 			return c.json({ error: "invalid json" }, 400);
 		}
-		const cycle = pending.then(async () => {
-			client.receive(body);
-			await onAuction();
+		// receive() and the synchronous start of onAuction() run in the same tick,
+		// so this cycle reads this push's orders before a later push replaces them.
+		client.receive(body);
+		onAuction().catch((error: unknown) => {
+			options.logger?.warn({ err: error }, "solve cycle failed");
 		});
-		// Keep subsequent requests runnable even if a cycle fails.
-		pending = cycle.catch(() => {});
-		await cycle;
 		return c.json({}, 200);
 	});
 	return app;

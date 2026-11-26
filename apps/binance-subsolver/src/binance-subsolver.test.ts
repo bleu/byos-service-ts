@@ -320,3 +320,69 @@ describe("Binance route alternatives", () => {
 		expect(submit).toHaveBeenCalledTimes(2);
 	});
 });
+
+describe("Binance overlapping auction cycles", () => {
+	function setup(orders: OrderbookOrder[]) {
+		const gates = new Map<bigint, () => void>();
+		const getQuotes = vi.fn(async (_sell: string, _buy: string, amount: bigint) => {
+			// Orders with a gated amount wait until the test releases them.
+			if (gates.has(amount)) await new Promise<void>((resolve) => gates.set(amount, resolve));
+			return [{ quoteId: `q-${amount}`, approveTarget: factory }];
+		});
+		const buildSwap = vi.fn(async () => ({
+			from: trampolineAddress,
+			to: factory,
+			data: "0x11",
+			value: "0",
+			minReceiveAmount: "1000",
+		}));
+		const submit = vi.fn<ByosClient["submit"]>(async () => submit.mock.calls.length);
+		const proposals = vi.fn(async () => []);
+		const solver = new BinanceSubsolver(
+			{ ...config, binanceQuoteConcurrency: 2 },
+			{ solvableOrders: async () => orders },
+			{ proposals, isTerminal: () => false, submit } as unknown as ByosClient,
+			{ getQuotes, buildSwap } as unknown as BinanceClient,
+			trampolineAddress,
+			byosDomain(56, factory),
+			async () => "0x",
+			logger,
+			new RequestBudget(),
+			new OrderFilter({ closeToExecutionTopN: 20 }),
+		);
+		const gate = (amount: bigint) => gates.set(amount, () => {});
+		const release = (amount: bigint) => gates.get(amount)?.();
+		const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+		return { solver, getQuotes, submit, proposals, gate, release, settle };
+	}
+
+	it("does not re-quote an order that an earlier cycle is still quoting", async () => {
+		const { solver, getQuotes, submit, gate, release, settle } = setup([order(1)]);
+		gate(100n);
+		const first = solver.pollOnce(100n);
+		await settle();
+		await solver.pollOnce(101n);
+		expect(getQuotes).toHaveBeenCalledTimes(1);
+		release(100n);
+		await first;
+		expect(submit).toHaveBeenCalledTimes(1);
+	});
+
+	it("submits a ready route without waiting for a slower order", async () => {
+		const slow = { ...order(2), sellAmount: 200n, fullSellAmount: 200n };
+		const { solver, submit, gate, release, settle } = setup([order(1), slow]);
+		gate(200n);
+		const cycle = solver.pollOnce(100n);
+		await settle();
+		expect(submit.mock.calls.map(([proposal]) => proposal.orderUid)).toEqual([order(1).uid]);
+		release(200n);
+		await cycle;
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+
+	it("shares one proposal-state read between overlapping cycles", async () => {
+		const { solver, proposals } = setup([]);
+		await Promise.all([solver.synchronize(100n), solver.synchronize(100n)]);
+		expect(proposals).toHaveBeenCalledTimes(1);
+	});
+});

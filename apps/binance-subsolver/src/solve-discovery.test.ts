@@ -65,10 +65,16 @@ function setup() {
 		new OrderFilter({ closeToExecutionTopN: config.closeToExecutionTopN }),
 	);
 	let now = 100n;
-	const app = createSolveApp(client, "secret", () => subsolver.pollOnce(now++));
+	// Pushes are acknowledged immediately; tests await the background cycle.
+	let cycle: Promise<void> = Promise.resolve();
+	const app = createSolveApp(client, "secret", () => {
+		cycle = subsolver.pollOnce(now++);
+		return cycle;
+	});
 	const push = async (orders: ReturnType<typeof order>[], token = "secret") => {
 		quote.mockClear();
-		return app.request("/solve", {
+		cycle = Promise.resolve();
+		const response = await app.request("/solve", {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 			body: JSON.stringify({
@@ -82,6 +88,8 @@ function setup() {
 				orders,
 			}),
 		});
+		await cycle;
+		return response;
 	};
 	const quotedSellAmounts = () => quote.mock.calls.map(([, , amount]) => amount.toString()).sort();
 	return { push, quotedSellAmounts, submit, subsolver, proposals };

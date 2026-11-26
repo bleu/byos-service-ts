@@ -7,9 +7,9 @@ import {
 	type OrderbookOrder,
 	type OrderFilter,
 	prioritizeCandidates,
-	quoteBatch,
 	type RequestBudget,
 	randomNonce,
+	streamQuotes,
 } from "@byos/subsolver-core";
 import { FyndError } from "@kayibal/fynd-client";
 import type pino from "pino";
@@ -30,6 +30,9 @@ export class FyndSubsolver {
 	private hasSynchronized = true;
 	private nextSynchronizationAt = 0n;
 	private retryAtMs = 0;
+	/** Orders an overlapping cycle is still quoting or submitting. */
+	private readonly inFlight = new Set<string>();
+	private synchronizing: Promise<boolean> | null = null;
 
 	constructor(
 		private readonly config: Config,
@@ -43,7 +46,15 @@ export class FyndSubsolver {
 		private readonly orderFilter: OrderFilter,
 	) {}
 
-	async synchronize(now: bigint): Promise<boolean> {
+	/** Refreshes proposal state; overlapping cycles share one in-progress read. */
+	synchronize(now: bigint): Promise<boolean> {
+		this.synchronizing ??= this.readProposalState(now).finally(() => {
+			this.synchronizing = null;
+		});
+		return this.synchronizing;
+	}
+
+	private async readProposalState(now: bigint): Promise<boolean> {
 		if (!this.budget.consumeRead()) return false;
 		try {
 			const next = new Map<string, Live>();
@@ -96,7 +107,8 @@ export class FyndSubsolver {
 		const candidates = orders.filter((order) => {
 			const live = this.live.get(order.uid.toLowerCase());
 			return (
-				!live || now - live.lastSubmitted >= BigInt(this.config.proposalRefreshIntervalSeconds)
+				!this.inFlight.has(order.uid.toLowerCase()) &&
+				(!live || now - live.lastSubmitted >= BigInt(this.config.proposalRefreshIntervalSeconds))
 			);
 		});
 		this.logger.debug(
@@ -127,86 +139,99 @@ export class FyndSubsolver {
 			(uid) => this.live.has(uid.toLowerCase()),
 		).map((ranked) => ranked.candidate);
 		this.logger.debug({ count: candidates.length }, "sending candidates to Fynd for quoting");
-		const results = await quoteBatch(this.fynd, candidates, this.config.fyndQuoteConcurrency);
+		const uids = candidates.map((candidate) => candidate.uid.toLowerCase());
+		for (const uid of uids) this.inFlight.add(uid);
 		let routesFound = 0;
 		let noRoute = 0;
 		let errors = 0;
-		for (const result of results) {
-			const order = byUid.get(result.order.uid.toLowerCase());
-			if (!order) continue;
-			if (result.error) {
-				this.logQuoteError(result.error, order.uid);
-				errors++;
-				continue;
-			}
-			if (!result.route) {
-				noRoute++;
-				continue;
-			}
-			routesFound++;
-			this.logger.debug(
-				{
-					orderUid: order.uid,
-					sellToken: order.sellToken,
-					buyToken: order.buyToken,
-					remainingSell: result.order.remainingSell.toString(),
-					scaledLimitBuy: result.order.scaledLimitBuy.toString(),
-					minBuyAmount: result.route.minBuyAmount.toString(),
-					quoteBuyAmount: result.route.quoteBuyAmount.toString(),
-					interactions: result.route.interactions.length,
-				},
-				"Fynd route found",
-			);
-			if (!this.budget.consumeSubmission()) {
-				this.logger.info("BYOS submission budget reserved for proposal state reads");
-				return;
-			}
-			try {
-				const validUntil = now + BigInt(this.config.proposalTtlSeconds);
-				const proposal = await buildProposalFromRoute(
-					{
-						...order,
-						sellAmount: result.order.remainingSell,
-						buyAmount: result.order.scaledLimitBuy,
-					},
-					result.route,
-					validUntil,
-					randomNonce(),
-					this.domain,
-					this.signFn,
-				);
-				if (!proposal) {
+		let stopped = false;
+		try {
+			await streamQuotes(
+				this.fynd,
+				candidates,
+				async (result) => {
+					const order = byUid.get(result.order.uid.toLowerCase());
+					if (!order) return;
+					if (result.error) {
+						this.logQuoteError(result.error, order.uid);
+						errors++;
+						return;
+					}
+					if (!result.route) {
+						noRoute++;
+						return;
+					}
+					routesFound++;
 					this.logger.debug(
 						{
 							orderUid: order.uid,
-							minBuyAmount: result.route.minBuyAmount.toString(),
+							sellToken: order.sellToken,
+							buyToken: order.buyToken,
+							remainingSell: result.order.remainingSell.toString(),
 							scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+							minBuyAmount: result.route.minBuyAmount.toString(),
+							quoteBuyAmount: result.route.quoteBuyAmount.toString(),
+							interactions: result.route.interactions.length,
 						},
-						"proposal rejected by buildProposalFromRoute (minBuyAmount < scaledLimitBuy or buy-order kind)",
+						"Fynd route found",
 					);
-					continue;
-				}
-				this.logger.debug(
-					{
-						orderUid: proposal.orderUid,
-						sellToken: proposal.sellToken,
-						buyToken: proposal.buyToken,
-						sellAmount: proposal.sellAmount.toString(),
-						minBuyAmount: proposal.minBuyAmount.toString(),
-						quoteBuyAmount: proposal.quoteBuyAmount.toString(),
-						validUntil: proposal.validUntil.toString(),
-						nonce: proposal.nonce.toString(),
-						interactions: proposal.interactions.length,
-					},
-					"submitting proposal to BYOS",
-				);
-				const id = await this.byos.submit(proposal);
-				this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
-				this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
-			} catch (error) {
-				this.handleByosError(error, "Fynd proposal submission failed", order.uid);
-				if (error instanceof ByosRateLimitError) return;
-			}
+					if (stopped || Date.now() < this.retryAtMs) return;
+					if (!this.budget.consumeSubmission()) {
+						stopped = true;
+						this.logger.info("BYOS submission budget reserved for proposal state reads");
+						return;
+					}
+					try {
+						const validUntil = now + BigInt(this.config.proposalTtlSeconds);
+						const proposal = await buildProposalFromRoute(
+							{
+								...order,
+								sellAmount: result.order.remainingSell,
+								buyAmount: result.order.scaledLimitBuy,
+							},
+							result.route,
+							validUntil,
+							randomNonce(),
+							this.domain,
+							this.signFn,
+						);
+						if (!proposal) {
+							this.logger.debug(
+								{
+									orderUid: order.uid,
+									minBuyAmount: result.route.minBuyAmount.toString(),
+									scaledLimitBuy: result.order.scaledLimitBuy.toString(),
+								},
+								"proposal rejected by buildProposalFromRoute (minBuyAmount < scaledLimitBuy or buy-order kind)",
+							);
+							return;
+						}
+						this.logger.debug(
+							{
+								orderUid: proposal.orderUid,
+								sellToken: proposal.sellToken,
+								buyToken: proposal.buyToken,
+								sellAmount: proposal.sellAmount.toString(),
+								minBuyAmount: proposal.minBuyAmount.toString(),
+								quoteBuyAmount: proposal.quoteBuyAmount.toString(),
+								validUntil: proposal.validUntil.toString(),
+								nonce: proposal.nonce.toString(),
+								interactions: proposal.interactions.length,
+							},
+							"submitting proposal to BYOS",
+						);
+						const id = await this.byos.submit(proposal);
+						this.live.set(order.uid.toLowerCase(), { validUntil, lastSubmitted: now });
+						this.logger.info({ id, orderUid: order.uid }, "Fynd proposal submitted");
+					} catch (error) {
+						this.handleByosError(error, "Fynd proposal submission failed", order.uid);
+						if (error instanceof ByosRateLimitError) stopped = true;
+					}
+				},
+				this.config.fyndQuoteConcurrency,
+			);
+		} finally {
+			for (const uid of uids) this.inFlight.delete(uid);
 		}
 		this.logger.info(
 			{ routesFound, noRoute, errors, total: candidates.length },
