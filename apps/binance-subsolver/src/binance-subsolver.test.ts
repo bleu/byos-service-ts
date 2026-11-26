@@ -336,7 +336,8 @@ describe("Binance overlapping auction cycles", () => {
 			value: "0",
 			minReceiveAmount: "1000",
 		}));
-		const submit = vi.fn<ByosClient["submit"]>(async () => submit.mock.calls.length);
+		let submitted = 0;
+		const submit = vi.fn<ByosClient["submit"]>(async () => ++submitted);
 		const proposals = vi.fn(async () => []);
 		const solver = new BinanceSubsolver(
 			{ ...config, binanceQuoteConcurrency: 2 },
